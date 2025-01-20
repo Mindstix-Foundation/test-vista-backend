@@ -17,7 +17,6 @@ model Country {
   id        Int      @id @default(autoincrement())
   name      String   @db.VarChar
   states    State[]
-  addresses Address[]
 }
 
 model State {
@@ -26,7 +25,6 @@ model State {
   country_id Int
   name       String   @db.VarChar
   cities     City[]
-  addresses  Address[]
 }
 
 model City {
@@ -39,10 +37,6 @@ model City {
 
 model Address {
   id          Int         @id @default(autoincrement())
-  country     Country     @relation(fields: [country_id], references: [id])
-  country_id  Int
-  state       State       @relation(fields: [state_id], references: [id])
-  state_id    Int
   city        City        @relation(fields: [city_id], references: [id])
   city_id     Int
   postal_code String      @db.VarChar
@@ -60,6 +54,36 @@ model Board {
   address_id   Int       @unique
   created_at   DateTime  @default(now()) @db.Timestamptz()
   updated_at   DateTime  @updatedAt @db.Timestamptz()
+  standards            Standard[]
+  subjects            Subject[]
+  instruction_mediums Instruction_Medium[]
+}
+
+model Standard {
+  id          Int         @id @default(autoincrement())
+  board       Board       @relation(fields: [board_id], references: [id])
+  board_id    Int
+  name        String      @db.VarChar
+  created_at  DateTime    @default(now()) @db.Timestamptz()
+  updated_at  DateTime    @updatedAt @db.Timestamptz()
+}
+
+model Subject {
+  id          Int         @id @default(autoincrement())
+  board       Board       @relation(fields: [board_id], references: [id])
+  board_id    Int
+  name        String      @db.VarChar
+  created_at  DateTime    @default(now()) @db.Timestamptz()
+  updated_at  DateTime    @updatedAt @db.Timestamptz()
+}
+
+model Instruction_Medium {
+  id                  Int         @id @default(autoincrement())
+  board               Board       @relation(fields: [board_id], references: [id])
+  board_id            Int
+  instruction_medium  String      @db.VarChar
+  created_at         DateTime    @default(now()) @db.Timestamptz()
+  updated_at         DateTime    @updatedAt @db.Timestamptz()
 }
 
 

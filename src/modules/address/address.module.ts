@@ -7,6 +7,6 @@ import { PrismaModule } from '../../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [AddressController],
   providers: [AddressService],
-  exports: [AddressService],
+  exports: [AddressService]
 })
 export class AddressModule {}

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
 import { BoardService } from './board.service';
 import { BoardDto, CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
@@ -9,14 +9,12 @@ export class BoardController {
   constructor(private readonly boardService: BoardService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create board' })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'The board has been successfully created.',
-    type: BoardDto
-  })
-  create(@Body() createBoardDto: CreateBoardDto): Promise<BoardDto> {
-    return this.boardService.create(createBoardDto);
+  @ApiOperation({ summary: 'Create a new board' })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'Board created successfully' })
+  @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Board already exists' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })
+  async create(@Body() createBoardDto: CreateBoardDto) {
+    return await this.boardService.create(createBoardDto);
   }
 
   @Get()
@@ -33,17 +31,10 @@ export class BoardController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a board by id' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Returns a board by id',
-    type: BoardDto
-  })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Board not found'
-  })
-  findOne(@Param('id', ParseIntPipe) id: number): Promise<BoardDto> {
-    return this.boardService.findOne(id);
+  @ApiResponse({ status: HttpStatus.OK, description: 'Board found' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
+  async findOne(@Param('id') id: number) {
+    return await this.boardService.findOne(id);
   }
 
   @Put(':id')
@@ -61,12 +52,11 @@ export class BoardController {
   }
 
   @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a board' })
-  @ApiResponse({ 
-    status: 204, 
-    description: 'The board has been successfully deleted.'
-  })
-  remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return this.boardService.remove(id);
+  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Board deleted successfully' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
+  async remove(@Param('id') id: number) {
+    await this.boardService.remove(id);
   }
 }

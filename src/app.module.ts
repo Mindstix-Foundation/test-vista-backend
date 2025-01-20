@@ -6,6 +6,9 @@ import { AddressModule } from './modules/address/address.module';
 import { CityModule } from './modules/city/city.module';
 import { StateModule } from './modules/state/state.module';
 import { CountryModule } from './modules/country/country.module';
+import { StandardModule } from './modules/standard/standard.module';
+import { SubjectModule } from './modules/subject/subject.module';
+import { InstructionMediumModule } from './modules/instruction_medium/instruction-medium.module';
 
 @Module({
   imports: [
@@ -13,7 +16,10 @@ import { CountryModule } from './modules/country/country.module';
     StateModule,
     CityModule,
     AddressModule,
-    BoardModule
+    BoardModule,
+    StandardModule,
+    SubjectModule,
+    InstructionMediumModule,
   ],
   controllers: [AppController],
   providers: [AppService],
