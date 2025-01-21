@@ -1,7 +1,7 @@
 import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { StateService } from './state.service';
 import { StateDto } from './dto/state.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('states')
 @Controller('states')
@@ -10,14 +10,9 @@ export class StateController {
 
   @Get()
   @ApiOperation({ summary: 'Get all states' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Returns all states',
-    type: StateDto,
-    isArray: true
-  })
-  findAll(@Query('country_id', new ParseIntPipe({ optional: true })) countryId?: number): Promise<StateDto[]> {
-    return this.stateService.findAll(countryId);
+  @ApiQuery({ name: 'countryId', required: false, type: Number })
+  findAll(@Query('countryId') countryId?: string): Promise<StateDto[]> {
+    return this.stateService.findAll(countryId ? +countryId : undefined);
   }
 
   @Get(':id')

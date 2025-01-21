@@ -1,7 +1,7 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { CityService } from './city.service';
-import { CityDto } from './dto/city.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { CityDto, CreateCityDto, UpdateCityDto } from './dto/city.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('cities')
 @Controller('cities')
@@ -10,14 +10,9 @@ export class CityController {
 
   @Get()
   @ApiOperation({ summary: 'Get all cities' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Returns all cities',
-    type: CityDto,
-    isArray: true
-  })
-  findAll(@Query('state_id', new ParseIntPipe({ optional: true })) stateId?: number): Promise<CityDto[]> {
-    return this.cityService.findAll(stateId);
+  @ApiQuery({ name: 'stateId', required: false, type: Number })
+  findAll(@Query('stateId') stateId?: string) {
+    return this.cityService.findAll(stateId ? +stateId : undefined);
   }
 
   @Get(':id')
