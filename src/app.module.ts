@@ -9,6 +9,15 @@ import { CountryModule } from './modules/country/country.module';
 import { StandardModule } from './modules/standard/standard.module';
 import { SubjectModule } from './modules/subject/subject.module';
 import { InstructionMediumModule } from './modules/instruction_medium/instruction-medium.module';
+import { SchoolController } from './modules/school/school.controller';
+import { SchoolInstructionMediumController } from './modules/school_instruction_medium/school_instruction_medium.controller';
+import { SchoolStandardController } from './modules/school_standard/school_standard.controller';
+import { SchoolService } from './modules/school/school.service';
+import { SchoolInstructionMediumService } from './modules/school_instruction_medium/school_instruction_medium.service';
+import { SchoolStandardService } from './modules/school_standard/school_standard.service';
+import { SchoolModule } from './modules/school/school.module';
+import { SchoolInstructionMediumModule } from './modules/school_instruction_medium/school_instruction_medium.module';
+import { SchoolStandardModule } from './modules/school_standard/school_standard.module';
 
 @Module({
   imports: [
@@ -20,6 +29,9 @@ import { InstructionMediumModule } from './modules/instruction_medium/instructio
     StandardModule,
     SubjectModule,
     InstructionMediumModule,
+    SchoolModule,
+    SchoolInstructionMediumModule,
+    SchoolStandardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
