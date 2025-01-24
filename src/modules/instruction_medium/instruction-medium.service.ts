@@ -24,7 +24,7 @@ export class InstructionMediumService {
       // Check for duplicate instruction medium in the same board
       const existing = await this.prisma.instruction_Medium.findFirst({
         where: { 
-          instruction_medium: createDto.name,
+          instruction_medium:toTitleCase( createDto.name),
           board_id: createDto.board_id 
         }
       });
