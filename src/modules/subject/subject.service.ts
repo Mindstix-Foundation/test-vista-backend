@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ConflictExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
 import { Prisma } from '@prisma/client';
+import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
 export class SubjectService {
@@ -23,7 +24,7 @@ export class SubjectService {
       // Check for duplicate subject in the same board
       const existing = await this.prisma.subject.findFirst({
         where: { 
-          name: createDto.name,
+          name: toTitleCase(createDto.name) ,
           board_id: createDto.board_id 
         }
       });
@@ -33,7 +34,10 @@ export class SubjectService {
       }
 
       return await this.prisma.subject.create({
-        data: createDto,
+        data: {
+          name: toTitleCase(createDto.name),
+          board_id: createDto.board_id,
+        },
         include: {
           board: true
         }

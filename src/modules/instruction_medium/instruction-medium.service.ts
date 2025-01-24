@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ConflictExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateInstructionMediumDto, UpdateInstructionMediumDto } from './dto/instruction-medium.dto';
 import { Prisma } from '@prisma/client';
+import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
 export class InstructionMediumService {
@@ -34,7 +35,7 @@ export class InstructionMediumService {
 
       return await this.prisma.instruction_Medium.create({
         data: {
-          instruction_medium: createDto.name,
+          instruction_medium: toTitleCase(createDto.name),
           board_id: createDto.board_id
         },
         include: {

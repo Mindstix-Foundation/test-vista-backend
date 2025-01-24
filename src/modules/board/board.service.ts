@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ConflictExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
 import { Prisma } from '@prisma/client';
+import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
 export class BoardService {
@@ -21,16 +22,25 @@ export class BoardService {
       }
 
       // Check if address is already associated with a board
-      const existingBoard = await this.prisma.board.findUnique({
-        where: { address_id: createBoardDto.address_id }
+      const existingBoard = await this.prisma.board.findFirst({
+        where: {
+          OR: [
+            { name: toTitleCase(createBoardDto.name) },
+            { abbreviation: createBoardDto.abbreviation.toUpperCase() }
+          ]
+        }
       });
 
       if (existingBoard) {
-        throw new ConflictException(`Address with ID ${createBoardDto.address_id} is already associated with a board`);
+        throw new ConflictException('Board name or abbreviation already exists');
       }
 
       return await this.prisma.board.create({
-        data: createBoardDto,
+        data: {
+          name: toTitleCase(createBoardDto.name),
+          abbreviation: createBoardDto.abbreviation.toUpperCase(),
+          address_id: createBoardDto.address_id
+        },
         include: {
           address: true
         }
