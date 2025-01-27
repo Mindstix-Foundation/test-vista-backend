@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolInstructionMediumDto } from './dto/school-instruction-medium.dto';
+import { toTitleCase } from '../../utils/titleCase'; // Assuming you have this utility
 
 @Injectable()
 export class SchoolInstructionMediumService {
@@ -10,49 +11,40 @@ export class SchoolInstructionMediumService {
 
   async create(createDto: CreateSchoolInstructionMediumDto) {
     try {
-      // Check if school exists
+      // Check if the school exists
       const school = await this.prisma.school.findUnique({
-        where: { id: createDto.school_id }
+        where: { id: createDto.school_id },
+        include: { board: true } // Assuming you have a relation to Board
       });
 
-      if (!school) {
-        throw new NotFoundException(`School with ID ${createDto.school_id} not found`);
-      }
-
-      // Check if instruction medium exists
+      // Check if the instruction medium exists
       const instructionMedium = await this.prisma.instruction_Medium.findUnique({
-        where: { id: createDto.instruction_medium_id }
+        where: { id: createDto.instruction_medium_id },
+        include: { board: true } // Assuming you have a relation to Board
       });
 
-      if (!instructionMedium) {
-        throw new NotFoundException(`Instruction medium with ID ${createDto.instruction_medium_id} not found`);
+      if (!school || !instructionMedium) {
+        throw new NotFoundException('School or Instruction Medium not found');
       }
 
-      // Check if combination already exists
-      const existing = await this.prisma.school_Instruction_Medium.findFirst({
-        where: {
-          school_id: createDto.school_id,
-          instruction_medium_id: createDto.instruction_medium_id
-        }
-      });
-
-      if (existing) {
-        throw new ConflictException('This instruction medium is already assigned to the school');
+      // Ensure both belong to the same board
+      if (school.board_id !== instructionMedium.board_id) {
+        throw new ConflictException('School and Instruction Medium must belong to the same board');
       }
 
+      // Create the entry
       return await this.prisma.school_Instruction_Medium.create({
-        data: createDto,
-        include: {
-          school: true,
-          instruction_medium: true
+        data: {
+          school_id: createDto.school_id,
+          instruction_medium_id: createDto.instruction_medium_id,
         }
       });
     } catch (error) {
-      this.logger.error('Failed to create school instruction medium:', error);
+      this.logger.error('Failed to create School Instruction Medium:', error);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
-        throw error;
+        throw error; // Rethrow known exceptions
       }
-      throw new InternalServerErrorException('Failed to create school instruction medium');
+      throw new InternalServerErrorException('Failed to create School Instruction Medium');
     }
   }
 

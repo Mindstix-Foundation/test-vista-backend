@@ -124,9 +124,11 @@ model School_Instruction_Medium {
   instruction_medium    Instruction_Medium  @relation(fields: [instruction_medium_id], references: [id])
   instruction_medium_id Int
   school               School              @relation(fields: [school_id], references: [id])
-  school_id            Int                 @unique
+  school_id            Int
   created_at           DateTime            @default(now()) @db.Timestamptz()
   updated_at           DateTime            @updatedAt @db.Timestamptz()
+
+  @@unique([school_id, instruction_medium_id])
 }
 
 model School_Standard {
@@ -134,8 +136,10 @@ model School_Standard {
   standard    Standard  @relation(fields: [standard_id], references: [id])
   standard_id Int
   school      School    @relation(fields: [school_id], references: [id])
-  school_id   Int       @unique
+  school_id   Int
   created_at  DateTime  @default(now()) @db.Timestamptz()
   updated_at  DateTime  @updatedAt @db.Timestamptz()
+
+  @@unique([school_id, standard_id])
 }
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolStandardDto } from './dto/school-standard.dto';
+import { toTitleCase } from '../../utils/titleCase'; // Assuming you have this utility
 
 @Injectable()
 export class SchoolStandardService {
@@ -10,49 +11,40 @@ export class SchoolStandardService {
 
   async create(createDto: CreateSchoolStandardDto) {
     try {
-      // Check if school exists
+      // Check if the school exists
       const school = await this.prisma.school.findUnique({
-        where: { id: createDto.school_id }
+        where: { id: createDto.school_id },
+        include: { board: true } // Assuming you have a relation to Board
       });
 
-      if (!school) {
-        throw new NotFoundException(`School with ID ${createDto.school_id} not found`);
-      }
-
-      // Check if standard exists
+      // Check if the standard exists
       const standard = await this.prisma.standard.findUnique({
-        where: { id: createDto.standard_id }
+        where: { id: createDto.standard_id },
+        include: { board: true } // Assuming you have a relation to Board
       });
 
-      if (!standard) {
-        throw new NotFoundException(`Standard with ID ${createDto.standard_id} not found`);
+      if (!school || !standard) {
+        throw new NotFoundException('School or Standard not found');
       }
 
-      // Check if combination already exists
-      const existing = await this.prisma.school_Standard.findFirst({
-        where: {
-          school_id: createDto.school_id,
-          standard_id: createDto.standard_id
-        }
-      });
-
-      if (existing) {
-        throw new ConflictException('This standard is already assigned to the school');
+      // Ensure both belong to the same board
+      if (school.board_id !== standard.board_id) {
+        throw new ConflictException('School and Standard must belong to the same board');
       }
 
+      // Create the entry
       return await this.prisma.school_Standard.create({
-        data: createDto,
-        include: {
-          school: true,
-          standard: true
+        data: {
+          school_id: createDto.school_id,
+          standard_id: createDto.standard_id,
         }
       });
     } catch (error) {
-      this.logger.error('Failed to create school standard:', error);
+      this.logger.error('Failed to create School Standard:', error);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
-        throw error;
+        throw error; // Rethrow known exceptions
       }
-      throw new InternalServerErrorException('Failed to create school standard');
+      throw new InternalServerErrorException('Failed to create School Standard');
     }
   }
 
