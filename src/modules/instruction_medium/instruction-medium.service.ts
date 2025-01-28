@@ -149,4 +149,10 @@ export class InstructionMediumService {
       throw new InternalServerErrorException('Failed to delete instruction medium');
     }
   }
+
+  async findByBoard(boardId: number) {
+    return await this.prisma.instruction_Medium.findMany({
+      where: { board_id: boardId },
+    });
+  }
 } 

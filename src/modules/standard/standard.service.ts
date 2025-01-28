@@ -146,4 +146,10 @@ export class StandardService {
       throw new InternalServerErrorException('Failed to delete standard');
     }
   }
+
+  async findByBoard(boardId: number) {
+    return await this.prisma.standard.findMany({
+      where: { board_id: boardId },
+    });
+  }
 } 

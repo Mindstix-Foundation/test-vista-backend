@@ -65,4 +65,10 @@ export class InstructionMediumController {
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.instructionMediumService.remove(id);
   }
+
+  @Get('board/:boardId')
+  @ApiResponse({ status: 200, description: 'List of instruction mediums for the specified board' })
+  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
+    return await this.instructionMediumService.findByBoard(boardId);
+  }
 } 

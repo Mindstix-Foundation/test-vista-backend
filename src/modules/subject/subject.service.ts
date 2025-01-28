@@ -146,4 +146,10 @@ export class SubjectService {
       throw new InternalServerErrorException('Failed to delete subject');
     }
   }
+
+  async findByBoard(boardId: number) {
+    return await this.prisma.subject.findMany({
+      where: { board_id: boardId },
+    });
+  }
 } 

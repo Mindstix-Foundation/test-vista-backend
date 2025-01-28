@@ -55,4 +55,10 @@ export class SubjectController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.subjectService.remove(id);
   }
+
+  @Get('board/:boardId')
+  @ApiResponse({ status: 200, description: 'List of subjects for the specified board' })
+  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
+    return await this.subjectService.findByBoard(boardId);
+  }
 } 

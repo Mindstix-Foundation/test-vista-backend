@@ -65,4 +65,10 @@ export class StandardController {
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.standardService.remove(id);
   }
+
+  @Get('board/:boardId')
+  @ApiResponse({ status: 200, description: 'List of standards for the specified board' })
+  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
+    return await this.standardService.findByBoard(boardId);
+  }
 } 
