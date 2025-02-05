@@ -33,10 +33,12 @@ async function bootstrap() {
   // Swagger setup
   const config = new DocumentBuilder()
     .setTitle('Board Management API')
-    .setDescription('API for managing digital boards and addresses')
+    .setDescription('API for managing digital boards, schools, and users')
     .setVersion('1.0')
     .addTag('addresses')
     .addTag('boards')
+    .addTag('schools')
+    .addTag('users')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);

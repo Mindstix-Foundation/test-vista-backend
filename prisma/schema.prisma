@@ -14,132 +14,215 @@ datasource db {
 }
 
 model Country {
-  id        Int      @id @default(autoincrement())
-  name      String   @db.VarChar
-  states    State[]
+  id     Int     @id @default(autoincrement())
+  name   String  @db.VarChar
+  states State[]
 }
 
 model State {
-  id         Int      @id @default(autoincrement())
-  country    Country  @relation(fields: [country_id], references: [id])
+  id         Int     @id @default(autoincrement())
+  country    Country @relation(fields: [country_id], references: [id])
   country_id Int
-  name       String   @db.VarChar
+  name       String  @db.VarChar
   cities     City[]
 }
 
 model City {
-  id         Int      @id @default(autoincrement())
-  state      State    @relation(fields: [state_id], references: [id])
-  state_id   Int
-  name       String   @db.VarChar
-  addresses  Address[]
+  id        Int       @id @default(autoincrement())
+  state     State     @relation(fields: [state_id], references: [id])
+  state_id  Int
+  name      String    @db.VarChar
+  addresses Address[]
 }
 
 model Address {
-  id          Int         @id @default(autoincrement())
-  city        City        @relation(fields: [city_id], references: [id])
+  id          Int      @id @default(autoincrement())
+  city        City     @relation(fields: [city_id], references: [id])
   city_id     Int
-  postal_code String      @db.VarChar
-  street      String      @db.VarChar
-  created_at  DateTime    @default(now()) @db.Timestamptz()
-  updated_at  DateTime    @updatedAt @db.Timestamptz()
+  postal_code String   @db.VarChar
+  street      String   @db.VarChar
+  created_at  DateTime @default(now()) @db.Timestamptz()
+  updated_at  DateTime @updatedAt @db.Timestamptz()
   board       Board?
   school      School?
 }
 
 model Board {
-  id           Int       @id @default(autoincrement())
-  name         String    @unique @db.VarChar
-  abbreviation String    @unique @db.VarChar @map("UPPER(abbreviation)")
-  address      Address   @relation(fields: [address_id], references: [id])
-  address_id   Int       @unique
-  created_at   DateTime  @default(now()) @db.Timestamptz()
-  updated_at   DateTime  @updatedAt @db.Timestamptz()
-  standards            Standard[]
+  id                  Int                  @id @default(autoincrement())
+  name                String               @unique @db.VarChar
+  abbreviation        String               @unique @map("UPPER(abbreviation)") @db.VarChar
+  address             Address              @relation(fields: [address_id], references: [id])
+  address_id          Int                  @unique
+  created_at          DateTime             @default(now()) @db.Timestamptz()
+  updated_at          DateTime             @updatedAt @db.Timestamptz()
+  standards           Standard[]
   subjects            Subject[]
   instruction_mediums Instruction_Medium[]
-  schools              School[]
+  schools             School[]
 
   @@map("boards")
 }
 
 model Standard {
-  id          Int         @id @default(autoincrement())
-  board       Board       @relation(fields: [board_id], references: [id])
-  board_id    Int
-  name        String      @db.VarChar
-  created_at  DateTime    @default(now()) @db.Timestamptz()
-  updated_at  DateTime    @updatedAt @db.Timestamptz()
+  id         Int      @id @default(autoincrement())
+  board      Board    @relation(fields: [board_id], references: [id])
+  board_id   Int
+  name       String   @db.VarChar
+  created_at DateTime @default(now()) @db.Timestamptz()
+  updated_at DateTime @updatedAt @db.Timestamptz()
 
-  School_Standard School_Standard[]
+  School_Standard         School_Standard[]
+  Medium_Standard_Subject Medium_Standard_Subject[]
 
   @@unique([board_id, name])
 }
 
 model Subject {
-  id          Int         @id @default(autoincrement())
-  board       Board       @relation(fields: [board_id], references: [id])
-  board_id    Int
-  name        String      @db.VarChar
-  created_at  DateTime    @default(now()) @db.Timestamptz()
-  updated_at  DateTime    @updatedAt @db.Timestamptz()
+  id         Int      @id @default(autoincrement())
+  board      Board    @relation(fields: [board_id], references: [id])
+  board_id   Int
+  name       String   @db.VarChar
+  created_at DateTime @default(now()) @db.Timestamptz()
+  updated_at DateTime @updatedAt @db.Timestamptz()
+
+  Medium_Standard_Subject Medium_Standard_Subject[]
 
   @@unique([board_id, name])
 }
 
 model Instruction_Medium {
-  id                  Int         @id @default(autoincrement())
-  board               Board       @relation(fields: [board_id], references: [id])
-  board_id            Int
-  instruction_medium  String      @db.VarChar
-  created_at         DateTime    @default(now()) @db.Timestamptz()
-  updated_at         DateTime    @updatedAt @db.Timestamptz()
+  id                 Int      @id @default(autoincrement())
+  board              Board    @relation(fields: [board_id], references: [id])
+  board_id           Int
+  instruction_medium String   @db.VarChar
+  created_at         DateTime @default(now()) @db.Timestamptz()
+  updated_at         DateTime @updatedAt @db.Timestamptz()
 
   School_Instruction_Medium School_Instruction_Medium[]
+  Medium_Standard_Subject   Medium_Standard_Subject[]
 
   @@unique([board_id, instruction_medium])
 }
 
 model School {
-  id                      Int       @id @default(autoincrement())
-  board                   Board     @relation(fields: [board_id], references: [id])
-  board_id                Int
-  name                    String    @db.VarChar
-  address                 Address   @relation(fields: [address_id], references: [id])
-  address_id              Int       @unique
-  principal_name          String    @db.VarChar
-  email                   String    @db.VarChar
-  contact_number          String    @db.VarChar
-  alternate_contact_number String?   @db.VarChar
-  created_at              DateTime  @default(now()) @db.Timestamptz()
-  updated_at              DateTime  @updatedAt @db.Timestamptz()
+  id                       Int      @id @default(autoincrement())
+  board                    Board    @relation(fields: [board_id], references: [id])
+  board_id                 Int
+  name                     String   @db.VarChar
+  address                  Address  @relation(fields: [address_id], references: [id])
+  address_id               Int      @unique
+  principal_name           String   @db.VarChar
+  email                    String   @db.VarChar
+  contact_number           String   @db.VarChar
+  alternate_contact_number String?  @db.VarChar
+  created_at               DateTime @default(now()) @db.Timestamptz()
+  updated_at               DateTime @updatedAt @db.Timestamptz()
 
   School_Instruction_Medium School_Instruction_Medium[]
-
-  School_Standard School_Standard[]
+  School_Standard           School_Standard[]
+  User_School               User_School[]
 }
 
 model School_Instruction_Medium {
-  id                    Int                 @id @default(autoincrement())
-  instruction_medium    Instruction_Medium  @relation(fields: [instruction_medium_id], references: [id])
+  id                    Int                @id @default(autoincrement())
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id])
   instruction_medium_id Int
-  school               School              @relation(fields: [school_id], references: [id])
-  school_id            Int
-  created_at           DateTime            @default(now()) @db.Timestamptz()
-  updated_at           DateTime            @updatedAt @db.Timestamptz()
+  school                School             @relation(fields: [school_id], references: [id])
+  school_id             Int
+  created_at            DateTime           @default(now()) @db.Timestamptz()
+  updated_at            DateTime           @updatedAt @db.Timestamptz()
 
   @@unique([school_id, instruction_medium_id])
 }
 
 model School_Standard {
-  id          Int       @id @default(autoincrement())
-  standard    Standard  @relation(fields: [standard_id], references: [id])
+  id          Int      @id @default(autoincrement())
+  standard    Standard @relation(fields: [standard_id], references: [id])
   standard_id Int
-  school      School    @relation(fields: [school_id], references: [id])
+  school      School   @relation(fields: [school_id], references: [id])
   school_id   Int
-  created_at  DateTime  @default(now()) @db.Timestamptz()
-  updated_at  DateTime  @updatedAt @db.Timestamptz()
+  created_at  DateTime @default(now()) @db.Timestamptz()
+  updated_at  DateTime @updatedAt @db.Timestamptz()
+
+  Teacher_Subject Teacher_Subject[]
 
   @@unique([school_id, standard_id])
 }
 
+model User {
+  id                       Int      @id @default(autoincrement())
+  password                 String   @db.VarChar
+  email_id                 String   @unique @db.VarChar
+  name                     String   @db.VarChar
+  contact_number           BigInt
+  alternate_contact_number BigInt?
+  highest_qualification    String?  @db.VarChar
+  status                   Boolean
+  created_at               DateTime @default(now()) @db.Timestamptz()
+  updated_at               DateTime @updatedAt @db.Timestamptz()
+
+  user_roles       User_Role[]
+  user_schools     User_School[]
+  teacher_subjects Teacher_Subject[]
+}
+
+model Role {
+  id        Int    @id @default(autoincrement())
+  role_name String @unique @db.VarChar
+
+  user_roles User_Role[]
+}
+
+model User_Role {
+  id         Int      @id @default(autoincrement())
+  user       User     @relation(fields: [user_id], references: [id])
+  user_id    Int
+  role       Role     @relation(fields: [role_id], references: [id])
+  role_id    Int
+  created_at DateTime @default(now()) @db.Timestamptz()
+
+  @@unique([user_id, role_id])
+}
+
+model User_School {
+  id         Int       @id @default(autoincrement())
+  user       User      @relation(fields: [user_id], references: [id])
+  user_id    Int
+  school     School    @relation(fields: [school_id], references: [id])
+  school_id  Int
+  start_date DateTime  @db.Date
+  end_date   DateTime? @db.Date
+  created_at DateTime  @default(now()) @db.Timestamptz()
+
+  @@unique([user_id, school_id])
+}
+
+model Medium_Standard_Subject {
+  id                    Int                @id @default(autoincrement())
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id])
+  instruction_medium_id Int
+  standard              Standard           @relation(fields: [standard_id], references: [id])
+  standard_id           Int
+  subject               Subject            @relation(fields: [subject_id], references: [id])
+  subject_id            Int
+  created_at            DateTime           @default(now()) @db.Timestamptz()
+  updated_at            DateTime           @updatedAt @db.Timestamptz()
+
+  teacher_subjects Teacher_Subject[]
+
+  @@unique([instruction_medium_id, standard_id, subject_id])
+}
+
+model Teacher_Subject {
+  id                         Int                     @id @default(autoincrement())
+  user                       User                    @relation(fields: [user_id], references: [id])
+  user_id                    Int
+  school_standard            School_Standard         @relation(fields: [school_standard_id], references: [id])
+  school_standard_id         Int
+  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id])
+  medium_standard_subject_id Int
+  created_at                 DateTime                @default(now()) @db.Timestamptz()
+  updated_at                 DateTime                @updatedAt @db.Timestamptz()
+
+  @@unique([user_id, school_standard_id, medium_standard_subject_id])
+}
