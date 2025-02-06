@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMediumStandardSubjectDto } from './dto/medium-standard-subject.dto';
 import { Prisma } from '@prisma/client';
@@ -11,10 +11,13 @@ export class MediumStandardSubjectService {
 
   private readonly mssSelect = {
     id: true,
+    instruction_medium_id: true,
+    standard_id: true,
+    subject_id: true,
     instruction_medium: {
       select: {
         id: true,
-        name: true,
+        instruction_medium: true,
         board: {
           select: {
             name: true,
@@ -79,14 +82,28 @@ export class MediumStandardSubjectService {
     }
   }
 
-  async findAll() {
+  async findAll(standardId?: number) {
     try {
+      // If standardId is provided, verify it exists
+      if (standardId) {
+        const standard = await this.prisma.standard.findUnique({
+          where: { id: standardId }
+        });
+        if (!standard) {
+          throw new NotFoundException(`Standard with ID ${standardId} not found`);
+        }
+      }
+
       return await this.prisma.medium_Standard_Subject.findMany({
+        where: standardId ? { standard_id: standardId } : undefined,
         select: this.mssSelect
       });
     } catch (error) {
       this.logger.error('Failed to fetch medium standard subjects:', error);
-      throw error;
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to fetch medium standard subjects');
     }
   }
 
