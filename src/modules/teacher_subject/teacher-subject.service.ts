@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
 import { Prisma } from '@prisma/client';
@@ -41,7 +41,7 @@ export class TeacherSubjectService {
         instruction_medium: {
           select: {
             id: true,
-            name: true
+            instruction_medium: true
           }
         },
         subject: {
@@ -96,15 +96,18 @@ export class TeacherSubjectService {
     }
   }
 
-  async findAll(teacherId?: number) {
+  async findAll(filters?: { userId?: number; schoolStandardId?: number }) {
     try {
       return await this.prisma.teacher_Subject.findMany({
-        where: teacherId ? { user_id: teacherId } : undefined,
+        where: {
+          ...(filters?.userId && { user_id: filters.userId }),
+          ...(filters?.schoolStandardId && { school_standard_id: filters.schoolStandardId })
+        },
         select: this.teacherSubjectSelect
       });
     } catch (error) {
       this.logger.error('Failed to fetch teacher subjects:', error);
-      throw error;
+      throw new InternalServerErrorException('Failed to fetch teacher subjects');
     }
   }
 

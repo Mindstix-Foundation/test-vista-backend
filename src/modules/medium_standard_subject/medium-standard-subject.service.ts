@@ -94,10 +94,12 @@ export class MediumStandardSubjectService {
         }
       }
 
-      return await this.prisma.medium_Standard_Subject.findMany({
+      const results = await this.prisma.medium_Standard_Subject.findMany({
         where: standardId ? { standard_id: standardId } : undefined,
         select: this.mssSelect
       });
+
+      return results;
     } catch (error) {
       this.logger.error('Failed to fetch medium standard subjects:', error);
       if (error instanceof NotFoundException) {

@@ -17,17 +17,11 @@ async function bootstrap() {
   // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,
       transform: true,
-      errorHttpStatusCode: 400,
-      exceptionFactory: (errors) => {
-        const messages = errors.map(error => ({
-          field: error.property,
-          message: Object.values(error.constraints).join(', '),
-        }));
-        return new BadRequestException(messages);
-      },
-    }),
+      transformOptions: { enableImplicitConversion: true },
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    })
   );
 
   // Swagger setup

@@ -2,6 +2,20 @@ import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, H
 import { TeacherSubjectService } from './teacher-subject.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
+import { IsOptional, IsNumber } from 'class-validator';
+
+class GetTeacherSubjectsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  userId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  schoolStandardId?: number;
+}
 
 @ApiTags('teacher-subjects')
 @Controller('teacher-subjects')
@@ -19,10 +33,14 @@ export class TeacherSubjectController {
 
   @Get()
   @ApiOperation({ summary: 'Get all teacher subject assignments' })
-  @ApiQuery({ name: 'teacherId', required: false, type: Number })
+  @ApiQuery({ name: 'userId', required: false, type: Number })
+  @ApiQuery({ name: 'schoolStandardId', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all assignments' })
-  async findAll(@Query('teacherId', new ParseIntPipe({ optional: true })) teacherId?: number) {
-    return await this.teacherSubjectService.findAll(teacherId);
+  async findAll(@Query() query: GetTeacherSubjectsQueryDto) {
+    return await this.teacherSubjectService.findAll({
+      userId: query.userId,
+      schoolStandardId: query.schoolStandardId
+    });
   }
 
   @Get(':id')

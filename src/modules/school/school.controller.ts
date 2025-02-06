@@ -2,6 +2,15 @@ import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStat
 import { SchoolService } from './school.service';
 import { SchoolDto, CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
+import { IsOptional, IsNumber } from 'class-validator';
+
+class GetSchoolsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  boardId?: number;
+}
 
 @ApiTags('schools')
 @Controller('schools')
@@ -29,8 +38,8 @@ export class SchoolController {
     type: SchoolDto,
     isArray: true
   })
-  async findAll(@Query('boardId', new ParseIntPipe({ optional: true })) boardId?: number) {
-    return await this.schoolService.findAll(boardId);
+  async findAll(@Query() query: GetSchoolsQueryDto) {
+    return await this.schoolService.findAll(query.boardId);
   }
 
   @Get(':id')
