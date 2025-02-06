@@ -151,32 +151,70 @@ export class BoardService {
     }
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number): Promise<{ message: string } | void> {
     try {
       const board = await this.findOne(id);
 
-      // Check for related records
-      const hasStandards = await this.prisma.standard.count({
-        where: { board_id: id }
+      // Check for connected schools
+      const connectedSchools = await this.prisma.school.findMany({
+        where: { board_id: id },
+        select: {
+          id: true,
+          name: true
+        }
       });
 
-      const hasSubjects = await this.prisma.subject.count({
-        where: { board_id: id }
-      });
-
-      const hasInstructionMediums = await this.prisma.instruction_Medium.count({
-        where: { board_id: id }
-      });
-
-      if (hasStandards || hasSubjects || hasInstructionMediums) {
-        throw new BadRequestException(
-          'Cannot delete board because it has associated standards, subjects, or instruction mediums. Please delete these first.'
-        );
+      if (connectedSchools.length > 0) {
+        const schoolNames = connectedSchools.map(school => school.name).join(', ');
+        throw new BadRequestException({
+          message: `Cannot delete board as it is connected to ${connectedSchools.length} school(s)`,
+          schools: schoolNames
+        });
       }
 
-      await this.prisma.board.delete({
-        where: { id }
+      // If no schools are connected, proceed with deletion of related entities
+      await this.prisma.$transaction(async (prisma) => {
+        // Delete all medium standard subjects first
+        await prisma.medium_Standard_Subject.deleteMany({
+          where: {
+            OR: [
+              {
+                standard: {
+                  board_id: id
+                }
+              },
+              {
+                instruction_medium: {
+                  board_id: id
+                }
+              }
+            ]
+          }
+        });
+
+        // Delete instruction mediums
+        await prisma.instruction_Medium.deleteMany({
+          where: { board_id: id }
+        });
+
+        // Delete standards
+        await prisma.standard.deleteMany({
+          where: { board_id: id }
+        });
+
+        // Delete subjects
+        await prisma.subject.deleteMany({
+          where: { board_id: id }
+        });
+
+        // Finally delete the board
+        await prisma.board.delete({
+          where: { id }
+        });
       });
+
+      return { message: 'Board and all associated entities deleted successfully' };
+
     } catch (error) {
       this.logger.error(`Failed to delete board ${id}:`, error);
       if (error instanceof NotFoundException || 

@@ -52,11 +52,12 @@ export class BoardController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a board' })
-  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Board deleted successfully' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Board deleted successfully or error message' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
-  async remove(@Param('id') id: number) {
-    await this.boardService.remove(id);
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Board has connected schools' })
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    return await this.boardService.remove(id);
   }
 }

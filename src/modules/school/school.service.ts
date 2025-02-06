@@ -78,11 +78,24 @@ export class SchoolService {
     }
   }
 
-  async findAll() {
+  async findAll(boardId?: number) {
     try {
       return await this.prisma.school.findMany({
+        where: boardId ? { board_id: boardId } : undefined,
         include: {
-          address: true,
+          address: {
+            include: {
+              city: {
+                include: {
+                  state: {
+                    include: {
+                      country: true
+                    }
+                  }
+                }
+              }
+            }
+          },
           board: true,
           School_Standard: {
             include: {
@@ -208,15 +221,81 @@ export class SchoolService {
     }
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number): Promise<{ message: string } | void> {
     try {
-      await this.findOne(id);
-      await this.prisma.school.delete({
-        where: { id }
+      const school = await this.findOne(id);
+
+      // Check for connected teachers through user_school and user_role
+      const connectedTeachers = await this.prisma.user_School.findMany({
+        where: { 
+          school_id: id,
+          user: {
+            user_roles: {
+              some: {
+                role: {
+                  role_name: 'TEACHER'
+                }
+              }
+            }
+          }
+        },
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email_id: true
+            }
+          }
+        }
       });
+
+      if (connectedTeachers.length > 0) {
+        const teacherNames = connectedTeachers.map(t => t.user.name).join(', ');
+        throw new BadRequestException({
+          message: `Cannot delete school as it has ${connectedTeachers.length} teacher(s) assigned`,
+          teachers: teacherNames
+        });
+      }
+
+      // If no teachers are connected, proceed with deletion of related entities
+      await this.prisma.$transaction(async (prisma) => {
+        // Delete teacher subjects first (if any exist)
+        await prisma.teacher_Subject.deleteMany({
+          where: {
+            school_standard: {
+              school_id: id
+            }
+          }
+        });
+
+        // Delete school instruction mediums
+        await prisma.school_Instruction_Medium.deleteMany({
+          where: { school_id: id }
+        });
+
+        // Delete school standards
+        await prisma.school_Standard.deleteMany({
+          where: { school_id: id }
+        });
+
+        // Delete user school associations (for non-teachers)
+        await prisma.user_School.deleteMany({
+          where: { school_id: id }
+        });
+
+        // Finally delete the school
+        await prisma.school.delete({
+          where: { id }
+        });
+      });
+
+      return { message: 'School and all associated entities deleted successfully' };
+
     } catch (error) {
       this.logger.error(`Failed to delete school ${id}:`, error);
-      if (error instanceof NotFoundException) {
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete school');

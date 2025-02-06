@@ -1,7 +1,7 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query } from '@nestjs/common';
 import { SchoolService } from './school.service';
 import { SchoolDto, CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('schools')
 @Controller('schools')
@@ -22,14 +22,15 @@ export class SchoolController {
 
   @Get()
   @ApiOperation({ summary: 'Get all schools' })
+  @ApiQuery({ name: 'boardId', required: false, type: Number })
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Returns all schools',
     type: SchoolDto,
     isArray: true
   })
-  async findAll() {
-    return await this.schoolService.findAll();
+  async findAll(@Query('boardId', new ParseIntPipe({ optional: true })) boardId?: number) {
+    return await this.schoolService.findAll(boardId);
   }
 
   @Get(':id')
@@ -53,11 +54,12 @@ export class SchoolController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a school' })
-  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'School deleted successfully' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'School deleted successfully or error message' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'School has assigned teachers' })
   async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.schoolService.remove(id);
+    return await this.schoolService.remove(id);
   }
 }
