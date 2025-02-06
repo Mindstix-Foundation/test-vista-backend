@@ -1,13 +1,13 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserSchoolDto, UpdateUserSchoolDto } from './dto/user-school.dto';
-import { Prisma } from '@prisma/client';
+
 
 @Injectable()
 export class UserSchoolService {
   private readonly logger = new Logger(UserSchoolService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private readonly userSchoolSelect = {
     id: true,
@@ -41,6 +41,7 @@ export class UserSchoolService {
       const user = await this.prisma.user.findUnique({
         where: { id: createDto.user_id }
       });
+
       if (!user) {
         throw new NotFoundException(`User with ID ${createDto.user_id} not found`);
       }
@@ -49,21 +50,56 @@ export class UserSchoolService {
       const school = await this.prisma.school.findUnique({
         where: { id: createDto.school_id }
       });
+
       if (!school) {
         throw new NotFoundException(`School with ID ${createDto.school_id} not found`);
       }
 
+      // Convert date strings to Date objects
+      const startDate = new Date(createDto.start_date);
+      const endDate = createDto.end_date ? new Date(createDto.end_date) : null;
+
       return await this.prisma.user_School.create({
-        data: createDto,
-        select: this.userSchoolSelect
+        data: {
+          user_id: createDto.user_id,
+          school_id: createDto.school_id,
+          start_date: startDate,
+          end_date: endDate
+        },
+        select: {
+          id: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email_id: true
+            }
+          },
+          school: {
+            select: {
+              id: true,
+              name: true,
+              board: {
+                select: {
+                  name: true,
+                  abbreviation: true
+                }
+              }
+            }
+          },
+          start_date: true,
+          end_date: true,
+          created_at: true
+        }
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('User is already associated with this school');
-        }
+      if (error instanceof NotFoundException) {
+        throw error;
       }
-      throw error;
+      if (error.code === 'P2002') {
+        throw new ConflictException('User is already assigned to this school');
+      }
+      throw new InternalServerErrorException('Failed to create user school assignment');
     }
   }
 

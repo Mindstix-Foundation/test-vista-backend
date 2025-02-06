@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 export class MediumStandardSubjectService {
   private readonly logger = new Logger(MediumStandardSubjectService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private readonly mssSelect = {
     id: true,
@@ -82,29 +82,14 @@ export class MediumStandardSubjectService {
     }
   }
 
-  async findAll(standardId?: number) {
+  async findAll(query: { instruction_medium_id?: number; standard_id?: number; subject_id?: number }) {
     try {
-      // If standardId is provided, verify it exists
-      if (standardId) {
-        const standard = await this.prisma.standard.findUnique({
-          where: { id: standardId }
-        });
-        if (!standard) {
-          throw new NotFoundException(`Standard with ID ${standardId} not found`);
-        }
-      }
-
-      const results = await this.prisma.medium_Standard_Subject.findMany({
-        where: standardId ? { standard_id: standardId } : undefined,
+      return await this.prisma.medium_Standard_Subject.findMany({
+        where: query,
         select: this.mssSelect
       });
-
-      return results;
     } catch (error) {
       this.logger.error('Failed to fetch medium standard subjects:', error);
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
       throw new InternalServerErrorException('Failed to fetch medium standard subjects');
     }
   }

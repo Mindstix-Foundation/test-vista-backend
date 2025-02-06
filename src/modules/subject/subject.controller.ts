@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
 import { SubjectService } from './subject.service';
-import { SubjectDto, CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
+import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @ApiTags('subjects')

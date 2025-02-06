@@ -26,23 +26,23 @@ export class UserSchoolDto {
 
 export class CreateUserSchoolDto {
   @ApiProperty({ example: 1 })
-  @IsNumber()
   @IsNotEmpty()
+  @IsNumber()
   user_id: number;
 
   @ApiProperty({ example: 1 })
-  @IsNumber()
   @IsNotEmpty()
+  @IsNumber()
   school_id: number;
 
   @ApiProperty({ example: '2024-02-05' })
-  @IsDateString()
   @IsNotEmpty()
+  @IsDateString()
   start_date: string;
 
   @ApiPropertyOptional({ example: '2025-02-05' })
-  @IsDateString()
   @IsOptional()
+  @IsDateString()
   end_date?: string;
 }
 

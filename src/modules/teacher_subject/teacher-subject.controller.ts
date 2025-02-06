@@ -2,7 +2,7 @@ import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, H
 import { TeacherSubjectService } from './teacher-subject.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import {  Type } from 'class-transformer';
 import { IsOptional, IsNumber } from 'class-validator';
 
 class GetTeacherSubjectsQueryDto {

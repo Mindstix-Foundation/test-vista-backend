@@ -1,16 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query } from '@nestjs/common';
 import { MediumStandardSubjectService } from './medium-standard-subject.service';
-import { CreateMediumStandardSubjectDto } from './dto/medium-standard-subject.dto';
+import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsOptional, IsNumber } from 'class-validator';
-
-class GetMssQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  standardId?: number;
-}
 
 @ApiTags('medium-standard-subjects')
 @Controller('medium-standard-subjects')
@@ -28,10 +19,12 @@ export class MediumStandardSubjectController {
 
   @Get()
   @ApiOperation({ summary: 'Get all medium-standard-subject associations' })
-  @ApiQuery({ name: 'standardId', required: false, type: Number })
+  @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
+  @ApiQuery({ name: 'standard_id', required: false, type: Number })
+  @ApiQuery({ name: 'subject_id', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all associations' })
   async findAll(@Query() query: GetMssQueryDto) {
-    return await this.mssService.findAll(query.standardId);
+    return await this.mssService.findAll(query);
   }
 
   @Get('medium/:mediumId/standard/:standardId')

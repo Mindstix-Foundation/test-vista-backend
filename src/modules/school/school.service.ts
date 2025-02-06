@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 export class SchoolService {
   private readonly logger = new Logger(SchoolService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateSchoolDto) {
     try {
@@ -223,8 +223,6 @@ export class SchoolService {
 
   async remove(id: number): Promise<{ message: string } | void> {
     try {
-      const school = await this.findOne(id);
-
       // Check for connected teachers through user_school and user_role
       const connectedTeachers = await this.prisma.user_School.findMany({
         where: { 

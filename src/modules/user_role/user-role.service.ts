@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserRoleDto } from './dto/user-role.dto';
 import { Prisma } from '@prisma/client';
@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 export class UserRoleService {
   private readonly logger = new Logger(UserRoleService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateUserRoleDto) {
     try {

@@ -1,60 +1,46 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException,  ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
 import { Prisma } from '@prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
 
+
 @Injectable()
 export class BoardService {
   private readonly logger = new Logger(BoardService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async create(createBoardDto: CreateBoardDto) {
+  async create(createDto: CreateBoardDto) {
     try {
       // Check if address exists
       const address = await this.prisma.address.findUnique({
-        where: { id: createBoardDto.address_id }
+        where: { id: createDto.address_id }
       });
-
       if (!address) {
-        throw new NotFoundException(`Address with ID ${createBoardDto.address_id} not found`);
+        throw new NotFoundException(`Address with ID ${createDto.address_id} not found`);
       }
 
-      // Check if address is already associated with a board
+      // Check if board name exists
       const existingBoard = await this.prisma.board.findFirst({
-        where: {
-          OR: [
-            { name: toTitleCase(createBoardDto.name) },
-            { abbreviation: createBoardDto.abbreviation.toUpperCase() }
-          ]
-        }
+        where: { name: toTitleCase(createDto.name) }
       });
-
       if (existingBoard) {
-        throw new ConflictException('Board name or abbreviation already exists');
+        throw new ConflictException('Board with this name already exists');
       }
 
       return await this.prisma.board.create({
         data: {
-          name: toTitleCase(createBoardDto.name),
-          abbreviation: createBoardDto.abbreviation.toUpperCase(),
-          address_id: createBoardDto.address_id
-        },
-        include: {
-          address: true
+          name: toTitleCase(createDto.name),
+          abbreviation: createDto.abbreviation.toUpperCase(),
+          address: {
+            connect: { id: createDto.address_id }
+          }
         }
       });
     } catch (error) {
-      this.logger.error('Failed to create board:', error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
-      }
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('Board with this name already exists');
-        }
       }
       throw new InternalServerErrorException('Failed to create board');
     }
@@ -131,7 +117,11 @@ export class BoardService {
       
       return await this.prisma.board.update({
         where: { id },
-        data: updateBoardDto,
+        data: {
+          ...updateBoardDto,
+          name: updateBoardDto.name ? toTitleCase(updateBoardDto.name) : undefined,
+          abbreviation: updateBoardDto.abbreviation ? updateBoardDto.abbreviation.toUpperCase() : undefined,
+        },
         include: {
           address: true
         }
@@ -151,74 +141,30 @@ export class BoardService {
     }
   }
 
-  async remove(id: number): Promise<{ message: string } | void> {
+  async remove(id: number) {
     try {
-      const board = await this.findOne(id);
-
-      // Check for connected schools
-      const connectedSchools = await this.prisma.school.findMany({
-        where: { board_id: id },
-        select: {
-          id: true,
-          name: true
-        }
+      const board = await this.prisma.board.findUnique({
+        where: { id }
       });
 
-      if (connectedSchools.length > 0) {
-        const schoolNames = connectedSchools.map(school => school.name).join(', ');
-        throw new BadRequestException({
-          message: `Cannot delete board as it is connected to ${connectedSchools.length} school(s)`,
-          schools: schoolNames
-        });
+      if (!board) {
+        throw new NotFoundException(`Board with ID ${id} not found`);
       }
 
-      // If no schools are connected, proceed with deletion of related entities
-      await this.prisma.$transaction(async (prisma) => {
-        // Delete all medium standard subjects first
-        await prisma.medium_Standard_Subject.deleteMany({
-          where: {
-            OR: [
-              {
-                standard: {
-                  board_id: id
-                }
-              },
-              {
-                instruction_medium: {
-                  board_id: id
-                }
-              }
-            ]
-          }
-        });
-
-        // Delete instruction mediums
-        await prisma.instruction_Medium.deleteMany({
-          where: { board_id: id }
-        });
-
-        // Delete standards
-        await prisma.standard.deleteMany({
-          where: { board_id: id }
-        });
-
-        // Delete subjects
-        await prisma.subject.deleteMany({
-          where: { board_id: id }
-        });
-
-        // Finally delete the board
-        await prisma.board.delete({
-          where: { id }
-        });
+      // Check for associated records
+      const schoolCount = await this.prisma.school.count({
+        where: { board_id: id }
       });
 
-      return { message: 'Board and all associated entities deleted successfully' };
+      if (schoolCount > 0) {
+        throw new ConflictException('Cannot delete board with associated schools');
+      }
 
+      return await this.prisma.board.delete({
+        where: { id }
+      });
     } catch (error) {
-      this.logger.error(`Failed to delete board ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof BadRequestException) {
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete board');

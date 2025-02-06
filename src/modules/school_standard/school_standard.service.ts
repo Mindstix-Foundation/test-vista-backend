@@ -1,13 +1,12 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolStandardDto } from './dto/school-standard.dto';
-import { toTitleCase } from '../../utils/titleCase'; // Assuming you have this utility
 
 @Injectable()
 export class SchoolStandardService {
   private readonly logger = new Logger(SchoolStandardService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateSchoolStandardDto) {
     try {

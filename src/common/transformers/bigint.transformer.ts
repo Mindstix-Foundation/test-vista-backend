@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+
 
 export const bigIntTransformer = {
   to: (value: string | null): bigint | null => {

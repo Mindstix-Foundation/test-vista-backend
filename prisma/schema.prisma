@@ -150,19 +150,19 @@ model School_Standard {
 }
 
 model User {
-  id                       Int      @id @default(autoincrement())
-  password                 String   @db.VarChar
-  email_id                 String   @unique @db.VarChar
-  name                     String   @db.VarChar
-  contact_number           BigInt
-  alternate_contact_number BigInt?
-  highest_qualification    String?  @db.VarChar
-  status                   Boolean
-  created_at               DateTime @default(now()) @db.Timestamptz()
-  updated_at               DateTime @updatedAt @db.Timestamptz()
+  id                       Int       @id @default(autoincrement())
+  email_id                 String    @unique @db.VarChar
+  password                 String    @db.VarChar
+  name                     String    @db.VarChar
+  contact_number           String    @db.VarChar(10)  // Added length constraint
+  alternate_contact_number String?   @db.VarChar(10)  // Added length constraint
+  highest_qualification    String?   @db.VarChar
+  status                   Boolean   @default(true)
+  created_at              DateTime  @default(now()) @db.Timestamptz()
+  updated_at              DateTime  @updatedAt @db.Timestamptz()
 
-  user_roles       User_Role[]
   user_schools     User_School[]
+  user_roles       User_Role[]
   teacher_subjects Teacher_Subject[]
 }
 

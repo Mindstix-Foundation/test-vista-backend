@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 export class AddressService {
   private readonly logger = new Logger(AddressService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateAddressDto) {
     try {

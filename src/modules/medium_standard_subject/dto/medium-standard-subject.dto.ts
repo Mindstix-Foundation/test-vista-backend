@@ -1,5 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsNotEmpty } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNumber, IsNotEmpty, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class MediumStandardSubjectDto {
   @ApiProperty({ example: 1 })
@@ -34,4 +35,24 @@ export class CreateMediumStandardSubjectDto {
   @IsNumber()
   @IsNotEmpty()
   subject_id: number;
+}
+
+export class GetMssQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsNumber()
+  instruction_medium_id?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsNumber()
+  standard_id?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsNumber()
+  subject_id?: number;
 } 

@@ -6,7 +6,7 @@ import { EntityAlreadyExistsException } from '../../common/exceptions/entity-alr
 
 @Injectable()
 export class CountryService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateCountryDto) {
     try {

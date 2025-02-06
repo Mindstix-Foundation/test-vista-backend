@@ -18,7 +18,7 @@ import { toTitleCase } from '../../utils/titleCase';
 export class UserService {
   private readonly logger = new Logger(UserService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateUserDto) {
     try {
@@ -36,7 +36,7 @@ export class UserService {
         throw new UserExistsException(createDto.email_id);
       }
 
-      // Validate contact number
+      // Validate contact numbers
       if (!this.isValidContactNumber(createDto.contact_number)) {
         throw new BadRequestException('Contact number must be exactly 10 digits');
       }
@@ -53,33 +53,50 @@ export class UserService {
         data: {
           ...createDto,
           name: toTitleCase(createDto.name),
-          contact_number: BigInt(createDto.contact_number),
-          alternate_contact_number: createDto.alternate_contact_number 
-            ? BigInt(createDto.alternate_contact_number) 
-            : null,
+          contact_number: createDto.contact_number,
+          alternate_contact_number: createDto.alternate_contact_number || null,
           password: hashedPassword
-        },
-        select: this.userSelect
+        }
       });
 
-      return this.transformUser(user);
+      return user;
     } catch (error) {
-      this.handleError(error, 'create user');
+      if (error instanceof BadRequestException || 
+          error instanceof UserExistsException) {
+        throw error;
+      }
+      this.logger.error('Failed to create user:', error);
+      throw new InternalServerErrorException('Failed to create user');
     }
   }
 
   async findAll(schoolId?: number) {
     try {
-      const users = await this.prisma.user.findMany({
-        where: schoolId ? {
-          user_schools: { some: { school_id: schoolId } }
-        } : undefined,
-        select: this.userSelect
+      const where = schoolId ? {
+        user_schools: {
+          some: { school_id: schoolId }
+        }
+      } : {};
+
+      const users = await this.prisma.user.findMany({ 
+        where,
+        select: {
+          id: true,
+          name: true,
+          email_id: true,
+          contact_number: true,
+          alternate_contact_number: true,
+          highest_qualification: true,
+          status: true,
+          created_at: true,
+          updated_at: true
+        }
       });
 
-      return users.map(user => this.transformUser(user));
+      return users;
     } catch (error) {
-      this.handleError(error, 'fetch users');
+      this.logger.error('Failed to fetch users:', error);
+      throw new InternalServerErrorException('Failed to fetch users');
     }
   }
 
@@ -88,9 +105,19 @@ export class UserService {
       const user = await this.prisma.user.findUnique({
         where: { id },
         select: {
-          ...this.userSelect,
+          id: true,
+          name: true,
+          email_id: true,
+          contact_number: true,
+          alternate_contact_number: true,
+          highest_qualification: true,
+          status: true,
+          created_at: true,
+          updated_at: true,
           user_schools: {
-            include: { school: true }
+            include: {
+              school: true
+            }
           }
         }
       });
@@ -99,15 +126,19 @@ export class UserService {
         throw new NotFoundException(`User with ID ${id} not found`);
       }
 
-      return this.transformUser(user);
+      return user;
     } catch (error) {
-      this.handleError(error, `fetch user ${id}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to fetch user ${id}:`, error);
+      throw new InternalServerErrorException('Failed to fetch user');
     }
   }
 
   async update(id: number, updateDto: UpdateUserDto) {
     try {
-      await this.findOne(id);
+      
 
       if (updateDto.email_id) {
         if (!this.isValidEmail(updateDto.email_id)) {
@@ -127,79 +158,82 @@ export class UserService {
       }
 
       if (updateDto.contact_number && !this.isValidContactNumber(updateDto.contact_number)) {
-        throw new BadRequestException('Invalid contact number format');
+        throw new BadRequestException('Contact number must be exactly 10 digits');
       }
 
       if (updateDto.alternate_contact_number && 
           !this.isValidContactNumber(updateDto.alternate_contact_number)) {
-        throw new BadRequestException('Invalid alternate contact number format');
+        throw new BadRequestException('Alternate contact number must be exactly 10 digits');
       }
 
-      const dataToUpdate: any = { 
-        ...updateDto,
-        name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
-        contact_number: updateDto.contact_number ? BigInt(updateDto.contact_number) : undefined,
-        alternate_contact_number: updateDto.alternate_contact_number 
-          ? BigInt(updateDto.alternate_contact_number) 
-          : null
-      };
-      if (updateDto.password) {
-        dataToUpdate.password = await this.hashPassword(updateDto.password);
-      }
-
-      const user = await this.prisma.user.update({
+      const updatedUser = await this.prisma.user.update({
         where: { id },
-        data: dataToUpdate,
-        select: this.userSelect
+        data: {
+          ...updateDto,
+          name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
+          password: updateDto.password ? await this.hashPassword(updateDto.password) : undefined
+        },
+        select: {
+          id: true,
+          name: true,
+          email_id: true,
+          contact_number: true,
+          alternate_contact_number: true,
+          highest_qualification: true,
+          status: true,
+          created_at: true,
+          updated_at: true
+        }
       });
 
-      return this.transformUser(user);
+      return updatedUser;
     } catch (error) {
-      this.handleError(error, `update user ${id}`);
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException || 
+          error instanceof UserExistsException) {
+        throw error;
+      }
+      this.logger.error(`Failed to update user ${id}:`, error);
+      throw new InternalServerErrorException('Failed to update user');
     }
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number) {
     try {
-      await this.findOne(id);
+      const user = await this.prisma.user.findUnique({
+        where: { id }
+      });
 
-      // Check for related records
-      const hasSchools = await this.prisma.user_School.count({
+      if (!user) {
+        throw new NotFoundException(`User with ID ${id} not found`);
+      }
+
+      const schoolCount = await this.prisma.user_School.count({
         where: { user_id: id }
       });
 
-      if (hasSchools) {
-        throw new UnprocessableEntityException(
-          'Cannot delete user because they are associated with schools. Please remove school associations first.'
-        );
+      if (schoolCount > 0) {
+        throw new UnprocessableEntityException('Cannot delete user because they are associated with schools');
       }
 
-      await this.prisma.user.delete({
+      return await this.prisma.user.delete({
         where: { id }
       });
     } catch (error) {
-      this.handleError(error, `delete user ${id}`);
+      if (error instanceof NotFoundException || error instanceof UnprocessableEntityException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(`Failed to delete user ${id}`);
     }
   }
 
-  private readonly userSelect = {
-    id: true,
-    email_id: true,
-    name: true,
-    contact_number: true,
-    alternate_contact_number: true,
-    highest_qualification: true,
-    status: true,
-    created_at: true,
-    updated_at: true
-  };
+  private isValidEmail(email: string): boolean {
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    return emailRegex.test(email) && email.length <= 254;
+  }
 
-  private transformUser(user: any) {
-    return {
-      ...user,
-      contact_number: user.contact_number.toString(),
-      alternate_contact_number: user.alternate_contact_number?.toString() || null
-    };
+  private isValidContactNumber(number: string): boolean {
+    return /^\d{10}$/.test(number);
   }
 
   private async hashPassword(password: string): Promise<string> {
@@ -209,15 +243,6 @@ export class UserService {
       this.logger.error('Failed to hash password:', error);
       throw new InternalServerErrorException('Failed to process password');
     }
-  }
-
-  private isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  }
-
-  private isValidContactNumber(number: string): boolean {
-    return /^\d{10}$/.test(number);
   }
 
   private handleError(error: any, operation: string) {

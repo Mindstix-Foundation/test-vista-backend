@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 export class TeacherSubjectService {
   private readonly logger = new Logger(TeacherSubjectService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private readonly teacherSubjectSelect = {
     id: true,

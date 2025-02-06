@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
 import { UserRoleService } from './user-role.service';
-import { CreateUserRoleDto, UserRoleDto } from './dto/user-role.dto';
+import { CreateUserRoleDto } from './dto/user-role.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @ApiTags('user-roles')

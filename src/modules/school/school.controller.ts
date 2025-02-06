@@ -2,7 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStat
 import { SchoolService } from './school.service';
 import { SchoolDto, CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import { IsOptional, IsNumber } from 'class-validator';
 
 class GetSchoolsQueryDto {

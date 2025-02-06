@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class RoleService {
   private readonly logger = new Logger(RoleService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findAll() {
     try {
