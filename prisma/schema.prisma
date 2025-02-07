@@ -150,20 +150,21 @@ model School_Standard {
 }
 
 model User {
-  id                       Int       @id @default(autoincrement())
-  email_id                 String    @unique @db.VarChar
-  password                 String    @db.VarChar
-  name                     String    @db.VarChar
-  contact_number           String    @db.VarChar 
-  alternate_contact_number String?   @db.VarChar
-  highest_qualification    String?   @db.VarChar
-  status                   Boolean   @default(true)
-  created_at              DateTime  @default(now()) @db.Timestamptz()
-  updated_at              DateTime  @updatedAt @db.Timestamptz()
+  id                      Int              @id @default(autoincrement())
+  email_id               String           @unique @db.VarChar
+  password               String           @db.VarChar
+  name                   String           @db.VarChar
+  contact_number         String           @db.VarChar
+  alternate_contact_number String?        @db.VarChar
+  highest_qualification  String?          @db.VarChar
+  status                 Boolean          @default(true)
+  created_at             DateTime         @default(now())
+  updated_at             DateTime         @updatedAt
+  user_roles            User_Role[]
+  user_schools          User_School[]
+  teacher_subjects      Teacher_Subject[]
 
-  user_schools     User_School[]
-  user_roles       User_Role[]
-  teacher_subjects Teacher_Subject[]
+  @@map("users") // This ensures the table name is lowercase
 }
 
 model Role {
