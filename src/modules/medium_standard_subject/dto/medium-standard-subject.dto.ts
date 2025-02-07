@@ -42,6 +42,12 @@ export class GetMssQueryDto {
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
   @IsNumber()
+  board_id?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsNumber()
   instruction_medium_id?: number;
 
   @ApiPropertyOptional()

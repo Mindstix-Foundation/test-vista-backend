@@ -1,7 +1,6 @@
-import { Injectable, Logger, NotFoundException,ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
-
 import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
@@ -24,7 +23,7 @@ export class SubjectService {
       // Check for duplicate subject in the same board
       const existing = await this.prisma.subject.findFirst({
         where: { 
-          name: toTitleCase(createDto.name) ,
+          name: toTitleCase(createDto.name),
           board_id: createDto.board_id 
         }
       });
@@ -102,22 +101,27 @@ export class SubjectService {
         }
 
         // Check for duplicate subject in the target board
-        const existing = await this.prisma.subject.findFirst({
-          where: { 
-            name: updateDto.name || undefined,
-            board_id: updateDto.board_id,
-            NOT: { id }
-          }
-        });
+        if (updateDto.name) {
+          const existing = await this.prisma.subject.findFirst({
+            where: { 
+              name: toTitleCase(updateDto.name),
+              board_id: updateDto.board_id,
+              NOT: { id }
+            }
+          });
 
-        if (existing) {
-          throw new ConflictException(`Subject already exists in the target board`);
+          if (existing) {
+            throw new ConflictException(`Subject already exists in the target board`);
+          }
         }
       }
       
       return await this.prisma.subject.update({
         where: { id },
-        data: updateDto,
+        data: {
+          ...updateDto,
+          name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
+        },
         include: {
           board: true
         }
@@ -152,4 +156,4 @@ export class SubjectService {
       where: { board_id: boardId },
     });
   }
-} 
+}

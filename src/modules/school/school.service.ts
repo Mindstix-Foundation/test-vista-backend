@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ConflictExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
 import { Prisma } from '@prisma/client';
+import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
 export class SchoolService {
@@ -40,10 +41,10 @@ export class SchoolService {
 
       return await this.prisma.school.create({
         data: {
-          name: createDto.name,
+          name: toTitleCase(createDto.name),
           board_id: createDto.board_id,
           address_id: createDto.address_id,
-          principal_name: createDto.principal_name,
+          principal_name: toTitleCase(createDto.principal_name),
           email: createDto.email,
           contact_number: createDto.contact_number,
           alternate_contact_number: createDto.alternate_contact_number
@@ -188,10 +189,10 @@ export class SchoolService {
       return await this.prisma.school.update({
         where: { id },
         data: {
-          name: updateDto.name,
+          name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
           board_id: updateDto.board_id,
           address_id: updateDto.address_id,
-          principal_name: updateDto.principal_name,
+          principal_name: updateDto.principal_name ? toTitleCase(updateDto.principal_name) : undefined,
           email: updateDto.email,
           contact_number: updateDto.contact_number,
           alternate_contact_number: updateDto.alternate_contact_number

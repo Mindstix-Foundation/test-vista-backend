@@ -19,6 +19,7 @@ export class MediumStandardSubjectController {
 
   @Get()
   @ApiOperation({ summary: 'Get all medium-standard-subject associations' })
+  @ApiQuery({ name: 'board_id', required: false, type: Number })
   @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
   @ApiQuery({ name: 'standard_id', required: false, type: Number })
   @ApiQuery({ name: 'subject_id', required: false, type: Number })
@@ -29,13 +30,15 @@ export class MediumStandardSubjectController {
 
   @Get('medium/:mediumId/standard/:standardId')
   @ApiOperation({ summary: 'Get subjects for medium and standard' })
+  @ApiQuery({ name: 'board_id', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns subjects for the medium and standard' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium or Standard not found' })
   async findByMediumAndStandard(
     @Param('mediumId', ParseIntPipe) mediumId: number,
-    @Param('standardId', ParseIntPipe) standardId: number
+    @Param('standardId', ParseIntPipe) standardId: number,
+    @Query('board_id', new ParseIntPipe({ optional: true })) boardId?: number
   ) {
-    return await this.mssService.findByMediumAndStandard(mediumId, standardId);
+    return await this.mssService.findByMediumAndStandard(mediumId, standardId, boardId);
   }
 
   @Delete(':id')

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsNotEmpty, IsEmail, IsBoolean,  Matches, Length } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsNotEmpty, IsEmail, IsBoolean, IsPhoneNumber, Matches, Length } from 'class-validator';
 import { IsStrongPassword } from '../../../common/validators/password.validator';
 
 export class UserDto {
@@ -55,16 +55,14 @@ export class CreateUserDto {
   @Length(2, 100, { message: 'Name must be between 2 and 100 characters' })
   name: string;
 
-  @ApiProperty({ example: '9876543210' })
-  @IsString({ message: 'Contact number must be a string' })
+  @ApiProperty({ example: '+911234567890', description: 'Contact number with country code' })
+  @IsPhoneNumber()
   @IsNotEmpty({ message: 'Contact number is required' })
-  @Matches(/^\d{10}$/, { message: 'Contact number must be exactly 10 digits' })
   contact_number: string;
 
-  @ApiPropertyOptional({ example: '9876543210' })
+  @ApiPropertyOptional({ example: '+919876543210', description: 'Alternate contact number with country code' })
   @IsOptional()
-  @IsString({ message: 'Alternate contact number must be a string' })
-  @Matches(/^\d{10}$/, { message: 'Alternate contact number must be exactly 10 digits' })
+  @IsPhoneNumber()
   alternate_contact_number?: string;
 
   @ApiPropertyOptional({ example: 'M.Tech' })
@@ -101,16 +99,15 @@ export class UpdateUserDto {
   @IsNotEmpty()
   name?: string;
 
-  @ApiPropertyOptional({ example: '9876543210' })
+  @ApiPropertyOptional({ example: '+911234567890', description: 'Contact number with country code' })
   @IsOptional()
-  @IsString({ message: 'Contact number must be a string' })
-  @Matches(/^\d{10}$/, { message: 'Contact number must be exactly 10 digits' })
+  @IsPhoneNumber()
+  @IsNotEmpty({ message: 'Contact number cannot be empty if provided' })
   contact_number?: string;
 
-  @ApiPropertyOptional({ example: '9876543210' })
+  @ApiPropertyOptional({ example: '+919876543210', description: 'Alternate contact number with country code' })
   @IsOptional()
-  @IsString({ message: 'Alternate contact number must be a string' })
-  @Matches(/^\d{10}$/, { message: 'Alternate contact number must be exactly 10 digits' })
+  @IsPhoneNumber()
   alternate_contact_number?: string;
 
   @ApiPropertyOptional({ example: 'M.Tech' })

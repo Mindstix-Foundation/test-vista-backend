@@ -36,16 +36,6 @@ export class UserService {
         throw new UserExistsException(createDto.email_id);
       }
 
-      // Validate contact numbers
-      if (!this.isValidContactNumber(createDto.contact_number)) {
-        throw new BadRequestException('Contact number must be exactly 10 digits');
-      }
-
-      if (createDto.alternate_contact_number && 
-          !this.isValidContactNumber(createDto.alternate_contact_number)) {
-        throw new BadRequestException('Alternate contact number must be exactly 10 digits');
-      }
-
       // Hash password
       const hashedPassword = await this.hashPassword(createDto.password);
 
@@ -53,9 +43,9 @@ export class UserService {
         data: {
           ...createDto,
           name: toTitleCase(createDto.name),
+          password: hashedPassword,
           contact_number: createDto.contact_number,
           alternate_contact_number: createDto.alternate_contact_number || null,
-          password: hashedPassword
         }
       });
 
@@ -157,21 +147,14 @@ export class UserService {
         }
       }
 
-      if (updateDto.contact_number && !this.isValidContactNumber(updateDto.contact_number)) {
-        throw new BadRequestException('Contact number must be exactly 10 digits');
-      }
-
-      if (updateDto.alternate_contact_number && 
-          !this.isValidContactNumber(updateDto.alternate_contact_number)) {
-        throw new BadRequestException('Alternate contact number must be exactly 10 digits');
-      }
-
       const updatedUser = await this.prisma.user.update({
         where: { id },
         data: {
           ...updateDto,
           name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
-          password: updateDto.password ? await this.hashPassword(updateDto.password) : undefined
+          password: updateDto.password ? await this.hashPassword(updateDto.password) : undefined,
+          contact_number: updateDto.contact_number,
+          alternate_contact_number: updateDto.alternate_contact_number || null,
         },
         select: {
           id: true,
@@ -230,10 +213,6 @@ export class UserService {
   private isValidEmail(email: string): boolean {
     const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
     return emailRegex.test(email) && email.length <= 254;
-  }
-
-  private isValidContactNumber(number: string): boolean {
-    return /^\d{10}$/.test(number);
   }
 
   private async hashPassword(password: string): Promise<string> {

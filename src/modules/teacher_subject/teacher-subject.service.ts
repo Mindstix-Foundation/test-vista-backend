@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
 import { Prisma } from '@prisma/client';
@@ -58,41 +58,111 @@ export class TeacherSubjectService {
 
   async create(createDto: CreateTeacherSubjectDto) {
     try {
-      // Check if teacher exists
-      const teacher = await this.prisma.user.findUnique({
-        where: { id: createDto.user_id }
+      // Check if user exists and is associated with the school
+      const userSchool = await this.prisma.user_School.findFirst({
+        where: {
+          user_id: createDto.user_id,
+          school_id: {
+            equals: (
+              await this.prisma.school_Standard.findUnique({
+                where: { id: createDto.school_standard_id },
+                select: { school_id: true }
+              })
+            )?.school_id
+          }
+        },
+        include: {
+          school: true
+        }
       });
-      if (!teacher) {
-        throw new NotFoundException(`Teacher with ID ${createDto.user_id} not found`);
+
+      if (!userSchool) {
+        throw new BadRequestException('Teacher is not associated with this school');
       }
 
-      // Check if school standard exists
+      // Get school standard details
       const schoolStandard = await this.prisma.school_Standard.findUnique({
-        where: { id: createDto.school_standard_id }
+        where: { id: createDto.school_standard_id },
+        include: {
+          standard: true,
+          school: true
+        }
       });
+
       if (!schoolStandard) {
         throw new NotFoundException(`School standard with ID ${createDto.school_standard_id} not found`);
       }
 
-      // Check if medium standard subject exists
-      const mss = await this.prisma.medium_Standard_Subject.findUnique({
-        where: { id: createDto.medium_standard_subject_id }
+      // Get medium standard subject details
+      const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
+        where: { id: createDto.medium_standard_subject_id },
+        include: {
+          standard: true,
+          instruction_medium: true,
+          subject: true
+        }
       });
-      if (!mss) {
-        throw new NotFoundException(`Medium standard subject with ID ${createDto.medium_standard_subject_id} not found`);
+
+      if (!mediumStandardSubject) {
+        throw new NotFoundException(
+          `Medium standard subject with ID ${createDto.medium_standard_subject_id} not found`
+        );
+      }
+
+      // Check if standards match
+      if (schoolStandard.standard_id !== mediumStandardSubject.standard_id) {
+        throw new BadRequestException(
+          `Standards do not match. School Standard: ${schoolStandard.standard.name}, ` +
+          `Medium Standard Subject Standard: ${mediumStandardSubject.standard.name}`
+        );
+      }
+
+      // Check for existing assignment
+      const existing = await this.prisma.teacher_Subject.findFirst({
+        where: {
+          user_id: createDto.user_id,
+          school_standard_id: createDto.school_standard_id,
+          medium_standard_subject_id: createDto.medium_standard_subject_id
+        }
+      });
+
+      if (existing) {
+        throw new ConflictException('This teacher subject assignment already exists');
       }
 
       return await this.prisma.teacher_Subject.create({
         data: createDto,
-        select: this.teacherSubjectSelect
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email_id: true
+            }
+          },
+          school_standard: {
+            include: {
+              school: true,
+              standard: true
+            }
+          },
+          medium_standard_subject: {
+            include: {
+              instruction_medium: true,
+              standard: true,
+              subject: true
+            }
+          }
+        }
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('This teacher subject assignment already exists');
-        }
+      this.logger.error('Failed to create teacher subject:', error);
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException ||
+          error instanceof ConflictException) {
+        throw error;
       }
-      throw error;
+      throw new InternalServerErrorException('Failed to create teacher subject');
     }
   }
 
