@@ -183,27 +183,55 @@ export class UserService {
 
   async remove(id: number) {
     try {
+      // First check if user exists
       const user = await this.prisma.user.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          user_roles: {
+            include: {
+              role: true
+            }
+          }
+        }
       });
 
       if (!user) {
         throw new NotFoundException(`User with ID ${id} not found`);
       }
 
-      const schoolCount = await this.prisma.user_School.count({
-        where: { user_id: id }
-      });
-
-      if (schoolCount > 0) {
-        throw new UnprocessableEntityException('Cannot delete user because they are associated with schools');
+      // Check if user is an admin
+      const isAdmin = user.user_roles.some(ur => ur.role.role_name === 'ADMIN');
+      if (isAdmin) {
+        throw new BadRequestException('Cannot delete admin user');
       }
 
-      return await this.prisma.user.delete({
-        where: { id }
+      // Start a transaction to handle cascading delete
+      await this.prisma.$transaction(async (prisma) => {
+        // Delete teacher subjects first
+        await prisma.teacher_Subject.deleteMany({
+          where: { user_id: id }
+        });
+
+        // Delete user school associations
+        await prisma.user_School.deleteMany({
+          where: { user_id: id }
+        });
+
+        // Delete user role associations
+        await prisma.user_Role.deleteMany({
+          where: { user_id: id }
+        });
+
+        // Finally delete the user
+        await prisma.user.delete({
+          where: { id }
+        });
       });
+
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof UnprocessableEntityException) {
+      this.logger.error(`Failed to delete user ${id}:`, error);
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException) {
         throw error;
       }
       throw new InternalServerErrorException(`Failed to delete user ${id}`);
