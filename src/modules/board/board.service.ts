@@ -143,6 +143,7 @@ export class BoardService {
 
   async remove(id: number) {
     try {
+      // First check if board exists
       const board = await this.prisma.board.findUnique({
         where: { id }
       });
@@ -151,20 +152,67 @@ export class BoardService {
         throw new NotFoundException(`Board with ID ${id} not found`);
       }
 
-      // Check for associated records
+      // Check for associated schools
       const schoolCount = await this.prisma.school.count({
         where: { board_id: id }
       });
 
       if (schoolCount > 0) {
-        throw new ConflictException('Cannot delete board with associated schools');
+        throw new ConflictException(
+          `Cannot delete board as it is associated with ${schoolCount} school${schoolCount > 1 ? 's' : ''}`
+        );
       }
 
-      return await this.prisma.board.delete({
-        where: { id }
+      // Start transaction for cascading delete
+      await this.prisma.$transaction(async (prisma) => {
+        // Delete all medium_standard_subjects related to this board's components
+        await prisma.medium_Standard_Subject.deleteMany({
+          where: {
+            OR: [
+              {
+                instruction_medium: {
+                  board_id: id
+                }
+              },
+              {
+                standard: {
+                  board_id: id
+                }
+              },
+              {
+                subject: {
+                  board_id: id
+                }
+              }
+            ]
+          }
+        });
+
+        // Delete instruction mediums
+        await prisma.instruction_Medium.deleteMany({
+          where: { board_id: id }
+        });
+
+        // Delete standards
+        await prisma.standard.deleteMany({
+          where: { board_id: id }
+        });
+
+        // Delete subjects
+        await prisma.subject.deleteMany({
+          where: { board_id: id }
+        });
+
+        // Finally delete the board
+        await prisma.board.delete({
+          where: { id }
+        });
       });
+
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ConflictException) {
+      this.logger.error(`Failed to delete board ${id}:`, error);
+      if (error instanceof NotFoundException || 
+          error instanceof ConflictException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete board');

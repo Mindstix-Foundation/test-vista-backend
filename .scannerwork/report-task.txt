@@ -2,5 +2,5 @@ projectKey=Test_Vista
 serverUrl=http://localhost:9000
 serverVersion=25.2.0.102705
 dashboardUrl=http://localhost:9000/dashboard?id=Test_Vista
-ceTaskId=6cec3d66-c654-4553-a7e3-8cba3155256e
-ceTaskUrl=http://localhost:9000/api/ce/task?id=6cec3d66-c654-4553-a7e3-8cba3155256e
+ceTaskId=dd494fc6-8e7c-410f-b0d3-b61ca8a333a4
+ceTaskUrl=http://localhost:9000/api/ce/task?id=dd494fc6-8e7c-410f-b0d3-b61ca8a333a4
