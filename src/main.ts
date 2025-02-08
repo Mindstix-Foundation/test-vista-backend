@@ -1,5 +1,7 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger} from '@nestjs/common';
+import { ValidationPipe, Logger
+  
+} from '@nestjs/common';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -8,8 +10,12 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
   
-  // Enable CORS
-  app.enableCors();
+  // CORS configuration with your EC2 IP
+  app.enableCors({
+    origin: ['http://16.170.201.149:5173', 'http://localhost:5173'],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+  });
   
   // Global exception filter with logger
   app.useGlobalFilters(new AllExceptionsFilter());

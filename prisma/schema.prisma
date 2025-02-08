@@ -164,7 +164,7 @@ model User {
   user_schools          User_School[]
   teacher_subjects      Teacher_Subject[]
 
-  @@map("users") // This ensures the table name is lowercase
+  @@map("user")
 }
 
 model Role {
