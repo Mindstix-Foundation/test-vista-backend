@@ -18,6 +18,7 @@ import { UserRoleModule } from './modules/user_role/user-role.module';
 import { UserSchoolModule } from './modules/user_school/user-school.module';
 import { MediumStandardSubjectModule } from './modules/medium_standard_subject/medium-standard-subject.module';
 import { TeacherSubjectModule } from './modules/teacher_subject/teacher-subject.module';
+import { BoardManagementModule } from './modules/board-management/board-management.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { TeacherSubjectModule } from './modules/teacher_subject/teacher-subject.
     UserSchoolModule,
     MediumStandardSubjectModule,
     TeacherSubjectModule,
+    BoardManagementModule,
   ],
   controllers: [AppController],
   providers: [AppService],
