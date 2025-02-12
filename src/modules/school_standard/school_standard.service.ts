@@ -47,9 +47,12 @@ export class SchoolStandardService {
     }
   }
 
-  async findAll() {
+  async findAll(standardId?: number) {
     try {
       return await this.prisma.school_Standard.findMany({
+        where: standardId ? { 
+          standard_id: standardId 
+        } : undefined,
         include: {
           school: true,
           standard: true

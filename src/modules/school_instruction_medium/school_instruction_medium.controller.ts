@@ -1,7 +1,26 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, PipeTransform, Injectable, ArgumentMetadata, BadRequestException } from '@nestjs/common';
 import { SchoolInstructionMediumService } from './school_instruction_medium.service';
 import { CreateSchoolInstructionMediumDto } from './dto/school-instruction-medium.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+
+@Injectable()
+class OptionalParseIntPipe implements PipeTransform<string | undefined, number | undefined> {
+  transform(value: string | undefined, metadata: ArgumentMetadata): number | undefined {
+    if (!value) return undefined;
+    
+    // Handle case when value is already a number
+    if (typeof value === 'number') return value;
+    
+    // Handle string case
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    
+    const val = parseInt(value as string);
+    if (isNaN(val)) {
+      throw new BadRequestException('Validation failed (numeric string is expected)');
+    }
+    return val;
+  }
+}
 
 @ApiTags('school-instruction-mediums')
 @Controller('school-instruction-mediums')
@@ -17,8 +36,11 @@ export class SchoolInstructionMediumController {
 
   @Get()
   @ApiOperation({ summary: 'Get all school instruction medium mappings' })
-  async findAll() {
-    return await this.service.findAll();
+  @ApiQuery({ name: 'instructionMediumId', required: false, type: Number })
+  async findAll(
+    @Query('instructionMediumId', new OptionalParseIntPipe()) instructionMediumId?: number
+  ) {
+    return await this.service.findAll(instructionMediumId);
   }
 
   @Get('school/:schoolId')

@@ -1,7 +1,26 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, BadRequestException, ArgumentMetadata, Injectable, PipeTransform } from '@nestjs/common';
 import { SchoolStandardService } from './school_standard.service';
 import { CreateSchoolStandardDto, SchoolStandardDto } from './dto/school-standard.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+
+@Injectable()
+class OptionalParseIntPipe implements PipeTransform<string | undefined, number | undefined> {
+  transform(value: string | undefined, metadata: ArgumentMetadata): number | undefined {
+    if (!value) return undefined;
+    
+    // Handle case when value is already a number
+    if (typeof value === 'number') return value;
+    
+    // Handle string case
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    
+    const val = parseInt(value as string);
+    if (isNaN(val)) {
+      throw new BadRequestException('Validation failed (numeric string is expected)');
+    }
+    return val;
+  }
+}
 
 @ApiTags('school-standards')
 @Controller('school-standards')
@@ -19,9 +38,12 @@ export class SchoolStandardController {
 
   @Get()
   @ApiOperation({ summary: 'Get all school standard mappings' })
+  @ApiQuery({ name: 'standardId', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'List of all school standard mappings', type: [SchoolStandardDto] })
-  async findAll() {
-    return await this.service.findAll();
+  async findAll(
+    @Query('standardId', new OptionalParseIntPipe()) standardId?: number
+  ) {
+    return await this.service.findAll(standardId);
   }
 
   @Get('school/:schoolId')

@@ -47,9 +47,12 @@ export class SchoolInstructionMediumService {
     }
   }
 
-  async findAll() {
+  async findAll(instructionMediumId?: number) {
     try {
       return await this.prisma.school_Instruction_Medium.findMany({
+        where: instructionMediumId ? { 
+          instruction_medium_id: instructionMediumId 
+        } : undefined,
         include: {
           school: true,
           instruction_medium: true
