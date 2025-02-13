@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, BadRequestException, ArgumentMetadata, Injectable, PipeTransform } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, BadRequestException, ArgumentMetadata, Injectable, PipeTransform, ParseBoolPipe } from '@nestjs/common';
 import { SchoolStandardService } from './school_standard.service';
 import { CreateSchoolStandardDto, SchoolStandardDto } from './dto/school-standard.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
@@ -39,19 +39,25 @@ export class SchoolStandardController {
   @Get()
   @ApiOperation({ summary: 'Get all school standard mappings' })
   @ApiQuery({ name: 'standardId', required: false, type: Number })
+  @ApiQuery({ name: 'hasSyllabus', required: false, type: Boolean })
   @ApiResponse({ status: HttpStatus.OK, description: 'List of all school standard mappings', type: [SchoolStandardDto] })
   async findAll(
-    @Query('standardId', new OptionalParseIntPipe()) standardId?: number
+    @Query('standardId', new OptionalParseIntPipe()) standardId?: number,
+    @Query('hasSyllabus', new ParseBoolPipe({ optional: true })) hasSyllabus?: boolean
   ) {
-    return await this.service.findAll(standardId);
+    return await this.service.findAll(standardId, hasSyllabus);
   }
 
   @Get('school/:schoolId')
   @ApiOperation({ summary: 'Get standards for a specific school' })
+  @ApiQuery({ name: 'hasSyllabus', required: false, type: Boolean })
   @ApiResponse({ status: HttpStatus.OK, description: 'List of standards for the school', type: [SchoolStandardDto] })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found' })
-  async findBySchool(@Param('schoolId', ParseIntPipe) schoolId: number) {
-    return await this.service.findBySchool(schoolId);
+  async findBySchool(
+    @Param('schoolId', ParseIntPipe) schoolId: number,
+    @Query('hasSyllabus', new ParseBoolPipe({ optional: true })) hasSyllabus?: boolean
+  ) {
+    return await this.service.findBySchool(schoolId, hasSyllabus);
   }
 
   @Delete(':id')

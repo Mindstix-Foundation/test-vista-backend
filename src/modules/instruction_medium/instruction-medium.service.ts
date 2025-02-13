@@ -138,35 +138,44 @@ export class InstructionMediumService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if instruction medium exists
+      // Check if the instruction medium exists
       const instructionMedium = await this.findOne(id);
+
+      const messages: string[] = []; // Array to collect messages
 
       // Check if it's being used in any school
       const schoolCount = await this.prisma.school_Instruction_Medium.count({
         where: { instruction_medium_id: id }
       });
 
-      if (schoolCount > 0) {
-        throw new BadRequestException('Cannot delete instruction medium as it is associated with schools');
-      }
-
-      // Check if it's being used in any medium_standard_subject
+      // Check if it's being used in any medium standard subject
       const mssCount = await this.prisma.medium_Standard_Subject.count({
         where: { instruction_medium_id: id }
       });
 
-      if (mssCount > 0) {
-        throw new BadRequestException('Cannot delete instruction medium as it is associated with subjects');
+      // Construct messages based on counts
+      if (schoolCount > 0 && mssCount > 0) {
+        messages.push(`Cannot delete instruction medium as it is associated with ${schoolCount} school${schoolCount > 1 ? 's' : ''} and ${mssCount} syllabus${mssCount > 1 ? 'es' : ''}.`);
+      } else if (schoolCount > 0) {
+        messages.push(`Cannot delete instruction medium as it is associated with ${schoolCount} school${schoolCount > 1 ? 's' : ''}.`);
+      } else if (mssCount > 0) {
+        messages.push(`Cannot delete instruction medium as it is associated with ${mssCount} syllabus${mssCount > 1 ? 'es' : ''}.`);
       }
 
+      // If there are any messages, throw a combined exception
+      if (messages.length > 0) {
+        throw new ConflictException(messages.join(' '));
+      }
+
+      // Proceed to delete the instruction medium
       await this.prisma.instruction_Medium.delete({
         where: { id }
       });
     } catch (error) {
       this.logger.error(`Failed to delete instruction medium ${id}:`, error);
       if (error instanceof NotFoundException || 
-          error instanceof BadRequestException) {
-        throw error;
+          error instanceof ConflictException) {
+        throw error; // Rethrow known exceptions
       }
       throw new InternalServerErrorException('Failed to delete instruction medium');
     }

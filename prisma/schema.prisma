@@ -212,6 +212,8 @@ model Medium_Standard_Subject {
   teacher_subjects Teacher_Subject[]
 
   @@unique([instruction_medium_id, standard_id, subject_id])
+
+  chapters Chapter[]
 }
 
 model Teacher_Subject {
@@ -226,4 +228,26 @@ model Teacher_Subject {
   updated_at                 DateTime                @updatedAt @db.Timestamptz()
 
   @@unique([user_id, school_standard_id, medium_standard_subject_id])
+}
+
+model Chapter {
+  id                         Int                     @id @default(autoincrement())
+  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id])
+  medium_standard_subject_id Int
+  sequential_chapter_number  Int
+  name                      String
+  created_at                DateTime                @default(now()) @db.Timestamptz()
+  updated_at                DateTime                @updatedAt @db.Timestamptz()
+  
+  topics                    Topic[]                  // One Chapter can have many Topics
+}
+
+model Topic {
+  id                    Int      @id @default(autoincrement())
+  chapter              Chapter   @relation(fields: [chapter_id], references: [id])
+  chapter_id           Int
+  sequential_topic_number Int
+  name                 String
+  created_at           DateTime  @default(now()) @db.Timestamptz()
+  updated_at           DateTime  @updatedAt @db.Timestamptz()
 }

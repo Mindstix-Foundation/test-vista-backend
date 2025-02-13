@@ -134,14 +134,44 @@ export class StandardService {
 
   async remove(id: number): Promise<void> {
     try {
-      await this.findOne(id);
+      // Check if the standard exists
+      const standard = await this.findOne(id);
+
+      const messages: string[] = []; // Array to collect messages
+
+      // Check for related school standards
+      const schoolStandardCount = await this.prisma.school_Standard.count({
+        where: { standard_id: id }
+      });
+
+      // Check for related medium standard subjects
+      const mediumStandardSubjectCount = await this.prisma.medium_Standard_Subject.count({
+        where: { standard_id: id }
+      });
+
+      // Construct messages based on counts
+      if (schoolStandardCount > 0 && mediumStandardSubjectCount > 0) {
+        messages.push(`Cannot delete standard as it is associated with ${schoolStandardCount} school${schoolStandardCount > 1 ? 's' : ''} and ${mediumStandardSubjectCount} syllabus${mediumStandardSubjectCount > 1 ? 'es' : ''}.`);
+      } else if (schoolStandardCount > 0) {
+        messages.push(`Cannot delete standard as it is associated with ${schoolStandardCount} school${schoolStandardCount > 1 ? 's' : ''}.`);
+      } else if (mediumStandardSubjectCount > 0) {
+        messages.push(`Cannot delete standard as it is associated with ${mediumStandardSubjectCount} syllabus${mediumStandardSubjectCount > 1 ? 'es' : ''}.`);
+      }
+
+      // If there are any messages, throw a combined exception
+      if (messages.length > 0) {
+        throw new ConflictException(messages.join(' '));
+      }
+
+      // Proceed to delete the standard
       await this.prisma.standard.delete({
         where: { id }
       });
     } catch (error) {
       this.logger.error(`Failed to delete standard ${id}:`, error);
-      if (error instanceof NotFoundException) {
-        throw error;
+      if (error instanceof NotFoundException || 
+          error instanceof ConflictException) {
+        throw error; // Rethrow known exceptions
       }
       throw new InternalServerErrorException('Failed to delete standard');
     }

@@ -138,14 +138,34 @@ export class SubjectService {
 
   async remove(id: number): Promise<void> {
     try {
-      await this.findOne(id);
+      // Check if the subject exists
+      const subject = await this.findOne(id);
+
+      const messages: string[] = []; // Array to collect messages
+
+      // Check for related medium standard subjects
+      const mediumStandardSubjectCount = await this.prisma.medium_Standard_Subject.count({
+        where: { subject_id: id }
+      });
+
+      if (mediumStandardSubjectCount > 0) {
+        messages.push(`Cannot delete subject as it is associated with ${mediumStandardSubjectCount} syllabus${mediumStandardSubjectCount > 1 ? 'es' : ''}.`);
+      }
+
+      // If there are any messages, throw a combined exception
+      if (messages.length > 0) {
+        throw new ConflictException(messages.join(' '));
+      }
+
+      // Proceed to delete the subject
       await this.prisma.subject.delete({
         where: { id }
       });
     } catch (error) {
       this.logger.error(`Failed to delete subject ${id}:`, error);
-      if (error instanceof NotFoundException) {
-        throw error;
+      if (error instanceof NotFoundException || 
+          error instanceof ConflictException) {
+        throw error; // Rethrow known exceptions
       }
       throw new InternalServerErrorException('Failed to delete subject');
     }

@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolStandardDto } from './dto/school-standard.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class SchoolStandardService {
@@ -47,15 +48,34 @@ export class SchoolStandardService {
     }
   }
 
-  async findAll(standardId?: number) {
+  async findAll(standardId?: number, hasSyllabus?: boolean) {
     try {
+      const where: any = {};
+      
+      // Add standard ID filter if provided
+      if (standardId) {
+        where.standard_id = standardId;
+      }
+
+      // Add syllabus filter if requested
+      if (hasSyllabus !== undefined) {
+        where.standard = {
+          Medium_Standard_Subject: {
+            some: hasSyllabus ? {} : undefined,
+            none: !hasSyllabus ? {} : undefined,
+          }
+        };
+      }
+
       return await this.prisma.school_Standard.findMany({
-        where: standardId ? { 
-          standard_id: standardId 
-        } : undefined,
+        where,
         include: {
           school: true,
-          standard: true
+          standard: {
+            include: {
+              Medium_Standard_Subject: true
+            }
+          }
         }
       });
     } catch (error) {
@@ -64,7 +84,7 @@ export class SchoolStandardService {
     }
   }
 
-  async findBySchool(schoolId: number) {
+  async findBySchool(schoolId: number, hasSyllabus?: boolean) {
     try {
       const school = await this.prisma.school.findUnique({
         where: { id: schoolId }
@@ -74,10 +94,26 @@ export class SchoolStandardService {
         throw new NotFoundException(`School with ID ${schoolId} not found`);
       }
 
+      const where: any = { school_id: schoolId };
+
+      // Add syllabus filter if requested
+      if (hasSyllabus !== undefined) {
+        where.standard = {
+          Medium_Standard_Subject: {
+            some: hasSyllabus ? {} : undefined,
+            none: !hasSyllabus ? {} : undefined,
+          }
+        };
+      }
+
       return await this.prisma.school_Standard.findMany({
-        where: { school_id: schoolId },
+        where,
         include: {
-          standard: true
+          standard: {
+            include: {
+              Medium_Standard_Subject: true
+            }
+          }
         }
       });
     } catch (error) {
@@ -91,23 +127,61 @@ export class SchoolStandardService {
 
   async remove(id: number): Promise<void> {
     try {
-      const schoolStandard = await this.prisma.school_Standard.findUnique({
-        where: { id }
+      // Check if the standard exists
+      const standard = await this.findOne(id);
+
+      const messages: string[] = [];
+
+      // Get all teacher records for this standard
+      const teachers = await this.prisma.teacher_Subject.findMany({
+        where: {
+          school_standard_id: id
+        },
+        select: {
+          user_id: true
+        }
       });
 
-      if (!schoolStandard) {
-        throw new NotFoundException(`School standard with ID ${id} not found`);
+      // Count unique teachers using Set
+      const uniqueTeachers = new Set(teachers.map(t => t.user_id));
+      const teacherCount = uniqueTeachers.size;
+
+      // Construct messages based on counts
+      if (teacherCount > 0) {
+        messages.push(`Cannot remove standard as it is associated with ${teacherCount} teacher${teacherCount > 1 ? 's' : ''}.`);
       }
 
-      await this.prisma.school_Standard.delete({
+      // If there are any messages, throw a combined exception
+      if (messages.length > 0) {
+        throw new ConflictException(messages.join(' '));
+      }
+
+      // Proceed to delete the standard
+      await this.prisma.standard.delete({
         where: { id }
       });
     } catch (error) {
-      this.logger.error(`Failed to delete school standard ${id}:`, error);
-      if (error instanceof NotFoundException) {
+      this.logger.error(`Failed to delete standard ${id}:`, error);
+      if (error instanceof NotFoundException || 
+          error instanceof ConflictException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to delete school standard');
+      throw new InternalServerErrorException('Failed to delete standard');
     }
+  }
+
+  async findOne(id: number) {
+    const standard = await this.prisma.standard.findUnique({
+      where: { id },
+      include: {
+        board: true
+      },
+    });
+
+    if (!standard) {
+      throw new NotFoundException(`Standard with ID ${id} not found`);
+    }
+
+    return standard;
   }
 }

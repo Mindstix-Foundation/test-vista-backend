@@ -91,21 +91,70 @@ export class SchoolInstructionMediumService {
 
   async remove(id: number): Promise<void> {
     try {
+      // Check if the school instruction medium exists
       const schoolInstructionMedium = await this.prisma.school_Instruction_Medium.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          instruction_medium: true,
+          school: true
+        }
       });
 
       if (!schoolInstructionMedium) {
         throw new NotFoundException(`School instruction medium with ID ${id} not found`);
       }
 
+      const messages: string[] = []; // Array to collect messages
+
+      // Find the instruction medium ID
+      const instructionMediumId = schoolInstructionMedium.instruction_medium_id;
+
+      // Find all related medium standard subjects
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
+        where: { instruction_medium_id: instructionMediumId }
+      });
+      
+      // Get unique teacher IDs associated with the medium standard subjects
+      const teacherIds = new Set<number>(); // Use a Set to avoid duplicates
+
+      for (const subject of mediumStandardSubjects) {
+        const teachers = await this.prisma.teacher_Subject.findMany({
+          where: { medium_standard_subject_id: subject.id },
+          include: {
+            school_standard: true
+          }
+        });
+
+        teachers.forEach(teacher => {
+          // Check if the teacher's school matches the school of the instruction medium
+          if (teacher.school_standard.school_id === schoolInstructionMedium.school_id) {
+            teacherIds.add(teacher.user_id); // Add unique teacher ID
+          }
+        });
+      }
+
+      // Count unique teachers
+      const teacherCount = teacherIds.size;
+
+      // Construct messages based on counts
+      if (teacherCount > 0) {
+        messages.push(`Cannot remove instruction medium as it is associated with ${teacherCount} teacher${teacherCount > 1 ? 's' : ''}.`);
+      }
+
+      // If there are any messages, throw a combined exception
+      if (messages.length > 0) {
+        throw new ConflictException(messages.join(' '));
+      }
+
+      // Proceed to delete the school instruction medium
       await this.prisma.school_Instruction_Medium.delete({
         where: { id }
       });
     } catch (error) {
       this.logger.error(`Failed to delete school instruction medium ${id}:`, error);
-      if (error instanceof NotFoundException) {
-        throw error;
+      if (error instanceof NotFoundException || 
+          error instanceof ConflictException) {
+        throw error; // Rethrow known exceptions
       }
       throw new InternalServerErrorException('Failed to delete school instruction medium');
     }
