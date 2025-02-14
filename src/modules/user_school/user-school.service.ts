@@ -125,12 +125,18 @@ export class UserSchoolService {
       }
 
       return await this.prisma.user_School.findMany({
-        where: { user_id: userId },
+        where: { 
+          user_id: userId,
+          end_date: null
+        },
         select: this.userSchoolSelect
       });
     } catch (error) {
       this.logger.error(`Failed to fetch schools for user ${userId}:`, error);
-      throw error;
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to fetch user schools');
     }
   }
 
