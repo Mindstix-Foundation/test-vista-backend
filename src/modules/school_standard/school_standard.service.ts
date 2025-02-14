@@ -127,10 +127,14 @@ export class SchoolStandardService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the standard exists
-      const standard = await this.findOne(id);
+      // Check if the school standard exists
+      const schoolStandard = await this.prisma.school_Standard.findUnique({
+        where: { id }
+      });
 
-      const messages: string[] = [];
+      if (!schoolStandard) {
+        throw new NotFoundException(`School standard with ID ${id} not found`);
+      }
 
       // Get all teacher records for this standard
       const teachers = await this.prisma.teacher_Subject.findMany({
@@ -148,20 +152,15 @@ export class SchoolStandardService {
 
       // Construct messages based on counts
       if (teacherCount > 0) {
-        messages.push(`Cannot remove standard as it is associated with ${teacherCount} teacher${teacherCount > 1 ? 's' : ''}.`);
+        throw new ConflictException(`Cannot remove standard as it is associated with ${teacherCount} teacher${teacherCount > 1 ? 's' : ''}.`);
       }
 
-      // If there are any messages, throw a combined exception
-      if (messages.length > 0) {
-        throw new ConflictException(messages.join(' '));
-      }
-
-      // Proceed to delete the standard
-      await this.prisma.standard.delete({
+      // Proceed to delete the school_Standard
+      await this.prisma.school_Standard.delete({
         where: { id }
       });
     } catch (error) {
-      this.logger.error(`Failed to delete standard ${id}:`, error);
+      this.logger.error(`Failed to delete school standard ${id}:`, error);
       if (error instanceof NotFoundException || 
           error instanceof ConflictException) {
         throw error;
