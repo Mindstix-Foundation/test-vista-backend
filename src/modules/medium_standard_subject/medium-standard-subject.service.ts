@@ -255,4 +255,25 @@ export class MediumStandardSubjectService {
       throw error;
     }
   }
+
+  async findOne(id: number) {
+    try {
+      const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
+        where: { id },
+        select: this.mssSelect
+      });
+
+      if (!mediumStandardSubject) {
+        throw new NotFoundException(`Medium standard subject with ID ${id} not found`);
+      }
+
+      return mediumStandardSubject;
+    } catch (error) {
+      this.logger.error(`Failed to fetch medium standard subject ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to fetch medium standard subject');
+    }
+  }
 } 

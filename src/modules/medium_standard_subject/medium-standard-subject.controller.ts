@@ -50,4 +50,12 @@ export class MediumStandardSubjectController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.mssService.remove(id);
   }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get medium standard subject by ID' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns the medium standard subject' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium standard subject not found' })
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    return await this.mssService.findOne(id);
+  }
 } 
