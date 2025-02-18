@@ -53,12 +53,18 @@ export class TopicService {
     }
   }
 
-  async findAll() {
+  async findAll(chapterId?: number) {
     try {
       return await this.prisma.topic.findMany({
+        where: chapterId ? {
+          chapter_id: chapterId
+        } : undefined,
         include: {
-          chapter: true,
+          chapter: true
         },
+        orderBy: {
+          sequential_topic_number: 'asc'
+        }
       });
     } catch (error) {
       this.logger.error('Failed to fetch topics:', error);
@@ -155,6 +161,72 @@ export class TopicService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete topic');
+    }
+  }
+
+  async reorderTopic(chapterId: number, topicId: number, newSequenceNumber: number) {
+    try {
+      await this.prisma.$transaction(async (prisma) => {
+        // Fetch all topics in the chapter ordered by their sequence number
+        const topics = await prisma.topic.findMany({
+          where: { chapter_id: chapterId },
+          orderBy: { sequential_topic_number: 'asc' },
+        });
+
+        // Find the topic to be moved
+        const topicToMove = topics.find(topic => topic.id === topicId);
+        if (!topicToMove) {
+          throw new NotFoundException('Topic not found');
+        }
+
+        const currentSequenceNumber = topicToMove.sequential_topic_number;
+
+        // Determine the direction of the shift
+        if (newSequenceNumber < currentSequenceNumber) {
+          // Shift topics down
+          await prisma.topic.updateMany({
+            where: {
+              chapter_id: chapterId,
+              sequential_topic_number: {
+                gte: newSequenceNumber,
+                lt: currentSequenceNumber,
+              },
+            },
+            data: {
+              sequential_topic_number: {
+                increment: 1,
+              },
+            },
+          });
+        } else if (newSequenceNumber > currentSequenceNumber) {
+          // Shift topics up
+          await prisma.topic.updateMany({
+            where: {
+              chapter_id: chapterId,
+              sequential_topic_number: {
+                gt: currentSequenceNumber,
+                lte: newSequenceNumber,
+              },
+            },
+            data: {
+              sequential_topic_number: {
+                decrement: 1,
+              },
+            },
+          });
+        }
+
+        // Update the sequence number of the topic to be moved
+        await prisma.topic.update({
+          where: { id: topicId },
+          data: { sequential_topic_number: newSequenceNumber },
+        });
+      });
+
+      return { message: 'Topic reordered successfully' };
+    } catch (error) {
+      this.logger.error('Failed to reorder topic:', error);
+      throw new InternalServerErrorException('Failed to reorder topic');
     }
   }
 } 

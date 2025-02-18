@@ -54,13 +54,25 @@ export class ChapterService {
     }
   }
 
-  async findAll() {
+  async findAll(mediumStandardSubjectId?: number) {
     try {
+      const where = mediumStandardSubjectId 
+        ? { medium_standard_subject_id: mediumStandardSubjectId }
+        : {};
+
       return await this.prisma.chapter.findMany({
+        where,
         include: {
           medium_standard_subject: true,
-          topics: true,
+          topics: {
+            orderBy: {
+              sequential_topic_number: 'asc'
+            }
+          },
         },
+        orderBy: {
+          sequential_chapter_number: 'asc'
+        }
       });
     } catch (error) {
       this.logger.error('Failed to fetch chapters:', error);
@@ -159,6 +171,75 @@ export class ChapterService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete chapter');
+    }
+  }
+
+  async reorderChapter(mediumStandardSubjectId: number, chapterId: number, newSequenceNumber: number) {
+    try {
+      await this.prisma.$transaction(async (prisma) => {
+        // Fetch all chapters in the medium_standard_subject ordered by their sequence number
+        const chapters = await prisma.chapter.findMany({
+          where: { medium_standard_subject_id: mediumStandardSubjectId },
+          orderBy: { sequential_chapter_number: 'asc' },
+        });
+
+        // Find the chapter to be moved
+        const chapterToMove = chapters.find(chapter => chapter.id === chapterId);
+        if (!chapterToMove) {
+          throw new NotFoundException('Chapter not found');
+        }
+
+        const currentSequenceNumber = chapterToMove.sequential_chapter_number;
+
+        // Determine the direction of the shift
+        if (newSequenceNumber < currentSequenceNumber) {
+          // Shift chapters down
+          await prisma.chapter.updateMany({
+            where: {
+              medium_standard_subject_id: mediumStandardSubjectId,
+              sequential_chapter_number: {
+                gte: newSequenceNumber,
+                lt: currentSequenceNumber,
+              },
+            },
+            data: {
+              sequential_chapter_number: {
+                increment: 1,
+              },
+            },
+          });
+        } else if (newSequenceNumber > currentSequenceNumber) {
+          // Shift chapters up
+          await prisma.chapter.updateMany({
+            where: {
+              medium_standard_subject_id: mediumStandardSubjectId,
+              sequential_chapter_number: {
+                gt: currentSequenceNumber,
+                lte: newSequenceNumber,
+              },
+            },
+            data: {
+              sequential_chapter_number: {
+                decrement: 1,
+              },
+            },
+          });
+        }
+
+        // Update the sequence number of the chapter to be moved
+        await prisma.chapter.update({
+          where: { id: chapterId },
+          data: { sequential_chapter_number: newSequenceNumber },
+        });
+      });
+
+      return { message: 'Chapter reordered successfully' };
+    } catch (error) {
+      this.logger.error('Failed to reorder chapter:', error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to reorder chapter');
     }
   }
 } 

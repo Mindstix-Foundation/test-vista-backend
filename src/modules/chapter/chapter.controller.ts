@@ -9,11 +9,12 @@ import {
   ParseIntPipe,
   HttpStatus,
   HttpCode,
+  Query,
 } from '@nestjs/common';
 import { ChapterService } from './chapter.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('chapters')
 @Controller('chapters')
@@ -32,8 +33,14 @@ export class ChapterController {
   @Get()
   @ApiOperation({ summary: 'Get all chapters' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all chapters' })
-  findAll() {
-    return this.chapterService.findAll();
+  @ApiQuery({
+    name: 'mediumStandardSubjectId',
+    required: false,
+    type: Number,
+    description: 'Filter chapters by medium standard subject ID'
+  })
+  findAll(@Query('mediumStandardSubjectId', new ParseIntPipe({ optional: true })) mediumStandardSubjectId?: number) {
+    return this.chapterService.findAll(mediumStandardSubjectId);
   }
 
   @Get(':id')
@@ -59,5 +66,21 @@ export class ChapterController {
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.chapterService.remove(id);
+  }
+
+  @Put('reorder/:mediumStandardSubjectId/:chapterId')
+  @ApiOperation({ summary: 'Reorder a chapter within a medium standard subject' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Chapter reordered successfully' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found or does not belong to the medium standard subject' })
+  async reorder(
+    @Param('mediumStandardSubjectId', ParseIntPipe) mediumStandardSubjectId: number,
+    @Param('chapterId', ParseIntPipe) chapterId: number,
+    @Body() data: { sequential_chapter_number: number }
+  ) {
+    return await this.chapterService.reorderChapter(
+      mediumStandardSubjectId,
+      chapterId,
+      data.sequential_chapter_number
+    );
   }
 } 

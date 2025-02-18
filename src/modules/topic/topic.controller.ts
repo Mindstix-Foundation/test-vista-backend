@@ -9,11 +9,12 @@ import {
   ParseIntPipe,
   HttpStatus,
   HttpCode,
+  Query,
 } from '@nestjs/common';
 import { TopicService } from './topic.service';
 import { CreateTopicDto } from './dto/create-topic.dto';
 import { UpdateTopicDto } from './dto/update-topic.dto';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('topics')
 @Controller('topics')
@@ -32,8 +33,9 @@ export class TopicController {
   @Get()
   @ApiOperation({ summary: 'Get all topics' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all topics' })
-  findAll() {
-    return this.topicService.findAll();
+  @ApiQuery({ name: 'chapterId', required: false, type: Number })
+  findAll(@Query('chapterId') chapterId?: string) {
+    return this.topicService.findAll(chapterId ? +chapterId : undefined);
   }
 
   @Get(':id')
@@ -59,5 +61,17 @@ export class TopicController {
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Topic not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.topicService.remove(id);
+  }
+
+  @Put('reorder/:chapterId/:topicId')
+  @ApiOperation({ summary: 'Reorder a topic within a chapter' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Topic reordered successfully' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Topic not found or does not belong to the chapter' })
+  async reorder(
+    @Param('chapterId', ParseIntPipe) chapterId: number,
+    @Param('topicId', ParseIntPipe) topicId: number,
+    @Body() data: { sequential_topic_number: number }
+  ) {
+    return await this.topicService.reorderTopic(chapterId, topicId, data.sequential_topic_number);
   }
 } 
