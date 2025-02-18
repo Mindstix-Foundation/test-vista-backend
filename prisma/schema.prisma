@@ -239,7 +239,9 @@ model Chapter {
   created_at                DateTime                @default(now()) @db.Timestamptz()
   updated_at                DateTime                @updatedAt @db.Timestamptz()
   
-  topics                    Topic[]                  // One Chapter can have many Topics
+  topics                    Topic[]
+
+  @@unique([medium_standard_subject_id, sequential_chapter_number])
 }
 
 model Topic {
@@ -250,4 +252,6 @@ model Topic {
   name                 String
   created_at           DateTime  @default(now()) @db.Timestamptz()
   updated_at           DateTime  @updatedAt @db.Timestamptz()
+
+  @@unique([chapter_id, sequential_topic_number])
 }

@@ -19,6 +19,8 @@ import { UserSchoolModule } from './modules/user_school/user-school.module';
 import { MediumStandardSubjectModule } from './modules/medium_standard_subject/medium-standard-subject.module';
 import { TeacherSubjectModule } from './modules/teacher_subject/teacher-subject.module';
 import { BoardManagementModule } from './modules/board-management/board-management.module';
+import { ChapterModule } from './modules/chapter/chapter.module';
+import { TopicModule } from './modules/topic/topic.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { BoardManagementModule } from './modules/board-management/board-manageme
     MediumStandardSubjectModule,
     TeacherSubjectModule,
     BoardManagementModule,
+    ChapterModule,
+    TopicModule,
   ],
   controllers: [AppController],
   providers: [AppService],
