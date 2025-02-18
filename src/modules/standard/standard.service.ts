@@ -134,44 +134,66 @@ export class StandardService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the standard exists
-      const standard = await this.findOne(id);
-
-      const messages: string[] = []; // Array to collect messages
-
-      // Check for related school standards
-      const schoolStandardCount = await this.prisma.school_Standard.count({
-        where: { standard_id: id }
+      // Check if standard exists with its relationships
+      const standard = await this.prisma.standard.findUnique({
+        where: { id },
+        include: {
+          board: true,
+          School_Standard: {
+            include: {
+              Teacher_Subject: true,
+              school: true
+            }
+          },
+          Medium_Standard_Subject: {
+            include: {
+              chapters: {
+                include: {
+                  topics: true
+                }
+              }
+            }
+          }
+        }
       });
 
-      // Check for related medium standard subjects
-      const mediumStandardSubjectCount = await this.prisma.medium_Standard_Subject.count({
-        where: { standard_id: id }
-      });
-
-      // Construct messages based on counts
-      if (schoolStandardCount > 0 && mediumStandardSubjectCount > 0) {
-        messages.push(`Cannot delete standard as it is associated with ${schoolStandardCount} school${schoolStandardCount > 1 ? 's' : ''} and ${mediumStandardSubjectCount} syllabus${mediumStandardSubjectCount > 1 ? 'es' : ''}.`);
-      } else if (schoolStandardCount > 0) {
-        messages.push(`Cannot delete standard as it is associated with ${schoolStandardCount} school${schoolStandardCount > 1 ? 's' : ''}.`);
-      } else if (mediumStandardSubjectCount > 0) {
-        messages.push(`Cannot delete standard as it is associated with ${mediumStandardSubjectCount} syllabus${mediumStandardSubjectCount > 1 ? 'es' : ''}.`);
+      if (!standard) {
+        throw new NotFoundException(`Standard with ID ${id} not found`);
       }
 
-      // If there are any messages, throw a combined exception
-      if (messages.length > 0) {
-        throw new ConflictException(messages.join(' '));
-      }
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        schools: standard.School_Standard.length,
+        teachers: new Set(standard.School_Standard.flatMap(ss => 
+          ss.Teacher_Subject.map(ts => ts.user_id)
+        )).size,
+        mediumSubjects: standard.Medium_Standard_Subject.length,
+        chapters: standard.Medium_Standard_Subject.reduce((sum, mss) => 
+          sum + mss.chapters.length, 0),
+        topics: standard.Medium_Standard_Subject.reduce((sum, mss) => 
+          sum + mss.chapters.reduce((chapterSum, chapter) => 
+            chapterSum + chapter.topics.length, 0), 0)
+      };
 
-      // Proceed to delete the standard
+      // Log what will be deleted
+      this.logger.log(`Deleting standard ${id} (${standard.name}) from board ${standard.board.name} will also delete:
+        - ${relatedCounts.schools} school assignments
+        - ${relatedCounts.teachers} teacher assignments
+        - ${relatedCounts.mediumSubjects} medium-subject combinations
+        - ${relatedCounts.chapters} chapters
+        - ${relatedCounts.topics} topics
+        and all their related records`);
+
+      // Delete the standard - cascade will handle all related records
       await this.prisma.standard.delete({
         where: { id }
       });
+
+      this.logger.log(`Successfully deleted standard ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete standard ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
-        throw error; // Rethrow known exceptions
+      if (error instanceof NotFoundException) {
+        throw error;
       }
       throw new InternalServerErrorException('Failed to delete standard');
     }

@@ -36,11 +36,13 @@ export class UserRoleController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove role from user' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Role removed successfully' })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User role association not found' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Association not found' })
   async remove(
     @Param('userId', ParseIntPipe) userId: number,
     @Param('roleId', ParseIntPipe) roleId: number
   ) {
-    await this.userRoleService.remove(userId, roleId);
+    // Find the user role ID first
+    const userRole = await this.userRoleService.findByUserAndRole(userId, roleId);
+    await this.userRoleService.remove(userRole.id);
   }
 } 

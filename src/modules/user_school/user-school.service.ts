@@ -164,25 +164,68 @@ export class UserSchoolService {
     }
   }
 
-  async remove(userId: number, schoolId: number) {
+  async remove(id: number): Promise<void> {
     try {
-      const userSchool = await this.prisma.user_School.findFirst({
-        where: {
-          user_id: userId,
-          school_id: schoolId
+      // Check if user school exists with its relationships
+      const userSchool = await this.prisma.user_School.findUnique({
+        where: { id },
+        include: {
+          user: {
+            include: {
+              user_roles: {
+                include: {
+                  role: true
+                }
+              }
+            }
+          },
+          school: true
         }
       });
 
       if (!userSchool) {
-        throw new NotFoundException('User school association not found');
+        throw new NotFoundException(`User school association with ID ${id} not found`);
       }
 
+      // Get user roles for context
+      const userRoles = userSchool.user.user_roles.map(ur => ur.role.role_name).join(', ');
+
+      // Log what will be deleted
+      this.logger.log(`Deleting user school assignment ${id}:
+        - User: ${userSchool.user.name} (${userSchool.user.email_id})
+        - School: ${userSchool.school.name}
+        - User Roles: ${userRoles}
+        - Assignment Period: ${userSchool.start_date.toISOString().split('T')[0]} to ${
+          userSchool.end_date ? userSchool.end_date.toISOString().split('T')[0] : 'Present'
+        }`);
+
+      // Delete the user school - cascade will handle related records
       await this.prisma.user_School.delete({
-        where: { id: userSchool.id }
+        where: { id }
       });
+
+      this.logger.log(`Successfully deleted user school assignment ${id}`);
     } catch (error) {
-      this.logger.error(`Failed to delete user school:`, error);
-      throw error;
+      this.logger.error(`Failed to delete user school assignment ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to delete user school assignment');
     }
+  }
+
+  async findByUserAndSchool(userId: number, schoolId: number) {
+    const userSchool = await this.prisma.user_School.findFirst({
+      where: {
+        user_id: userId,
+        school_id: schoolId
+      }
+    });
+
+    if (!userSchool) {
+      throw new NotFoundException(`User school association not found for user ${userId} and school ${schoolId}`);
+    }
+
+    return userSchool;
   }
 } 

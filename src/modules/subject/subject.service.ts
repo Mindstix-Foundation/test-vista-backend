@@ -138,34 +138,65 @@ export class SubjectService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the subject exists
-      const subject = await this.findOne(id);
-
-      const messages: string[] = []; // Array to collect messages
-
-      // Check for related medium standard subjects
-      const mediumStandardSubjectCount = await this.prisma.medium_Standard_Subject.count({
-        where: { subject_id: id }
+      // Check if subject exists with its relationships
+      const subject = await this.prisma.subject.findUnique({
+        where: { id },
+        include: {
+          board: true,
+          Medium_Standard_Subject: {
+            include: {
+              instruction_medium: true,
+              standard: true,
+              chapters: {
+                include: {
+                  topics: true
+                }
+              },
+              teacher_subjects: {
+                include: {
+                  user: true
+                }
+              }
+            }
+          }
+        }
       });
 
-      if (mediumStandardSubjectCount > 0) {
-        messages.push(`Cannot delete subject as it is associated with ${mediumStandardSubjectCount} syllabus${mediumStandardSubjectCount > 1 ? 'es' : ''}.`);
+      if (!subject) {
+        throw new NotFoundException(`Subject with ID ${id} not found`);
       }
 
-      // If there are any messages, throw a combined exception
-      if (messages.length > 0) {
-        throw new ConflictException(messages.join(' '));
-      }
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        mediumStandards: subject.Medium_Standard_Subject.length,
+        teachers: new Set(subject.Medium_Standard_Subject.flatMap(mss => 
+          mss.teacher_subjects.map(ts => ts.user_id)
+        )).size,
+        chapters: subject.Medium_Standard_Subject.reduce((sum, mss) => 
+          sum + mss.chapters.length, 0),
+        topics: subject.Medium_Standard_Subject.reduce((sum, mss) => 
+          sum + mss.chapters.reduce((chapterSum, chapter) => 
+            chapterSum + chapter.topics.length, 0), 0)
+      };
 
-      // Proceed to delete the subject
+      // Log what will be deleted
+      this.logger.log(`Deleting subject ${id} (${subject.name}) from board ${subject.board.name} will also delete:
+        - ${relatedCounts.mediumStandards} medium-standard combinations
+        - ${relatedCounts.teachers} teacher assignments
+        - ${relatedCounts.chapters} chapters
+        - ${relatedCounts.topics} topics
+        and all their related records`);
+
+      // Delete the subject - cascade will handle all related records
       await this.prisma.subject.delete({
         where: { id }
       });
+
+      this.logger.log(`Successfully deleted subject ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete subject ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
-        throw error; // Rethrow known exceptions
+      if (error instanceof NotFoundException) {
+        throw error;
       }
       throw new InternalServerErrorException('Failed to delete subject');
     }

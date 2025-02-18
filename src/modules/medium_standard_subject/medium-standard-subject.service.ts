@@ -228,31 +228,51 @@ export class MediumStandardSubjectService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<void> {
     try {
-      const mss = await this.prisma.medium_Standard_Subject.findUnique({
-        where: { id }
+      // Check if medium standard subject exists with its relationships
+      const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
+        where: { id },
+        include: {
+          teacher_subjects: true,
+          chapters: {
+            include: {
+              topics: true
+            }
+          }
+        }
       });
 
-      if (!mss) {
+      if (!mediumStandardSubject) {
         throw new NotFoundException(`Medium standard subject with ID ${id} not found`);
       }
 
-      // Check for related teacher subjects
-      const hasTeacherSubjects = await this.prisma.teacher_Subject.count({
-        where: { medium_standard_subject_id: id }
-      });
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        teacherSubjects: mediumStandardSubject.teacher_subjects.length,
+        chapters: mediumStandardSubject.chapters.length,
+        topics: mediumStandardSubject.chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
+      };
 
-      if (hasTeacherSubjects) {
-        throw new ConflictException('Cannot delete as there are teachers assigned to this subject');
-      }
+      // Log what will be deleted
+      this.logger.log(`Deleting medium standard subject ${id} will also delete:
+        - ${relatedCounts.teacherSubjects} teacher subject assignments
+        - ${relatedCounts.chapters} chapters
+        - ${relatedCounts.topics} topics
+        and all their related records`);
 
+      // Delete the medium standard subject - cascade will handle all related records
       await this.prisma.medium_Standard_Subject.delete({
         where: { id }
       });
+
+      this.logger.log(`Successfully deleted medium standard subject ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete medium standard subject ${id}:`, error);
-      throw error;
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to delete medium standard subject');
     }
   }
 

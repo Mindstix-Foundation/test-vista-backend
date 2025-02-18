@@ -141,78 +141,48 @@ export class BoardService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<void> {
     try {
-      // First check if board exists
+      // Check if board exists
       const board = await this.prisma.board.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          schools: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
+        }
       });
 
       if (!board) {
         throw new NotFoundException(`Board with ID ${id} not found`);
       }
 
-      // Check for associated schools
-      const schoolCount = await this.prisma.school.count({
-        where: { board_id: id }
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        schools: board.schools.length,
+        standards: board.standards.length,
+        subjects: board.subjects.length,
+        instruction_mediums: board.instruction_mediums.length
+      };
+
+      // Log what will be deleted
+      this.logger.log(`Deleting board ${id} will also delete:
+        - ${relatedCounts.schools} schools
+        - ${relatedCounts.standards} standards
+        - ${relatedCounts.subjects} subjects
+        - ${relatedCounts.instruction_mediums} instruction mediums
+        and all their related records`);
+
+      // Delete the board - cascade will handle all related records
+      await this.prisma.board.delete({
+        where: { id }
       });
 
-      if (schoolCount > 0) {
-        throw new ConflictException(
-          `Cannot delete board as it is associated with ${schoolCount} school${schoolCount > 1 ? 's' : ''}`
-        );
-      }
-
-      // Start transaction for cascading delete
-      await this.prisma.$transaction(async (prisma) => {
-        // Delete all medium_standard_subjects related to this board's components
-        await prisma.medium_Standard_Subject.deleteMany({
-          where: {
-            OR: [
-              {
-                instruction_medium: {
-                  board_id: id
-                }
-              },
-              {
-                standard: {
-                  board_id: id
-                }
-              },
-              {
-                subject: {
-                  board_id: id
-                }
-              }
-            ]
-          }
-        });
-
-        // Delete instruction mediums
-        await prisma.instruction_Medium.deleteMany({
-          where: { board_id: id }
-        });
-
-        // Delete standards
-        await prisma.standard.deleteMany({
-          where: { board_id: id }
-        });
-
-        // Delete subjects
-        await prisma.subject.deleteMany({
-          where: { board_id: id }
-        });
-
-        // Finally delete the board
-        await prisma.board.delete({
-          where: { id }
-        });
-      });
-
+      this.logger.log(`Successfully deleted board ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete board ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
+      if (error instanceof NotFoundException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete board');

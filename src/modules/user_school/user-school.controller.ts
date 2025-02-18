@@ -53,6 +53,8 @@ export class UserSchoolController {
     @Param('userId', ParseIntPipe) userId: number,
     @Param('schoolId', ParseIntPipe) schoolId: number
   ) {
-    await this.userSchoolService.remove(userId, schoolId);
+    // Find the user school ID first
+    const userSchool = await this.userSchoolService.findByUserAndSchool(userId, schoolId);
+    await this.userSchoolService.remove(userSchool.id);
   }
 } 

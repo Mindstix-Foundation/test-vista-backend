@@ -199,22 +199,52 @@ export class TeacherSubjectService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<void> {
     try {
+      // Check if teacher subject exists with its relationships
       const teacherSubject = await this.prisma.teacher_Subject.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          user: true,
+          school_standard: {
+            include: {
+              school: true,
+              standard: true
+            }
+          },
+          medium_standard_subject: {
+            include: {
+              instruction_medium: true,
+              subject: true
+            }
+          }
+        }
       });
 
       if (!teacherSubject) {
         throw new NotFoundException(`Teacher subject with ID ${id} not found`);
       }
 
+      // Log what will be deleted
+      this.logger.log(`Deleting teacher subject assignment ${id}:
+        - Teacher: ${teacherSubject.user.name}
+        - School: ${teacherSubject.school_standard.school.name}
+        - Standard: ${teacherSubject.school_standard.standard.name}
+        - Subject: ${teacherSubject.medium_standard_subject.subject.name}
+        - Medium: ${teacherSubject.medium_standard_subject.instruction_medium.instruction_medium}`);
+
+      // Delete the teacher subject - cascade will handle related records
       await this.prisma.teacher_Subject.delete({
         where: { id }
       });
+
+      this.logger.log(`Successfully deleted teacher subject assignment ${id}`);
     } catch (error) {
-      this.logger.error(`Failed to delete teacher subject ${id}:`, error);
-      throw error;
+      this.logger.error(`Failed to delete teacher subject assignment ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to delete teacher subject assignment');
     }
   }
 } 

@@ -222,75 +222,53 @@ export class SchoolService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<void> {
     try {
-      // First check if school exists
+      // Check if school exists with its relationships
       const school = await this.prisma.school.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          School_Standard: {
+            include: {
+              Teacher_Subject: true
+            }
+          },
+          School_Instruction_Medium: true,
+          User_School: true
+        }
       });
 
       if (!school) {
         throw new NotFoundException(`School with ID ${id} not found`);
       }
 
-      // Check for associated teachers (users)
-      const teacherCount = await this.prisma.user_School.count({
-        where: { 
-          school_id: id,
-          user: {
-            user_roles: {
-              some: {
-                role: {
-                  role_name: 'TEACHER'
-                }
-              }
-            }
-          }
-        }
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        standards: school.School_Standard.length,
+        teachers: new Set(school.School_Standard.flatMap(ss => 
+          ss.Teacher_Subject.map(ts => ts.user_id)
+        )).size,
+        instructionMediums: school.School_Instruction_Medium.length,
+        users: school.User_School.length
+      };
+
+      // Log what will be deleted
+      this.logger.log(`Deleting school ${id} will also delete:
+        - ${relatedCounts.standards} standard assignments
+        - ${relatedCounts.teachers} teacher assignments
+        - ${relatedCounts.instructionMediums} instruction medium assignments
+        - ${relatedCounts.users} user associations
+        and all their related records`);
+
+      // Delete the school - cascade will handle all related records
+      await this.prisma.school.delete({
+        where: { id }
       });
 
-      if (teacherCount > 0) {
-        throw new ConflictException(
-          `Cannot delete school as it is associated with ${teacherCount} teacher${teacherCount > 1 ? 's' : ''}`
-        );
-      }
-
-      // Start transaction for cascading delete
-      await this.prisma.$transaction(async (prisma) => {
-        // First delete all teacher subjects associated with school standards
-        await prisma.teacher_Subject.deleteMany({
-          where: {
-            school_standard: {
-              school_id: id
-            }
-          }
-        });
-
-        // Delete school standards
-        await prisma.school_Standard.deleteMany({
-          where: { school_id: id }
-        });
-
-        // Delete school instruction mediums
-        await prisma.school_Instruction_Medium.deleteMany({
-          where: { school_id: id }
-        });
-
-        // Delete user school associations
-        await prisma.user_School.deleteMany({
-          where: { school_id: id }
-        });
-
-        // Finally delete the school
-        await prisma.school.delete({
-          where: { id }
-        });
-      });
-
+      this.logger.log(`Successfully deleted school ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete school ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
+      if (error instanceof NotFoundException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete school');

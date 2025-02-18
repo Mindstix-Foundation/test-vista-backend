@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserRoleDto } from './dto/user-role.dto';
 import { Prisma } from '@prisma/client';
@@ -113,25 +113,68 @@ export class UserRoleService {
     }
   }
 
-  async remove(userId: number, roleId: number) {
+  async remove(id: number): Promise<void> {
     try {
-      const userRole = await this.prisma.user_Role.findFirst({
-        where: {
-          user_id: userId,
-          role_id: roleId
+      // Check if user role exists with its relationships
+      const userRole = await this.prisma.user_Role.findUnique({
+        where: { id },
+        include: {
+          user: true,
+          role: true
         }
       });
 
       if (!userRole) {
-        throw new NotFoundException(`User role association not found`);
+        throw new NotFoundException(`User role with ID ${id} not found`);
       }
 
+      // Check if this is the last admin role and prevent deletion if it is
+      if (userRole.role.role_name === 'ADMIN') {
+        const adminCount = await this.prisma.user_Role.count({
+          where: {
+            role: {
+              role_name: 'ADMIN'
+            }
+          }
+        });
+
+        if (adminCount <= 1) {
+          throw new ConflictException('Cannot delete the last admin role assignment');
+        }
+      }
+
+      // Log what will be deleted
+      this.logger.log(`Deleting user role assignment ${id}:
+        - User: ${userRole.user.name} (${userRole.user.email_id})
+        - Role: ${userRole.role.role_name}`);
+
+      // Delete the user role - cascade will handle related records
       await this.prisma.user_Role.delete({
-        where: { id: userRole.id }
+        where: { id }
       });
+
+      this.logger.log(`Successfully deleted user role assignment ${id}`);
     } catch (error) {
-      this.logger.error(`Failed to delete user role:`, error);
-      throw error;
+      this.logger.error(`Failed to delete user role assignment ${id}:`, error);
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to delete user role assignment');
     }
+  }
+
+  async findByUserAndRole(userId: number, roleId: number) {
+    const userRole = await this.prisma.user_Role.findFirst({
+      where: {
+        user_id: userId,
+        role_id: roleId
+      }
+    });
+
+    if (!userRole) {
+      throw new NotFoundException(`User role association not found for user ${userId} and role ${roleId}`);
+    }
+
+    return userRole;
   }
 } 

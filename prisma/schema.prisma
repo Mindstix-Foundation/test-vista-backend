@@ -21,7 +21,7 @@ model Country {
 
 model State {
   id         Int     @id @default(autoincrement())
-  country    Country @relation(fields: [country_id], references: [id])
+  country    Country @relation(fields: [country_id], references: [id], onDelete: Cascade)
   country_id Int
   name       String  @db.VarChar
   cities     City[]
@@ -29,7 +29,7 @@ model State {
 
 model City {
   id        Int       @id @default(autoincrement())
-  state     State     @relation(fields: [state_id], references: [id])
+  state     State     @relation(fields: [state_id], references: [id], onDelete: Cascade)
   state_id  Int
   name      String    @db.VarChar
   addresses Address[]
@@ -37,7 +37,7 @@ model City {
 
 model Address {
   id          Int      @id @default(autoincrement())
-  city        City     @relation(fields: [city_id], references: [id])
+  city        City     @relation(fields: [city_id], references: [id], onDelete: Cascade)
   city_id     Int
   postal_code String   @db.VarChar
   street      String   @db.VarChar
@@ -51,7 +51,7 @@ model Board {
   id                  Int                  @id @default(autoincrement())
   name                String               @unique @db.VarChar
   abbreviation        String               @unique @map("UPPER(abbreviation)") @db.VarChar
-  address             Address              @relation(fields: [address_id], references: [id])
+  address             Address              @relation(fields: [address_id], references: [id], onDelete: Cascade)
   address_id          Int                  @unique
   created_at          DateTime             @default(now()) @db.Timestamptz()
   updated_at          DateTime             @updatedAt @db.Timestamptz()
@@ -65,7 +65,7 @@ model Board {
 
 model Standard {
   id         Int      @id @default(autoincrement())
-  board      Board    @relation(fields: [board_id], references: [id])
+  board      Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
   board_id   Int
   name       String   @db.VarChar
   created_at DateTime @default(now()) @db.Timestamptz()
@@ -79,7 +79,7 @@ model Standard {
 
 model Subject {
   id         Int      @id @default(autoincrement())
-  board      Board    @relation(fields: [board_id], references: [id])
+  board      Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
   board_id   Int
   name       String   @db.VarChar
   created_at DateTime @default(now()) @db.Timestamptz()
@@ -92,7 +92,7 @@ model Subject {
 
 model Instruction_Medium {
   id                 Int      @id @default(autoincrement())
-  board              Board    @relation(fields: [board_id], references: [id])
+  board              Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
   board_id           Int
   instruction_medium String   @db.VarChar
   created_at         DateTime @default(now()) @db.Timestamptz()
@@ -106,10 +106,10 @@ model Instruction_Medium {
 
 model School {
   id                       Int      @id @default(autoincrement())
-  board                    Board    @relation(fields: [board_id], references: [id])
+  board                    Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
   board_id                 Int
   name                     String   @db.VarChar
-  address                  Address  @relation(fields: [address_id], references: [id])
+  address                  Address  @relation(fields: [address_id], references: [id], onDelete: Cascade)
   address_id               Int      @unique
   principal_name           String   @db.VarChar
   email                    String   @db.VarChar
@@ -125,9 +125,9 @@ model School {
 
 model School_Instruction_Medium {
   id                    Int                @id @default(autoincrement())
-  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id])
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
   instruction_medium_id Int
-  school                School             @relation(fields: [school_id], references: [id])
+  school                School             @relation(fields: [school_id], references: [id], onDelete: Cascade)
   school_id             Int
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
@@ -137,9 +137,9 @@ model School_Instruction_Medium {
 
 model School_Standard {
   id          Int      @id @default(autoincrement())
-  standard    Standard @relation(fields: [standard_id], references: [id])
+  standard    Standard @relation(fields: [standard_id], references: [id], onDelete: Cascade)
   standard_id Int
-  school      School   @relation(fields: [school_id], references: [id])
+  school      School   @relation(fields: [school_id], references: [id], onDelete: Cascade)
   school_id   Int
   created_at  DateTime @default(now()) @db.Timestamptz()
   updated_at  DateTime @updatedAt @db.Timestamptz()
@@ -176,9 +176,9 @@ model Role {
 
 model User_Role {
   id         Int      @id @default(autoincrement())
-  user       User     @relation(fields: [user_id], references: [id])
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
   user_id    Int
-  role       Role     @relation(fields: [role_id], references: [id])
+  role       Role     @relation(fields: [role_id], references: [id], onDelete: Cascade)
   role_id    Int
   created_at DateTime @default(now()) @db.Timestamptz()
 
@@ -187,9 +187,9 @@ model User_Role {
 
 model User_School {
   id         Int       @id @default(autoincrement())
-  user       User      @relation(fields: [user_id], references: [id])
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   user_id    Int
-  school     School    @relation(fields: [school_id], references: [id])
+  school     School    @relation(fields: [school_id], references: [id], onDelete: Cascade)
   school_id  Int
   start_date DateTime  @db.Date
   end_date   DateTime? @db.Date
@@ -200,11 +200,11 @@ model User_School {
 
 model Medium_Standard_Subject {
   id                    Int                @id @default(autoincrement())
-  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id])
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
   instruction_medium_id Int
-  standard              Standard           @relation(fields: [standard_id], references: [id])
+  standard              Standard           @relation(fields: [standard_id], references: [id], onDelete: Cascade)
   standard_id           Int
-  subject               Subject            @relation(fields: [subject_id], references: [id])
+  subject               Subject            @relation(fields: [subject_id], references: [id], onDelete: Cascade)
   subject_id            Int
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
@@ -218,11 +218,11 @@ model Medium_Standard_Subject {
 
 model Teacher_Subject {
   id                         Int                     @id @default(autoincrement())
-  user                       User                    @relation(fields: [user_id], references: [id])
+  user                       User                    @relation(fields: [user_id], references: [id], onDelete: Cascade)
   user_id                    Int
-  school_standard            School_Standard         @relation(fields: [school_standard_id], references: [id])
+  school_standard            School_Standard         @relation(fields: [school_standard_id], references: [id], onDelete: Cascade)
   school_standard_id         Int
-  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id])
+  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id], onDelete: Cascade)
   medium_standard_subject_id Int
   created_at                 DateTime                @default(now()) @db.Timestamptz()
   updated_at                 DateTime                @updatedAt @db.Timestamptz()
@@ -232,7 +232,7 @@ model Teacher_Subject {
 
 model Chapter {
   id                         Int                     @id @default(autoincrement())
-  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id])
+  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id], onDelete: Cascade)
   medium_standard_subject_id Int
   sequential_chapter_number  Int
   name                      String
@@ -244,7 +244,7 @@ model Chapter {
 
 model Topic {
   id                    Int      @id @default(autoincrement())
-  chapter              Chapter   @relation(fields: [chapter_id], references: [id])
+  chapter              Chapter   @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
   chapter_id           Int
   sequential_topic_number Int
   name                 String

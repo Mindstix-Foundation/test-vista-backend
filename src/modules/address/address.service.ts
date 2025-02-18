@@ -137,33 +137,33 @@ export class AddressService {
   async remove(id: number): Promise<void> {
     try {
       // Check if address exists
-      await this.findOne(id);
-
-      // Check if address is referenced by any board
-      const addressWithBoard = await this.prisma.address.findUnique({
+      const address = await this.prisma.address.findUnique({
         where: { id },
-        include: { board: true }
+        include: {
+          board: true,
+          school: true
+        }
       });
 
-      if (addressWithBoard?.board) {
-        throw new BadRequestException(
-          'Cannot delete address because it is associated with a board. Please delete the board first.'
+      if (!address) {
+        throw new NotFoundException(`Address with ID ${id} not found`);
+      }
+
+      // Check if address is associated with a board or school
+      if (address.board || address.school) {
+        throw new ConflictException(
+          `Cannot delete address as it is associated with a ${address.board ? 'board' : 'school'}`
         );
       }
 
+      // Delete the address - cascade will handle related records
       await this.prisma.address.delete({
         where: { id }
       });
     } catch (error) {
       this.logger.error(`Failed to delete address ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof BadRequestException) {
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
-      }
-      if (error.code === 'P2003') {
-        throw new BadRequestException(
-          'Cannot delete address because it is referenced by other records'
-        );
       }
       throw new InternalServerErrorException('Failed to delete address');
     }

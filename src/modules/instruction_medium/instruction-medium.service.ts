@@ -138,44 +138,41 @@ export class InstructionMediumService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the instruction medium exists
-      const instructionMedium = await this.findOne(id);
-
-      const messages: string[] = []; // Array to collect messages
-
-      // Check if it's being used in any school
-      const schoolCount = await this.prisma.school_Instruction_Medium.count({
-        where: { instruction_medium_id: id }
+      // Check if instruction medium exists with its relationships
+      const instructionMedium = await this.prisma.instruction_Medium.findUnique({
+        where: { id },
+        include: {
+          School_Instruction_Medium: true,
+          Medium_Standard_Subject: true
+        }
       });
 
-      // Check if it's being used in any medium standard subject
-      const mssCount = await this.prisma.medium_Standard_Subject.count({
-        where: { instruction_medium_id: id }
-      });
-
-      // Construct messages based on counts
-      if (schoolCount > 0 && mssCount > 0) {
-        messages.push(`Cannot delete instruction medium as it is associated with ${schoolCount} school${schoolCount > 1 ? 's' : ''} and ${mssCount} syllabus${mssCount > 1 ? 'es' : ''}.`);
-      } else if (schoolCount > 0) {
-        messages.push(`Cannot delete instruction medium as it is associated with ${schoolCount} school${schoolCount > 1 ? 's' : ''}.`);
-      } else if (mssCount > 0) {
-        messages.push(`Cannot delete instruction medium as it is associated with ${mssCount} syllabus${mssCount > 1 ? 'es' : ''}.`);
+      if (!instructionMedium) {
+        throw new NotFoundException(`Instruction medium with ID ${id} not found`);
       }
 
-      // If there are any messages, throw a combined exception
-      if (messages.length > 0) {
-        throw new ConflictException(messages.join(' '));
-      }
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        schoolAssociations: instructionMedium.School_Instruction_Medium.length,
+        subjectAssociations: instructionMedium.Medium_Standard_Subject.length
+      };
 
-      // Proceed to delete the instruction medium
+      // Log what will be deleted
+      this.logger.log(`Deleting instruction medium ${id} will also delete:
+        - ${relatedCounts.schoolAssociations} school associations
+        - ${relatedCounts.subjectAssociations} subject associations
+        and all their related records`);
+
+      // Delete the instruction medium - cascade will handle all related records
       await this.prisma.instruction_Medium.delete({
         where: { id }
       });
+
+      this.logger.log(`Successfully deleted instruction medium ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete instruction medium ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
-        throw error; // Rethrow known exceptions
+      if (error instanceof NotFoundException) {
+        throw error;
       }
       throw new InternalServerErrorException('Failed to delete instruction medium');
     }

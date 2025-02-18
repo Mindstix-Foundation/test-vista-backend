@@ -181,15 +181,36 @@ export class UserService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<void> {
     try {
-      // First check if user exists
+      // Check if user exists with its relationships
       const user = await this.prisma.user.findUnique({
         where: { id },
         include: {
           user_roles: {
             include: {
               role: true
+            }
+          },
+          user_schools: {
+            include: {
+              school: true
+            }
+          },
+          teacher_subjects: {
+            include: {
+              school_standard: {
+                include: {
+                  school: true,
+                  standard: true
+                }
+              },
+              medium_standard_subject: {
+                include: {
+                  subject: true,
+                  instruction_medium: true
+                }
+              }
             }
           }
         }
@@ -199,42 +220,44 @@ export class UserService {
         throw new NotFoundException(`User with ID ${id} not found`);
       }
 
-      // Check if user is an admin
-      const isAdmin = user.user_roles.some(ur => ur.role.role_name === 'ADMIN');
-      if (isAdmin) {
-        throw new BadRequestException('Cannot delete admin user');
-      }
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        roles: user.user_roles.length,
+        schools: new Set(user.user_schools.map(us => us.school_id)).size,
+        teachingAssignments: user.teacher_subjects.length,
+        uniqueSubjects: new Set(user.teacher_subjects.map(ts => 
+          ts.medium_standard_subject.subject.name
+        )).size
+      };
 
-      // Start a transaction to handle cascading delete
-      await this.prisma.$transaction(async (prisma) => {
-        // Delete teacher subjects first
-        await prisma.teacher_Subject.deleteMany({
-          where: { user_id: id }
-        });
+      // Log what will be deleted
+      this.logger.log(`Deleting user ${id} (${user.name}) will also delete:
+        - ${relatedCounts.roles} role assignments
+        - ${relatedCounts.schools} school associations
+        - ${relatedCounts.teachingAssignments} teaching assignments
+        - Teaching assignments for ${relatedCounts.uniqueSubjects} unique subjects
+        
+        Details:
+        - Roles: ${user.user_roles.map(ur => ur.role.role_name).join(', ')}
+        - Schools: ${user.user_schools.map(us => us.school.name).join(', ')}
+        - Teaching: ${user.teacher_subjects.map(ts => 
+          `${ts.medium_standard_subject.subject.name} at ${ts.school_standard.school.name}`
+        ).join(', ')}
+        
+        All related records will be deleted.`);
 
-        // Delete user school associations
-        await prisma.user_School.deleteMany({
-          where: { user_id: id }
-        });
-
-        // Delete user role associations
-        await prisma.user_Role.deleteMany({
-          where: { user_id: id }
-        });
-
-        // Finally delete the user
-        await prisma.user.delete({
-          where: { id }
-        });
+      // Delete the user - cascade will handle all related records
+      await this.prisma.user.delete({
+        where: { id }
       });
 
+      this.logger.log(`Successfully deleted user ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete user ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof BadRequestException) {
+      if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException(`Failed to delete user ${id}`);
+      throw new InternalServerErrorException('Failed to delete user');
     }
   }
 

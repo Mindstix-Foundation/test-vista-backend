@@ -127,45 +127,51 @@ export class SchoolStandardService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the school standard exists
+      // Check if school standard exists with its relationships
       const schoolStandard = await this.prisma.school_Standard.findUnique({
-        where: { id }
+        where: { id },
+        include: {
+          school: true,
+          standard: true,
+          Teacher_Subject: {
+            include: {
+              user: true,
+              medium_standard_subject: true
+            }
+          }
+        }
       });
 
       if (!schoolStandard) {
         throw new NotFoundException(`School standard with ID ${id} not found`);
       }
 
-      // Get all teacher records for this standard
-      const teachers = await this.prisma.teacher_Subject.findMany({
-        where: {
-          school_standard_id: id
-        },
-        select: {
-          user_id: true
-        }
-      });
+      // Get counts of related entities for informative message
+      const relatedCounts = {
+        teachers: new Set(schoolStandard.Teacher_Subject.map(ts => ts.user_id)).size,
+        subjects: new Set(schoolStandard.Teacher_Subject.map(ts => ts.medium_standard_subject_id)).size
+      };
 
-      // Count unique teachers using Set
-      const uniqueTeachers = new Set(teachers.map(t => t.user_id));
-      const teacherCount = uniqueTeachers.size;
+      // Log what will be deleted
+      this.logger.log(`Deleting school standard ${id} will also delete:
+        - School: ${schoolStandard.school.name}
+        - Standard: ${schoolStandard.standard.name}
+        - ${relatedCounts.teachers} teacher assignments
+        - ${relatedCounts.subjects} subject assignments
+        and all their related records`);
 
-      // Construct messages based on counts
-      if (teacherCount > 0) {
-        throw new ConflictException(`Cannot remove standard as it is associated with ${teacherCount} teacher${teacherCount > 1 ? 's' : ''}.`);
-      }
-
-      // Proceed to delete the school_Standard
+      // Delete the school standard - cascade will handle all related records
       await this.prisma.school_Standard.delete({
         where: { id }
       });
+
+      this.logger.log(`Successfully deleted school standard ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete school standard ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
+      if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to delete standard');
+      throw new InternalServerErrorException('Failed to delete school standard');
     }
   }
 
