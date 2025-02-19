@@ -164,69 +164,95 @@ export class TopicService {
     }
   }
 
-  async reorderTopic(chapterId: number, topicId: number, newSequenceNumber: number) {
+  async reorderTopic(topicId: number, newPosition: number, chapterId?: number) {
     try {
-      await this.prisma.$transaction(async (prisma) => {
-        // Fetch all topics in the chapter ordered by their sequence number
-        const topics = await prisma.topic.findMany({
-          where: { chapter_id: chapterId },
-          orderBy: { sequential_topic_number: 'asc' },
+        // Get the current topic and its details
+        const currentTopic = await this.prisma.topic.findUnique({
+            where: { id: topicId },
+            select: {
+                id: true,
+                chapter_id: true,
+                sequential_topic_number: true
+            }
         });
 
-        // Find the topic to be moved
-        const topicToMove = topics.find(topic => topic.id === topicId);
-        if (!topicToMove) {
-          throw new NotFoundException('Topic not found');
+        if (!currentTopic) {
+            throw new NotFoundException(`Topic with ID ${topicId} not found`);
         }
 
-        const currentSequenceNumber = topicToMove.sequential_topic_number;
-
-        // Determine the direction of the shift
-        if (newSequenceNumber < currentSequenceNumber) {
-          // Shift topics down
-          await prisma.topic.updateMany({
-            where: {
-              chapter_id: chapterId,
-              sequential_topic_number: {
-                gte: newSequenceNumber,
-                lt: currentSequenceNumber,
-              },
-            },
-            data: {
-              sequential_topic_number: {
-                increment: 1,
-              },
-            },
-          });
-        } else if (newSequenceNumber > currentSequenceNumber) {
-          // Shift topics up
-          await prisma.topic.updateMany({
-            where: {
-              chapter_id: chapterId,
-              sequential_topic_number: {
-                gt: currentSequenceNumber,
-                lte: newSequenceNumber,
-              },
-            },
-            data: {
-              sequential_topic_number: {
-                decrement: 1,
-              },
-            },
-          });
+        // If chapterId is provided, verify it matches the topic's chapter
+        if (chapterId && chapterId !== currentTopic.chapter_id) {
+            throw new ConflictException('Topic does not belong to the specified chapter');
         }
 
-        // Update the sequence number of the topic to be moved
-        await prisma.topic.update({
-          where: { id: topicId },
-          data: { sequential_topic_number: newSequenceNumber },
+        // Get total topics count in the chapter to validate newPosition
+        const totalTopics = await this.prisma.topic.count({
+            where: { chapter_id: currentTopic.chapter_id }
         });
-      });
 
-      return { message: 'Topic reordered successfully' };
+        // Validate newPosition
+        if (newPosition < 1 || newPosition > totalTopics) {
+            throw new ConflictException(`New position must be between 1 and ${totalTopics}`);
+        }
+
+        const currentPosition = currentTopic.sequential_topic_number;
+
+        // If the positions are the same, no need to reorder
+        if (currentPosition === newPosition) {
+            return await this.findOne(topicId);
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+            // Move the target topic to a temporary position (999)
+            await tx.topic.update({
+                where: { id: topicId },
+                data: { sequential_topic_number: 999 }
+            });
+
+            if (currentPosition < newPosition) {
+                // Moving to a later position
+                await tx.topic.updateMany({
+                    where: {
+                        chapter_id: currentTopic.chapter_id,
+                        sequential_topic_number: {
+                            gt: currentPosition,
+                            lte: newPosition
+                        }
+                    },
+                    data: {
+                        sequential_topic_number: {
+                            decrement: 1
+                        }
+                    }
+                });
+            } else {
+                // Moving to an earlier position
+                for (let i = currentPosition - 1; i >= newPosition; i--) {
+                    await tx.topic.updateMany({
+                        where: {
+                            chapter_id: currentTopic.chapter_id,
+                            sequential_topic_number: i
+                        },
+                        data: {
+                            sequential_topic_number: i + 1
+                        }
+                    });
+                }
+            }
+
+            // Finally, move the topic to its new position
+            await tx.topic.update({
+                where: { id: topicId },
+                data: { sequential_topic_number: newPosition }
+            });
+        });
+
+        return await this.findOne(topicId);
     } catch (error) {
-      this.logger.error('Failed to reorder topic:', error);
-      throw new InternalServerErrorException('Failed to reorder topic');
+        if (error instanceof NotFoundException || error instanceof ConflictException) {
+            throw error;
+        }
+        throw new InternalServerErrorException('Failed to reorder topic');
     }
   }
 } 

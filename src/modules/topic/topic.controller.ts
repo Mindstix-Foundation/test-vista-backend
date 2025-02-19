@@ -15,6 +15,7 @@ import { TopicService } from './topic.service';
 import { CreateTopicDto } from './dto/create-topic.dto';
 import { UpdateTopicDto } from './dto/update-topic.dto';
 import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ReorderTopicDto } from './dto/reorder-topic.dto';
 
 @ApiTags('topics')
 @Controller('topics')
@@ -63,15 +64,20 @@ export class TopicController {
     return await this.topicService.remove(id);
   }
 
-  @Put('reorder/:chapterId/:topicId')
+  @Put('reorder/:topicId/:chapterId')
   @ApiOperation({ summary: 'Reorder a topic within a chapter' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Topic reordered successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Topic not found or does not belong to the chapter' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid sequence number' })
   async reorder(
-    @Param('chapterId', ParseIntPipe) chapterId: number,
     @Param('topicId', ParseIntPipe) topicId: number,
-    @Body() data: { sequential_topic_number: number }
+    @Param('chapterId', ParseIntPipe) chapterId: number,
+    @Body() reorderTopicDto: ReorderTopicDto
   ) {
-    return await this.topicService.reorderTopic(chapterId, topicId, data.sequential_topic_number);
+    return await this.topicService.reorderTopic(
+      topicId,
+      reorderTopicDto.sequential_topic_number,
+      chapterId
+    );
   }
 } 

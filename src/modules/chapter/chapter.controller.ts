@@ -15,6 +15,7 @@ import { ChapterService } from './chapter.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
 import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ReorderChapterDto } from './dto/reorder-chapter.dto';
 
 @ApiTags('chapters')
 @Controller('chapters')
@@ -39,8 +40,8 @@ export class ChapterController {
     type: Number,
     description: 'Filter chapters by medium standard subject ID'
   })
-  findAll(@Query('mediumStandardSubjectId', new ParseIntPipe({ optional: true })) mediumStandardSubjectId?: number) {
-    return this.chapterService.findAll(mediumStandardSubjectId);
+  findAll(@Query('mediumStandardSubjectId') mediumStandardSubjectId?: string) {
+    return this.chapterService.findAll(mediumStandardSubjectId ? +mediumStandardSubjectId : undefined);
   }
 
   @Get(':id')
@@ -68,19 +69,20 @@ export class ChapterController {
     return await this.chapterService.remove(id);
   }
 
-  @Put('reorder/:mediumStandardSubjectId/:chapterId')
+  @Put('reorder/:chapterId/:mediumStandardSubjectId')
   @ApiOperation({ summary: 'Reorder a chapter within a medium standard subject' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Chapter reordered successfully' })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found or does not belong to the medium standard subject' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid sequence number' })
   async reorder(
-    @Param('mediumStandardSubjectId', ParseIntPipe) mediumStandardSubjectId: number,
     @Param('chapterId', ParseIntPipe) chapterId: number,
-    @Body() data: { sequential_chapter_number: number }
+    @Param('mediumStandardSubjectId', ParseIntPipe) mediumStandardSubjectId: number,
+    @Body() reorderChapterDto: ReorderChapterDto
   ) {
     return await this.chapterService.reorderChapter(
-      mediumStandardSubjectId,
       chapterId,
-      data.sequential_chapter_number
+      reorderChapterDto.sequential_chapter_number,
+      mediumStandardSubjectId
     );
   }
 } 
