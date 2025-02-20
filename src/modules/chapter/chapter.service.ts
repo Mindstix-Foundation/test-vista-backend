@@ -158,10 +158,36 @@ export class ChapterService {
 
   async remove(id: number) {
     try {
-      await this.findOne(id);
+      const chapterToDelete = await this.findOne(id);
+      const currentPosition = chapterToDelete.sequential_chapter_number;
 
-      await this.prisma.chapter.delete({
-        where: { id },
+      await this.prisma.$transaction(async (tx) => {
+        // First delete the chapter
+        await tx.chapter.delete({
+          where: { id }
+        });
+
+        // Update sequence numbers for remaining chapters one by one
+        const chaptersToUpdate = await tx.chapter.findMany({
+          where: {
+            medium_standard_subject_id: chapterToDelete.medium_standard_subject_id,
+            sequential_chapter_number: {
+              gt: currentPosition
+            }
+          },
+          orderBy: {
+            sequential_chapter_number: 'asc'
+          }
+        });
+
+        for (const chapter of chaptersToUpdate) {
+          await tx.chapter.update({
+            where: { id: chapter.id },
+            data: {
+              sequential_chapter_number: chapter.sequential_chapter_number - 1
+            }
+          });
+        }
       });
 
       return { message: 'Chapter deleted successfully' };
@@ -176,6 +202,8 @@ export class ChapterService {
 
   async reorderChapter(chapterId: number, newPosition: number, mediumStandardSubjectId?: number) {
     try {
+      this.logger.log(`Starting reorder for chapter ${chapterId} to position ${newPosition}`);
+      
       // Get the current chapter and its details
       const currentChapter = await this.prisma.chapter.findUnique({
         where: { id: chapterId },
@@ -190,7 +218,9 @@ export class ChapterService {
         throw new NotFoundException(`Chapter with ID ${chapterId} not found`);
       }
 
-      // If mediumStandardSubjectId is provided, verify it matches the chapter's subject
+      this.logger.log(`Found current chapter: ${JSON.stringify(currentChapter)}`);
+
+      // If mediumStandardSubjectId is provided, verify it matches
       if (mediumStandardSubjectId && mediumStandardSubjectId !== currentChapter.medium_standard_subject_id) {
         throw new ConflictException('Chapter does not belong to the specified medium standard subject');
       }
@@ -199,6 +229,8 @@ export class ChapterService {
       const totalChapters = await this.prisma.chapter.count({
         where: { medium_standard_subject_id: currentChapter.medium_standard_subject_id }
       });
+
+      this.logger.log(`Total chapters in subject: ${totalChapters}`);
 
       // Validate newPosition
       if (newPosition < 1 || newPosition > totalChapters) {
@@ -212,57 +244,62 @@ export class ChapterService {
         return await this.findOne(chapterId);
       }
 
-      await this.prisma.$transaction(async (tx) => {
-        // Move the target chapter to a temporary position (999)
-        await tx.chapter.update({
-          where: { id: chapterId },
-          data: { sequential_chapter_number: 999 }
-        });
-
-        if (currentPosition < newPosition) {
-          // Moving to a later position
-          await tx.chapter.updateMany({
-            where: {
-              medium_standard_subject_id: currentChapter.medium_standard_subject_id,
-              sequential_chapter_number: {
-                gt: currentPosition,
-                lte: newPosition
-              }
-            },
-            data: {
-              sequential_chapter_number: {
-                decrement: 1
-              }
-            }
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // First move to temporary position
+          this.logger.log(`Moving chapter ${chapterId} to temporary position`);
+          await tx.chapter.update({
+            where: { id: chapterId },
+            data: { sequential_chapter_number: 999 }
           });
-        } else {
-          // Moving to an earlier position
-          for (let i = currentPosition - 1; i >= newPosition; i--) {
-            await tx.chapter.updateMany({
-              where: {
-                medium_standard_subject_id: currentChapter.medium_standard_subject_id,
-                sequential_chapter_number: i
-              },
-              data: {
-                sequential_chapter_number: i + 1
-              }
-            });
+
+          if (currentPosition < newPosition) {
+            // Moving to a later position
+            for (let i = currentPosition + 1; i <= newPosition; i++) {
+              await tx.chapter.updateMany({
+                where: {
+                  medium_standard_subject_id: currentChapter.medium_standard_subject_id,
+                  sequential_chapter_number: i
+                },
+                data: {
+                  sequential_chapter_number: i - 1
+                }
+              });
+            }
+          } else {
+            // Moving to an earlier position
+            for (let i = currentPosition - 1; i >= newPosition; i--) {
+              await tx.chapter.updateMany({
+                where: {
+                  medium_standard_subject_id: currentChapter.medium_standard_subject_id,
+                  sequential_chapter_number: i
+                },
+                data: {
+                  sequential_chapter_number: i + 1
+                }
+              });
+            }
           }
-        }
 
-        // Finally, move the chapter to its new position
-        await tx.chapter.update({
-          where: { id: chapterId },
-          data: { sequential_chapter_number: newPosition }
+          // Finally, move to new position
+          this.logger.log(`Moving chapter to final position ${newPosition}`);
+          await tx.chapter.update({
+            where: { id: chapterId },
+            data: { sequential_chapter_number: newPosition }
+          });
         });
-      });
 
-      return await this.findOne(chapterId);
+        return await this.findOne(chapterId);
+      } catch (txError) {
+        this.logger.error(`Transaction failed: ${txError.message}`, txError.stack);
+        throw new InternalServerErrorException(`Failed to reorder: ${txError.message}`);
+      }
     } catch (error) {
+      this.logger.error(`Reorder failed for chapter ${chapterId}: ${error.message}`, error.stack);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to reorder chapter');
+      throw new InternalServerErrorException(`Failed to reorder chapter: ${error.message}`);
     }
   }
 } 
