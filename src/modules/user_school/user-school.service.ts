@@ -228,4 +228,31 @@ export class UserSchoolService {
 
     return userSchool;
   }
+
+  async updateById(id: number, updateDto: UpdateUserSchoolDto) {
+    try {
+      const userSchool = await this.prisma.user_School.findUnique({
+        where: { id }
+      });
+
+      if (!userSchool) {
+        throw new NotFoundException(`User school association with ID ${id} not found`);
+      }
+
+      return await this.prisma.user_School.update({
+        where: { id },
+        data: {
+          start_date: updateDto.start_date ? new Date(updateDto.start_date) : undefined,
+          end_date: updateDto.end_date ? new Date(updateDto.end_date) : undefined
+        },
+        select: this.userSchoolSelect
+      });
+    } catch (error) {
+      this.logger.error(`Failed to update user school with ID ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to update user school assignment');
+    }
+  }
 } 

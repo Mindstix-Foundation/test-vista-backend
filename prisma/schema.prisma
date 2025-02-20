@@ -61,6 +61,7 @@ model Board {
   schools             School[]
 
   @@map("boards")
+  Pattern Pattern[]
 }
 
 model Standard {
@@ -75,6 +76,7 @@ model Standard {
   Medium_Standard_Subject Medium_Standard_Subject[]
 
   @@unique([board_id, name])
+  Pattern Pattern[]
 }
 
 model Subject {
@@ -88,6 +90,7 @@ model Subject {
   Medium_Standard_Subject Medium_Standard_Subject[]
 
   @@unique([board_id, name])
+  Pattern Pattern[]
 }
 
 model Instruction_Medium {
@@ -194,8 +197,6 @@ model User_School {
   start_date DateTime  @db.Date
   end_date   DateTime? @db.Date
   created_at DateTime  @default(now()) @db.Timestamptz()
-
-  @@unique([user_id, school_id])
 }
 
 model Medium_Standard_Subject {
@@ -254,4 +255,57 @@ model Topic {
   updated_at           DateTime  @updatedAt @db.Timestamptz()
 
   @@unique([chapter_id, sequential_topic_number])
+}
+
+model Question_Type {
+  id                          Int                       @id @default(autoincrement())
+  type_name                   String                    @db.VarChar
+  created_at                  DateTime                  @default(now()) @db.Timestamptz()
+  updated_at                  DateTime                  @updatedAt @db.Timestamptz()
+  subsection_question_types   Subsection_Question_Type[]
+}
+
+model Pattern {
+  id            Int       @id @default(autoincrement())
+  pattern_name  String    @db.VarChar
+  board         Board     @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  board_id      Int
+  standard      Standard  @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  standard_id   Int
+  subject       Subject   @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  subject_id    Int
+  total_marks   Int
+  created_at    DateTime  @default(now()) @db.Timestamptz()
+  updated_at    DateTime  @updatedAt @db.Timestamptz()
+  sections      Section[]
+}
+
+model Section {
+  id                       Int                       @id @default(autoincrement())
+  pattern                  Pattern                   @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
+  pattern_id               Int
+  seqencial_section_number Int
+  sub_section             String                    @db.VarChar
+  section_name            String                    @db.VarChar
+  total_questions         Int
+  mandotory_questions     Int
+  marks_per_question      Int
+  created_at              DateTime                  @default(now()) @db.Timestamptz()
+  updated_at              DateTime                  @updatedAt @db.Timestamptz()
+  subsection_question_types Subsection_Question_Type[]
+
+  @@unique([pattern_id, seqencial_section_number])
+}
+
+model Subsection_Question_Type {
+  id                          Int           @id @default(autoincrement())
+  section                     Section       @relation(fields: [section_id], references: [id], onDelete: Cascade)
+  section_id                  Int
+  seqencial_subquestion_number Int
+  question_type              Question_Type @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
+  question_type_id           Int
+  created_at                 DateTime      @default(now()) @db.Timestamptz()
+  updated_at                 DateTime      @updatedAt @db.Timestamptz()
+
+  @@unique([section_id, seqencial_subquestion_number])
 }

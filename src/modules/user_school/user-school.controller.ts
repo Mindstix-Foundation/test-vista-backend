@@ -57,4 +57,15 @@ export class UserSchoolController {
     const userSchool = await this.userSchoolService.findByUserAndSchool(userId, schoolId);
     await this.userSchoolService.remove(userSchool.id);
   }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update user school association by ID' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Association updated successfully' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Association not found' })
+  async updateById(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateDto: UpdateUserSchoolDto
+  ) {
+    return await this.userSchoolService.updateById(id, updateDto);
+  }
 } 
