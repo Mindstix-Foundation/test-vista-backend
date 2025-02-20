@@ -21,6 +21,7 @@ import { TeacherSubjectModule } from './modules/teacher_subject/teacher-subject.
 import { BoardManagementModule } from './modules/board-management/board-management.module';
 import { ChapterModule } from './modules/chapter/chapter.module';
 import { TopicModule } from './modules/topic/topic.module';
+import { PatternModule } from './modules/pattern/pattern.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { TopicModule } from './modules/topic/topic.module';
     BoardManagementModule,
     ChapterModule,
     TopicModule,
+    PatternModule,
   ],
   controllers: [AppController],
   providers: [AppService],
