@@ -247,4 +247,56 @@ export class TeacherSubjectService {
       throw new InternalServerErrorException('Failed to delete teacher subject assignment');
     }
   }
+
+  async removeByUserId(userId: number): Promise<void> {
+    try {
+      // Check if user exists and has any assignments
+      const assignments = await this.prisma.teacher_Subject.findMany({
+        where: { user_id: userId },
+        include: {
+          user: true,
+          school_standard: {
+            include: {
+              school: true,
+              standard: true
+            }
+          },
+          medium_standard_subject: {
+            include: {
+              instruction_medium: true,
+              subject: true
+            }
+          }
+        }
+      });
+
+      if (!assignments.length) {
+        throw new NotFoundException(`No teacher subject assignments found for user ID ${userId}`);
+      }
+
+      // Log what will be deleted
+      this.logger.log(`Deleting all teacher subject assignments for user ${assignments[0].user.name}:`);
+      assignments.forEach(assignment => {
+        this.logger.log(`
+          - School: ${assignment.school_standard.school.name}
+          - Standard: ${assignment.school_standard.standard.name}
+          - Subject: ${assignment.medium_standard_subject.subject.name}
+          - Medium: ${assignment.medium_standard_subject.instruction_medium.instruction_medium}
+        `);
+      });
+
+      // Delete all assignments for the user
+      await this.prisma.teacher_Subject.deleteMany({
+        where: { user_id: userId }
+      });
+
+      this.logger.log(`Successfully deleted ${assignments.length} teacher subject assignments for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to delete teacher subject assignments for user ${userId}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to delete teacher subject assignments');
+    }
+  }
 } 

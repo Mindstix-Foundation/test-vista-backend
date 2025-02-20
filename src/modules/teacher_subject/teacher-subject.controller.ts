@@ -59,4 +59,13 @@ export class TeacherSubjectController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.teacherSubjectService.remove(id);
   }
+
+  @Delete('user/:userId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete all teacher subject assignments for a user' })
+  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'All assignments deleted successfully' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User not found or has no assignments' })
+  async removeByUserId(@Param('userId', ParseIntPipe) userId: number) {
+    await this.teacherSubjectService.removeByUserId(userId);
+  }
 } 
