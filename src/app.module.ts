@@ -22,6 +22,9 @@ import { BoardManagementModule } from './modules/board-management/board-manageme
 import { ChapterModule } from './modules/chapter/chapter.module';
 import { TopicModule } from './modules/topic/topic.module';
 import { PatternModule } from './modules/pattern/pattern.module';
+import { QuestionTypeModule } from './modules/question-type/question-type.module';
+import { SectionModule } from './modules/section/section.module';
+import { SubsectionQuestionTypeModule } from './modules/subsection-question-type/subsection-question-type.module';
 
 @Module({
   imports: [
@@ -46,6 +49,9 @@ import { PatternModule } from './modules/pattern/pattern.module';
     ChapterModule,
     TopicModule,
     PatternModule,
+    QuestionTypeModule,
+    SectionModule,
+    SubsectionQuestionTypeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

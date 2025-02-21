@@ -258,10 +258,8 @@ model Topic {
 }
 
 model Question_Type {
-  id                          Int                       @id @default(autoincrement())
-  type_name                   String                    @db.VarChar
-  created_at                  DateTime                  @default(now()) @db.Timestamptz()
-  updated_at                  DateTime                  @updatedAt @db.Timestamptz()
+  id         Int      @id @default(autoincrement())
+  type_name  String   @db.VarChar
   subsection_question_types   Subsection_Question_Type[]
 }
 
