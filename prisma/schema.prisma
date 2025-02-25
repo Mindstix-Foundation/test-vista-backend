@@ -299,11 +299,15 @@ model Subsection_Question_Type {
   id                          Int           @id @default(autoincrement())
   section                     Section       @relation(fields: [section_id], references: [id], onDelete: Cascade)
   section_id                  Int
-  seqencial_subquestion_number Int
+  seqencial_subquestion_number Int          // 0 means this question type applies to all questions in the section
   question_type              Question_Type @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
   question_type_id           Int
   created_at                 DateTime      @default(now()) @db.Timestamptz()
   updated_at                 DateTime      @updatedAt @db.Timestamptz()
+
+  // Adding a comment to document the special case
+  /// When seqencial_subquestion_number is 0, this question type applies to all questions in the section
+  /// Otherwise, it applies only to the specific question number
 
   @@unique([section_id, seqencial_subquestion_number])
 }

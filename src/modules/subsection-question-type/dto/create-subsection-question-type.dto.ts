@@ -11,12 +11,13 @@ export class CreateSubsectionQuestionTypeDto {
   section_id: number;
 
   @ApiProperty({
-    description: 'Sequential subquestion number',
-    example: 1
+    description: 'Sequential subquestion number (0 means applies to all questions)',
+    example: 1,
+    minimum: 0
   })
   @IsInt()
   @IsNotEmpty()
-  @Min(1)
+  @Min(0)
   seqencial_subquestion_number: number;
 
   @ApiProperty({
