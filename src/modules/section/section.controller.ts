@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Put, Param, Delete, ParseIntPipe, Query, H
 import { SectionService } from './section.service';
 import { CreateSectionDto } from './dto/create-section.dto';
 import { UpdateSectionDto } from './dto/update-section.dto';
+import { ReorderSectionDto } from './dto/reorder-section.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('sections')
@@ -50,5 +51,17 @@ export class SectionController {
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Section not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     return await this.sectionService.remove(id);
+  }
+
+  @Put(':id/reorder')
+  @ApiOperation({ summary: 'Reorder a section' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Section reordered successfully' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Section not found' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid position' })
+  async reorder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() reorderDto: ReorderSectionDto,
+  ) {
+    return await this.sectionService.reorderSection(id, reorderDto.newPosition, reorderDto.patternId);
   }
 } 

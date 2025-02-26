@@ -11,13 +11,22 @@ export class CreateSectionDto {
   pattern_id: number;
 
   @ApiProperty({
-    description: 'Sequential section number',
+    description: 'Section sequence number',
     example: 1
   })
   @IsInt()
   @IsNotEmpty()
   @Min(1)
-  seqencial_section_number: number;
+  sequence_number: number;
+
+  @ApiProperty({
+    description: 'Section number',
+    example: 1
+  })
+  @IsInt()
+  @IsNotEmpty()
+  @Min(1)
+  section_number: number;
 
   @ApiProperty({
     description: 'Sub section',

@@ -279,20 +279,21 @@ model Pattern {
 }
 
 model Section {
-  id                       Int                       @id @default(autoincrement())
-  pattern                  Pattern                   @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
-  pattern_id               Int
-  seqencial_section_number Int
-  sub_section             String                    @db.VarChar
-  section_name            String                    @db.VarChar
-  total_questions         Int
-  mandotory_questions     Int
-  marks_per_question      Int
-  created_at              DateTime                  @default(now()) @db.Timestamptz()
-  updated_at              DateTime                  @updatedAt @db.Timestamptz()
+  id              Int                       @id @default(autoincrement())
+  pattern         Pattern                   @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
+  pattern_id      Int
+  sequence_number Int
+  section_number  Int
+  sub_section     String                    @db.VarChar
+  section_name    String                    @db.VarChar
+  total_questions Int
+  mandotory_questions Int
+  marks_per_question  Int
+  created_at      DateTime                  @default(now()) @db.Timestamptz()
+  updated_at      DateTime                  @updatedAt @db.Timestamptz()
   subsection_question_types Subsection_Question_Type[]
 
-  @@unique([pattern_id, seqencial_section_number])
+  @@unique([pattern_id, sequence_number])
 }
 
 model Subsection_Question_Type {
