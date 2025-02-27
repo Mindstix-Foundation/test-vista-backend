@@ -1,9 +1,12 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { TeacherSubjectService } from './teacher-subject.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import {  Type } from 'class-transformer';
 import { IsOptional, IsNumber } from 'class-validator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 class GetTeacherSubjectsQueryDto {
   @IsOptional()
@@ -19,10 +22,13 @@ class GetTeacherSubjectsQueryDto {
 
 @ApiTags('teacher-subjects')
 @Controller('teacher-subjects')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class TeacherSubjectController {
   constructor(private readonly teacherSubjectService: TeacherSubjectService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Assign subject to teacher' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Subject assigned successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Teacher, School Standard or Subject not found' })
@@ -32,6 +38,7 @@ export class TeacherSubjectController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all teacher subject assignments' })
   @ApiQuery({ name: 'userId', required: false, type: Number })
   @ApiQuery({ name: 'schoolStandardId', required: false, type: Number })
@@ -44,6 +51,7 @@ export class TeacherSubjectController {
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get teacher subject assignment by id' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns the assignment' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Assignment not found' })
@@ -52,6 +60,7 @@ export class TeacherSubjectController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete teacher subject assignment' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Assignment deleted successfully' })
@@ -61,6 +70,7 @@ export class TeacherSubjectController {
   }
 
   @Delete('user/:userId')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete all teacher subject assignments for a user' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'All assignments deleted successfully' })

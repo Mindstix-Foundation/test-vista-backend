@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BoardModule } from './modules/board/board.module';
@@ -25,9 +26,13 @@ import { PatternModule } from './modules/pattern/pattern.module';
 import { QuestionTypeModule } from './modules/question-type/question-type.module';
 import { SectionModule } from './modules/section/section.module';
 import { SubsectionQuestionTypeModule } from './modules/subsection-question-type/subsection-question-type.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     CountryModule,
     StateModule,
     CityModule,
@@ -52,6 +57,7 @@ import { SubsectionQuestionTypeModule } from './modules/subsection-question-type
     QuestionTypeModule,
     SectionModule,
     SubsectionQuestionTypeModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

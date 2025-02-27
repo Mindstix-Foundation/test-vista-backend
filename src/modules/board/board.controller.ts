@@ -1,63 +1,53 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards } from '@nestjs/common';
 import { BoardService } from './board.service';
 import { BoardDto, CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('boards')
 @Controller('boards')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class BoardController {
   constructor(private readonly boardService: BoardService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new board' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Board created successfully' })
-  @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Board already exists' })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
   async create(@Body() createBoardDto: CreateBoardDto) {
     return await this.boardService.create(createBoardDto);
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all boards' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Returns all boards',
-    type: BoardDto,
-    isArray: true
-  })
   findAll(): Promise<BoardDto[]> {
     return this.boardService.findAll();
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get a board by id' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Board found' })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
-  async findOne(@Param('id') id: number) {
-    return await this.boardService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.boardService.findOne(id);
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a board' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'The board has been successfully updated.',
-    type: BoardDto
-  })
-  update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() updateBoardDto: UpdateBoardDto,
-  ): Promise<BoardDto> {
+  update(@Param('id', ParseIntPipe) id: number, @Body() updateBoardDto: UpdateBoardDto) {
     return this.boardService.update(id, updateBoardDto);
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.OK)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Delete a board' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Board deleted successfully or error message' })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Board has connected schools' })
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    return await this.boardService.remove(id);
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.boardService.remove(id);
   }
 }

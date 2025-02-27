@@ -1,14 +1,20 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards } from '@nestjs/common';
 import { SubjectService } from './subject.service';
 import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('subjects')
 @Controller('subjects')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class SubjectController {
   constructor(private readonly subjectService: SubjectService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new subject' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Subject created successfully' })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Subject already exists' })
@@ -18,6 +24,7 @@ export class SubjectController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all subjects' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
@@ -28,6 +35,7 @@ export class SubjectController {
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get a subject by id' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Subject found' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Subject not found' })
@@ -36,6 +44,7 @@ export class SubjectController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a subject' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Subject updated successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Subject not found' })
@@ -48,6 +57,7 @@ export class SubjectController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a subject' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Subject deleted successfully' })
@@ -57,6 +67,7 @@ export class SubjectController {
   }
 
   @Get('board/:boardId')
+  @Roles('ADMIN', 'TEACHER')
   @ApiResponse({ status: 200, description: 'List of subjects for the specified board' })
   async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
     return await this.subjectService.findByBoard(boardId);

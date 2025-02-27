@@ -10,19 +10,26 @@ import {
   HttpStatus,
   HttpCode,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { TopicService } from './topic.service';
 import { CreateTopicDto } from './dto/create-topic.dto';
 import { UpdateTopicDto } from './dto/update-topic.dto';
-import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { ReorderTopicDto } from './dto/reorder-topic.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('topics')
 @Controller('topics')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class TopicController {
   constructor(private readonly topicService: TopicService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new topic' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Topic created successfully' })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Topic already exists' })
@@ -32,6 +39,7 @@ export class TopicController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all topics' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all topics' })
   @ApiQuery({ name: 'chapterId', required: false, type: Number })
@@ -40,6 +48,7 @@ export class TopicController {
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get a topic by id' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Topic found' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Topic not found' })
@@ -48,6 +57,7 @@ export class TopicController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a topic' })
   @ApiResponse({ status: HttpStatus.OK, description: 'The topic has been successfully updated.' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Topic not found' })
@@ -56,6 +66,7 @@ export class TopicController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a topic' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Topic deleted successfully' })
@@ -65,6 +76,7 @@ export class TopicController {
   }
 
   @Put('reorder/:topicId/:chapterId')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Reorder a topic within a chapter' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Topic reordered successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Topic not found or does not belong to the chapter' })

@@ -312,3 +312,12 @@ model Subsection_Question_Type {
 
   @@unique([section_id, seqencial_subquestion_number])
 }
+
+model Blacklisted_Token {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@map("blacklisted_tokens")
+}

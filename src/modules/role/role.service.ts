@@ -58,4 +58,15 @@ export class RoleService {
       throw error;
     }
   }
+
+  async findUserRoles(userId: number) {
+    const userRoles = await this.prisma.user_Role.findMany({
+      where: { user_id: userId },
+      include: {
+        role: true
+      }
+    });
+
+    return userRoles.map(userRole => userRole.role);
+  }
 } 

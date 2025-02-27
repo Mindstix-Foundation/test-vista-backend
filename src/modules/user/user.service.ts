@@ -297,4 +297,16 @@ export class UserService {
 
     throw new InternalServerErrorException(`Failed to ${operation}`);
   }
+
+  async findByEmail(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email_id: email }
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with email ${email} not found`);
+    }
+
+    return user;
+  }
 } 
