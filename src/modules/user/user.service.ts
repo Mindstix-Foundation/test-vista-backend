@@ -128,8 +128,6 @@ export class UserService {
 
   async update(id: number, updateDto: UpdateUserDto) {
     try {
-      
-
       if (updateDto.email_id) {
         if (!this.isValidEmail(updateDto.email_id)) {
           throw new BadRequestException('Invalid email format');
@@ -152,7 +150,6 @@ export class UserService {
         data: {
           ...updateDto,
           name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
-          password: updateDto.password ? await this.hashPassword(updateDto.password) : undefined,
           contact_number: updateDto.contact_number,
           alternate_contact_number: updateDto.alternate_contact_number || null,
         },

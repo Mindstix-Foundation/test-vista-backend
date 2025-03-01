@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ConflictException, BadRequestExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
 import { Prisma } from '@prisma/client';
+import { parseQueryParams } from '../../utils/queryParams';
 
 @Injectable()
 export class MediumStandardSubjectService {
@@ -121,42 +122,45 @@ export class MediumStandardSubjectService {
     }
   }
 
-  async findAll(query: GetMssQueryDto) {
+  async findAll(boardId?: string, instruction_medium_id?: string, standard_id?: string, subject_id?: string) {
     try {
-      const { board_id, instruction_medium_id, standard_id, subject_id } = query;
-      
+      const parsedParams = parseQueryParams(
+        { boardId, instruction_medium_id, standard_id, subject_id },
+        ['boardId', 'instruction_medium_id', 'standard_id', 'subject_id']
+      );
+
       const where: any = {};
 
-      // If board_id is provided, filter all related entities by board
-      if (board_id) {
+      if (parsedParams.boardId) {
         where.OR = [
           {
             instruction_medium: {
-              board_id: board_id
+              board_id: parsedParams.boardId
             }
           },
           {
             standard: {
-              board_id: board_id
+              board_id: parsedParams.boardId
             }
           },
           {
             subject: {
-              board_id: board_id
+              board_id: parsedParams.boardId
             }
           }
         ];
       }
 
-      // Add other filters
-      if (instruction_medium_id) {
-        where.instruction_medium_id = instruction_medium_id;
+      if (parsedParams.instruction_medium_id) {
+        where.instruction_medium_id = parsedParams.instruction_medium_id;
       }
-      if (standard_id) {
-        where.standard_id = standard_id;
+
+      if (parsedParams.standard_id) {
+        where.standard_id = parsedParams.standard_id;
       }
-      if (subject_id) {
-        where.subject_id = subject_id;
+
+      if (parsedParams.subject_id) {
+        where.subject_id = parsedParams.subject_id;
       }
 
       return await this.prisma.medium_Standard_Subject.findMany({
@@ -165,6 +169,9 @@ export class MediumStandardSubjectService {
       });
     } catch (error) {
       this.logger.error('Failed to fetch medium standard subjects:', error);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new InternalServerErrorException('Failed to fetch medium standard subjects');
     }
   }

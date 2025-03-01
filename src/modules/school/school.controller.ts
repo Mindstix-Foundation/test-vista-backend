@@ -38,15 +38,20 @@ export class SchoolController {
   @Get()
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all schools' })
-  @ApiQuery({ name: 'boardId', required: false, type: Number })
+  @ApiQuery({ 
+    name: 'boardId', 
+    required: false, 
+    type: Number,
+    description: 'Filter schools by board ID' 
+  })
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Returns all schools',
     type: SchoolDto,
     isArray: true
   })
-  async findAll(@Query() query: GetSchoolsQueryDto) {
-    return await this.schoolService.findAll(query.boardId);
+  async findAll(@Query('boardId', new ParseIntPipe({ optional: true })) boardId?: number) {
+    return this.schoolService.findAll(boardId);
   }
 
   @Get(':id')

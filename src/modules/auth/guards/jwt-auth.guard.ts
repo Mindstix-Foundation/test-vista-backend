@@ -1,7 +1,10 @@
-import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from '../auth.service';
-import { Request } from 'express';
 import { Inject, forwardRef } from '@nestjs/common';
 
 @Injectable()
@@ -15,33 +18,42 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     try {
-      // First run the default JWT guard
-      const isJwtValid = await super.canActivate(context) as boolean;
-      if (!isJwtValid) {
-        return false;
-      }
-
-      // Then check if token is blacklisted
+      // Get the request
       const request = context.switchToHttp().getRequest();
-      const token = this.extractTokenFromHeader(request);
       
+      // Extract token
+      const token = this.extractTokenFromHeader(request);
       if (!token) {
         throw new UnauthorizedException('No token provided');
       }
 
+      // Check if token is blacklisted
       const isBlacklisted = await this.authService?.isTokenBlacklisted(token);
       if (isBlacklisted) {
         throw new UnauthorizedException('Token has been invalidated');
       }
 
+      // Validate JWT token
+      const isValid = await super.canActivate(context);
+      if (!isValid) {
+        throw new UnauthorizedException('Invalid token');
+      }
+
       return true;
     } catch (error) {
-      throw new UnauthorizedException('Invalid token or session expired');
+      this.handleError(error);
     }
   }
 
-  private extractTokenFromHeader(request: Request): string {
+  private extractTokenFromHeader(request: any): string | undefined {
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
     return type === 'Bearer' ? token : undefined;
+  }
+
+  private handleError(error: any) {
+    if (error instanceof UnauthorizedException) {
+      throw error;
+    }
+    throw new UnauthorizedException('Invalid token or session expired');
   }
 } 

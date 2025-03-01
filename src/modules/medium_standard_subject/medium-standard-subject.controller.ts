@@ -25,14 +25,24 @@ export class MediumStandardSubjectController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all medium-standard-subject associations' })
-  @ApiQuery({ name: 'board_id', required: false, type: Number })
+  @ApiOperation({ summary: 'Get all medium standard subjects' })
+  @ApiQuery({ name: 'boardId', required: false, type: Number })
   @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
   @ApiQuery({ name: 'standard_id', required: false, type: Number })
   @ApiQuery({ name: 'subject_id', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all associations' })
-  async findAll(@Query() query: GetMssQueryDto) {
-    return await this.mssService.findAll(query);
+  async findAll(
+    @Query('boardId', new ParseIntPipe({ optional: true })) boardId?: string,
+    @Query('instruction_medium_id', new ParseIntPipe({ optional: true })) instruction_medium_id?: string,
+    @Query('standard_id', new ParseIntPipe({ optional: true })) standard_id?: string,
+    @Query('subject_id', new ParseIntPipe({ optional: true })) subject_id?: string,
+  ) {
+    return this.mssService.findAll(
+      boardId,
+      instruction_medium_id,
+      standard_id,
+      subject_id
+    );
   }
 
   @Get('medium/:mediumId/standard/:standardId')

@@ -39,15 +39,15 @@ export class TeacherSubjectController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all teacher subject assignments' })
+  @ApiOperation({ summary: 'Get all teacher subjects' })
   @ApiQuery({ name: 'userId', required: false, type: Number })
   @ApiQuery({ name: 'schoolStandardId', required: false, type: Number })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns all assignments' })
-  async findAll(@Query() query: GetTeacherSubjectsQueryDto) {
-    return await this.teacherSubjectService.findAll({
-      userId: query.userId,
-      schoolStandardId: query.schoolStandardId
-    });
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns all teacher subjects' })
+  async findAll(
+    @Query('userId', new ParseIntPipe({ optional: true })) userId?: string,
+    @Query('schoolStandardId', new ParseIntPipe({ optional: true })) schoolStandardId?: string,
+  ) {
+    return this.teacherSubjectService.findAll({ userId, schoolStandardId });
   }
 
   @Get(':id')

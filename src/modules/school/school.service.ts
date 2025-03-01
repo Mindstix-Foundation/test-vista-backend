@@ -82,7 +82,10 @@ export class SchoolService {
   async findAll(boardId?: number) {
     try {
       return await this.prisma.school.findMany({
-        where: boardId ? { board_id: boardId } : undefined,
+        where: {
+          // Convert boardId to number if it exists
+          ...(boardId && { board_id: parseInt(boardId.toString()) })
+        },
         include: {
           address: {
             include: {
