@@ -252,17 +252,13 @@ model Topic {
   created_at             DateTime @default(now()) @db.Timestamptz()
   updated_at             DateTime @updatedAt @db.Timestamptz()
 
-  unverified_questions   Unverified_Question[]
-  question_texts         Question_Text[]
-
-  @@unique([chapter_id, sequential_topic_number])
+  question_topics Question_Topic[]
 }
 
 model Question_Type {
   id                          Int                          @id @default(autoincrement())
   type_name                   String                       @db.VarChar
   subsection_question_types   Subsection_Question_Type[]
-  unverified_questions        Unverified_Question[]
   questions                   Question[]
 }
 
@@ -344,7 +340,6 @@ model Image {
   mcq_options       Mcq_Option[]
   match_pairs_left  Match_Pair[]          @relation("LeftImage")
   match_pairs_right Match_Pair[]          @relation("RightImage")
-  unverified_questions Unverified_Question[]
 }
 
 model Question {
@@ -352,18 +347,18 @@ model Question {
   question_type         Question_Type          @relation(fields: [question_type_id], references: [id])
   question_type_id      Int
   board_question        Boolean
-  created_at           DateTime               @default(now()) @db.Timestamptz()
-  updated_at           DateTime               @updatedAt @db.Timestamptz()
-  question_texts       Question_Text[]
-  test_paper_questions Test_Paper_Question[]
+  is_verified           Boolean                @default(false)
+  created_at            DateTime               @default(now()) @db.Timestamptz()
+  updated_at            DateTime               @updatedAt @db.Timestamptz()
+  question_texts        Question_Text[]
+  test_paper_questions  Test_Paper_Question[]
+  question_topics       Question_Topic[]
 }
 
 model Question_Text {
   id            Int           @id @default(autoincrement())
   question      Question      @relation(fields: [question_id], references: [id])
   question_id   Int
-  topic         Topic         @relation(fields: [topic_id], references: [id])
-  topic_id      Int
   image         Image?        @relation(fields: [image_id], references: [id])
   image_id      Int?
   question_text String
@@ -373,43 +368,42 @@ model Question_Text {
   match_pairs   Match_Pair[]
 }
 
-model Unverified_Question {
-  id               Int           @id @default(autoincrement())
-  question_type    Question_Type @relation(fields: [question_type_id], references: [id])
-  question_type_id Int
-  topic           Topic         @relation(fields: [topic_id], references: [id])
-  topic_id        Int
-  image           Image?        @relation(fields: [image_id], references: [id])
-  image_id        Int?
-  question_text   String
-  created_at      DateTime      @default(now()) @db.Timestamptz()
-  updated_at      DateTime      @updatedAt @db.Timestamptz()
+model Question_Topic {
+  id          Int      @id @default(autoincrement())
+  question    Question @relation(fields: [question_id], references: [id])
+  question_id Int
+  topic       Topic    @relation(fields: [topic_id], references: [id])
+  topic_id    Int
+  created_at  DateTime @default(now()) @db.Timestamptz()
+  updated_at  DateTime @updatedAt @db.Timestamptz()
+
+  @@unique([question_id, topic_id])
 }
 
 model Mcq_Option {
   id               Int            @id @default(autoincrement())
-  question_text    Question_Text @relation(fields: [question_text_id], references: [id])
+  question_text    Question_Text  @relation(fields: [question_text_id], references: [id])
   question_text_id Int
-  option_text      String?       @db.VarChar
-  image            Image?        @relation(fields: [image_id], references: [id])
+  option_text      String?        @db.VarChar
+  image            Image?         @relation(fields: [image_id], references: [id])
   image_id         Int?
   is_correct       Boolean
-  created_at       DateTime      @default(now()) @db.Timestamptz()
-  updated_at       DateTime      @updatedAt @db.Timestamptz()
+  created_at       DateTime       @default(now()) @db.Timestamptz()
+  updated_at       DateTime       @updatedAt @db.Timestamptz()
 }
 
 model Match_Pair {
   id               Int            @id @default(autoincrement())
-  question_text    Question_Text @relation(fields: [question_text_id], references: [id])
+  question_text    Question_Text  @relation(fields: [question_text_id], references: [id])
   question_text_id Int
-  left_text        String?       @db.VarChar
-  right_text       String?       @db.VarChar
-  left_image       Image?        @relation("LeftImage", fields: [left_image_id], references: [id])
+  left_text        String?        @db.VarChar
+  right_text       String?        @db.VarChar
+  left_image       Image?         @relation("LeftImage", fields: [left_image_id], references: [id])
   left_image_id    Int?
-  right_image      Image?        @relation("RightImage", fields: [right_image_id], references: [id])
+  right_image      Image?         @relation("RightImage", fields: [right_image_id], references: [id])
   right_image_id   Int?
-  created_at       DateTime      @default(now()) @db.Timestamptz()
-  updated_at       DateTime      @updatedAt @db.Timestamptz()
+  created_at       DateTime       @default(now()) @db.Timestamptz()
+  updated_at       DateTime       @updatedAt @db.Timestamptz()
 }
 
 model Test_Paper {

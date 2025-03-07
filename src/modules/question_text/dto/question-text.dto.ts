@@ -12,14 +12,6 @@ export class CreateQuestionTextDto {
 
   @ApiProperty({
     example: 1,
-    description: 'ID of the topic'
-  })
-  @IsInt()
-  @IsNotEmpty()
-  topic_id: number;
-
-  @ApiProperty({
-    example: 1,
     description: 'ID of the image (optional)',
     required: false
   })
@@ -37,15 +29,6 @@ export class CreateQuestionTextDto {
 }
 
 export class UpdateQuestionTextDto {
-  @ApiProperty({
-    example: 1,
-    description: 'ID of the topic',
-    required: false
-  })
-  @IsInt()
-  @IsOptional()
-  topic_id?: number;
-
   @ApiProperty({
     example: 1,
     description: 'ID of the image',
@@ -74,4 +57,22 @@ export class QuestionTextFilterDto {
   @IsInt()
   @IsOptional()
   topic_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by chapter ID'
+  })
+  @IsInt()
+  @IsOptional()
+  chapter_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by question type ID'
+  })
+  @IsInt()
+  @IsOptional()
+  question_type_id?: number;
 } 

@@ -25,6 +25,8 @@ export class QuestionTextController {
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all question texts' })
   @ApiQuery({ name: 'topic_id', required: false, type: Number })
+  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
+  @ApiQuery({ name: 'question_type_id', required: false, type: Number })
   async findAll(@Query() filters: QuestionTextFilterDto) {
     return await this.questionTextService.findAll(filters);
   }

@@ -25,6 +25,9 @@ export class QuestionController {
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all questions' })
   @ApiQuery({ name: 'question_type_id', required: false, type: Number })
+  @ApiQuery({ name: 'is_verified', required: false, type: Boolean })
+  @ApiQuery({ name: 'topic_id', required: false, type: Number })
+  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
   async findAll(@Query() filters: QuestionFilterDto) {
     return await this.questionService.findAll(filters);
   }
@@ -58,4 +61,4 @@ export class QuestionController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.questionService.remove(id);
   }
-} 
+}
