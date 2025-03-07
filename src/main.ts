@@ -21,12 +21,15 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   
   // Global validation pipe
-  app.useGlobalPipes(new ValidationPipe());
+  app.useGlobalPipes(new ValidationPipe({
+    transform: true,
+    whitelist: true
+  }));
 
   // Swagger setup
   const config = new DocumentBuilder()
-    .setTitle('Your API Title')
-    .setDescription('API Description')
+    .setTitle('Test Vista API')
+    .setDescription('The Test Vista API description')
     .setVersion('1.0')
     .addBearerAuth()
     .addTag('auth')

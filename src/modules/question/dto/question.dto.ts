@@ -1,0 +1,49 @@
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+
+export class CreateQuestionDto {
+  @ApiProperty({
+    example: 1,
+    description: 'Question type ID'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  question_type_id: number;
+
+  @ApiProperty({
+    example: true,
+    description: 'Whether this is a board question'
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  board_question: boolean;
+}
+
+export class UpdateQuestionDto {
+  @ApiProperty({
+    example: 1,
+    description: 'Question type ID'
+  })
+  @IsInt()
+  @IsOptional()
+  question_type_id?: number;
+
+  @ApiProperty({
+    example: true,
+    description: 'Whether this is a board question'
+  })
+  @IsBoolean()
+  @IsOptional()
+  board_question?: boolean;
+}
+
+export class QuestionFilterDto {
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by question type ID'
+  })
+  @IsInt()
+  @IsOptional()
+  question_type_id?: number;
+} 

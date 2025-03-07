@@ -143,7 +143,7 @@ export class SubjectService {
         where: { id },
         include: {
           board: true,
-          Medium_Standard_Subject: {
+          medium_standard_subjects: {
             include: {
               instruction_medium: true,
               standard: true,
@@ -168,13 +168,13 @@ export class SubjectService {
 
       // Get counts of related entities for informative message
       const relatedCounts = {
-        mediumStandards: subject.Medium_Standard_Subject.length,
-        teachers: new Set(subject.Medium_Standard_Subject.flatMap(mss => 
+        mediumStandards: subject.medium_standard_subjects.length,
+        teachers: new Set(subject.medium_standard_subjects.flatMap(mss => 
           mss.teacher_subjects.map(ts => ts.user_id)
         )).size,
-        chapters: subject.Medium_Standard_Subject.reduce((sum, mss) => 
+        chapters: subject.medium_standard_subjects.reduce((sum, mss) => 
           sum + mss.chapters.length, 0),
-        topics: subject.Medium_Standard_Subject.reduce((sum, mss) => 
+        topics: subject.medium_standard_subjects.reduce((sum, mss) => 
           sum + mss.chapters.reduce((chapterSum, chapter) => 
             chapterSum + chapter.topics.length, 0), 0)
       };

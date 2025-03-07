@@ -60,7 +60,7 @@ export class SchoolStandardService {
       // Add syllabus filter if requested
       if (hasSyllabus !== undefined) {
         where.standard = {
-          Medium_Standard_Subject: {
+          medium_standard_subjects: {
             some: hasSyllabus ? {} : undefined,
             none: !hasSyllabus ? {} : undefined,
           }
@@ -73,7 +73,7 @@ export class SchoolStandardService {
           school: true,
           standard: {
             include: {
-              Medium_Standard_Subject: true
+              medium_standard_subjects: true
             }
           }
         }
@@ -99,7 +99,7 @@ export class SchoolStandardService {
       // Add syllabus filter if requested
       if (hasSyllabus !== undefined) {
         where.standard = {
-          Medium_Standard_Subject: {
+          medium_standard_subjects: {
             some: hasSyllabus ? {} : undefined,
             none: !hasSyllabus ? {} : undefined,
           }
@@ -111,7 +111,7 @@ export class SchoolStandardService {
         include: {
           standard: {
             include: {
-              Medium_Standard_Subject: true
+              medium_standard_subjects: true
             }
           }
         }
@@ -133,7 +133,7 @@ export class SchoolStandardService {
         include: {
           school: true,
           standard: true,
-          Teacher_Subject: {
+          teacher_subjects: {
             include: {
               user: true,
               medium_standard_subject: true
@@ -148,8 +148,8 @@ export class SchoolStandardService {
 
       // Get counts of related entities for informative message
       const relatedCounts = {
-        teachers: new Set(schoolStandard.Teacher_Subject.map(ts => ts.user_id)).size,
-        subjects: new Set(schoolStandard.Teacher_Subject.map(ts => ts.medium_standard_subject_id)).size
+        teachers: new Set(schoolStandard.teacher_subjects.map(ts => ts.user_id)).size,
+        subjects: new Set(schoolStandard.teacher_subjects.map(ts => ts.medium_standard_subject_id)).size
       };
 
       // Log what will be deleted
