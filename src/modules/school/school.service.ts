@@ -52,12 +52,12 @@ export class SchoolService {
         include: {
           address: true,
           board: true,
-          School_Standard: {
+          school_standards: {
             include: {
               standard: true
             }
           },
-          School_Instruction_Medium: {
+          school_instruction_mediums: {
             include: {
               instruction_medium: true
             }
@@ -83,7 +83,6 @@ export class SchoolService {
     try {
       return await this.prisma.school.findMany({
         where: {
-          // Convert boardId to number if it exists
           ...(boardId && { board_id: parseInt(boardId.toString()) })
         },
         include: {
@@ -101,12 +100,12 @@ export class SchoolService {
             }
           },
           board: true,
-          School_Standard: {
+          school_standards: {
             include: {
               standard: true
             }
           },
-          School_Instruction_Medium: {
+          school_instruction_mediums: {
             include: {
               instruction_medium: true
             }
@@ -126,12 +125,12 @@ export class SchoolService {
         include: {
           address: true,
           board: true,
-          School_Standard: {
+          school_standards: {
             include: {
               standard: true
             }
           },
-          School_Instruction_Medium: {
+          school_instruction_mediums: {
             include: {
               instruction_medium: true
             }
@@ -166,7 +165,6 @@ export class SchoolService {
           throw new NotFoundException(`Address with ID ${updateDto.address_id} not found`);
         }
 
-        // Check if address is used by another school
         const existingSchool = await this.prisma.school.findFirst({
           where: { 
             address_id: updateDto.address_id,
@@ -203,12 +201,12 @@ export class SchoolService {
         include: {
           address: true,
           board: true,
-          School_Standard: {
+          school_standards: {
             include: {
               standard: true
             }
           },
-          School_Instruction_Medium: {
+          school_instruction_mediums: {
             include: {
               instruction_medium: true
             }
@@ -227,17 +225,16 @@ export class SchoolService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if school exists with its relationships
       const school = await this.prisma.school.findUnique({
         where: { id },
         include: {
-          School_Standard: {
+          school_standards: {
             include: {
-              Teacher_Subject: true
+              teacher_subjects: true
             }
           },
-          School_Instruction_Medium: true,
-          User_School: true
+          school_instruction_mediums: true,
+          user_schools: true
         }
       });
 
@@ -245,17 +242,15 @@ export class SchoolService {
         throw new NotFoundException(`School with ID ${id} not found`);
       }
 
-      // Get counts of related entities for informative message
       const relatedCounts = {
-        standards: school.School_Standard.length,
-        teachers: new Set(school.School_Standard.flatMap(ss => 
-          ss.Teacher_Subject.map(ts => ts.user_id)
+        standards: school.school_standards.length,
+        teachers: new Set(school.school_standards.flatMap(ss => 
+          ss.teacher_subjects.map(ts => ts.user_id)
         )).size,
-        instructionMediums: school.School_Instruction_Medium.length,
-        users: school.User_School.length
+        instructionMediums: school.school_instruction_mediums.length,
+        users: school.user_schools.length
       };
 
-      // Log what will be deleted
       this.logger.log(`Deleting school ${id} will also delete:
         - ${relatedCounts.standards} standard assignments
         - ${relatedCounts.teachers} teacher assignments
@@ -263,12 +258,9 @@ export class SchoolService {
         - ${relatedCounts.users} user associations
         and all their related records`);
 
-      // Delete the school - cascade will handle all related records
       await this.prisma.school.delete({
         where: { id }
       });
-
-      this.logger.log(`Successfully deleted school ${id} and all related records`);
     } catch (error) {
       this.logger.error(`Failed to delete school ${id}:`, error);
       if (error instanceof NotFoundException) {

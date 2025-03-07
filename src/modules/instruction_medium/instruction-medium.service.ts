@@ -142,8 +142,8 @@ export class InstructionMediumService {
       const instructionMedium = await this.prisma.instruction_Medium.findUnique({
         where: { id },
         include: {
-          School_Instruction_Medium: true,
-          Medium_Standard_Subject: true
+          school_instruction_mediums: true,
+          medium_standard_subjects: true
         }
       });
 
@@ -153,8 +153,8 @@ export class InstructionMediumService {
 
       // Get counts of related entities for informative message
       const relatedCounts = {
-        schoolAssociations: instructionMedium.School_Instruction_Medium.length,
-        subjectAssociations: instructionMedium.Medium_Standard_Subject.length
+        schoolAssociations: instructionMedium.school_instruction_mediums.length,
+        subjectAssociations: instructionMedium.medium_standard_subjects.length
       };
 
       // Log what will be deleted

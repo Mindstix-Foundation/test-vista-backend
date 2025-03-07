@@ -27,6 +27,9 @@ import { QuestionTypeModule } from './modules/question-type/question-type.module
 import { SectionModule } from './modules/section/section.module';
 import { SubsectionQuestionTypeModule } from './modules/subsection-question-type/subsection-question-type.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { QuestionModule } from './modules/question/question.module';
+import { QuestionTextModule } from './modules/question_text/question-text.module';
+import { ImageModule } from './modules/image/image.module';
 
 @Module({
   imports: [
@@ -58,6 +61,9 @@ import { AuthModule } from './modules/auth/auth.module';
     SectionModule,
     SubsectionQuestionTypeModule,
     AuthModule,
+    QuestionModule,
+    QuestionTextModule,
+    ImageModule
   ],
   controllers: [AppController],
   providers: [AppService],

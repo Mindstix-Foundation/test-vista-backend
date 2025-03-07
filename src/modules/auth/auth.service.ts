@@ -138,11 +138,11 @@ export class AuthService {
       );
 
       // Store reset token in database
-      await this.prisma.passwordReset.create({
+      await this.prisma.password_Reset.create({
         data: {
           token,
-          userId: user.id,
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
+          user_id: user.id,
+          expires_at: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
           used: false
         },
       });
@@ -279,11 +279,11 @@ export class AuthService {
     try {
       const payload = this.jwtService.verify(resetPasswordDto.token) as { email_id: string };
       
-      const resetRecord = await this.prisma.passwordReset.findFirst({
+      const resetRecord = await this.prisma.password_Reset.findFirst({
         where: {
           token: resetPasswordDto.token,
           used: false,
-          expiresAt: {
+          expires_at: {
             gt: new Date(),
           },
         },
@@ -302,7 +302,7 @@ export class AuthService {
       });
 
       // Invalidate reset token
-      await this.prisma.passwordReset.update({
+      await this.prisma.password_Reset.update({
         where: { id: resetRecord.id },
         data: { used: true },
       });
