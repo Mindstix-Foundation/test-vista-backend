@@ -1,15 +1,21 @@
-import { Controller, Post, Body, Get, Param, Delete, ParseIntPipe, Put, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Post, Body, Get, Param, Delete, ParseIntPipe, Put, HttpStatus, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BoardManagementService } from './board-management.service';
 import { CreateBoardManagementDto } from './dto/create-board-management.dto';
 import { UpdateBoardManagementDto } from './dto/update-board-management.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('board-management')
 @Controller('board-management')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class BoardManagementController {
   constructor(private readonly boardManagementService: BoardManagementService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new board with all related entities' })
   @ApiResponse({ 
     status: HttpStatus.CREATED, 
@@ -19,29 +25,27 @@ export class BoardManagementController {
     status: HttpStatus.BAD_REQUEST, 
     description: 'Invalid input data' 
   })
-  @ApiResponse({ 
-    status: HttpStatus.CONFLICT, 
-    description: 'Entity already exists' 
-  })
   async create(@Body() createDto: CreateBoardManagementDto) {
     return await this.boardManagementService.create(createDto);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all boards with related entities' })
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get all boards with their related entities' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Returns all boards with their related entities' 
+    description: 'Returns all boards and their related entities' 
   })
   async findAll() {
     return await this.boardManagementService.findAll();
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a board by id with related entities' })
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get a board and its related entities by id' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Returns a board with its related entities' 
+    description: 'Returns the board and its related entities' 
   })
   @ApiResponse({ 
     status: HttpStatus.NOT_FOUND, 
@@ -52,6 +56,7 @@ export class BoardManagementController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Delete a board and its related entities' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
@@ -66,6 +71,7 @@ export class BoardManagementController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a board and its related entities' })
   @ApiResponse({ 
     status: HttpStatus.OK, 

@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ConflictException, BadRequestExc
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
 import { Prisma } from '@prisma/client';
+import { parseQueryParams } from '../../utils/queryParams';
 
 @Injectable()
 export class TeacherSubjectService {
@@ -166,17 +167,80 @@ export class TeacherSubjectService {
     }
   }
 
-  async findAll(filters?: { userId?: number; schoolStandardId?: number }) {
+  async findAll(filters: { userId?: string; schoolStandardId?: string }) {
     try {
-      return await this.prisma.teacher_Subject.findMany({
-        where: {
-          ...(filters?.userId && { user_id: filters.userId }),
-          ...(filters?.schoolStandardId && { school_standard_id: filters.schoolStandardId })
+      const parsedParams = parseQueryParams(
+        { 
+          userId: filters.userId, 
+          schoolStandardId: filters.schoolStandardId 
         },
-        select: this.teacherSubjectSelect
+        ['userId', 'schoolStandardId']
+      );
+
+      const where: any = {};
+
+      if (parsedParams.userId) {
+        where.user_id = parsedParams.userId;
+      }
+
+      if (parsedParams.schoolStandardId) {
+        where.school_standard_id = parsedParams.schoolStandardId;
+      }
+
+      return await this.prisma.teacher_Subject.findMany({
+        where,
+        select: {
+          id: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email_id: true
+            }
+          },
+          school_standard: {
+            select: {
+              id: true,
+              school: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              },
+              standard: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          medium_standard_subject: {
+            select: {
+              id: true,
+              instruction_medium: {
+                select: {
+                  id: true,
+                  instruction_medium: true
+                }
+              },
+              subject: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          created_at: true,
+          updated_at: true
+        }
       });
     } catch (error) {
       this.logger.error('Failed to fetch teacher subjects:', error);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new InternalServerErrorException('Failed to fetch teacher subjects');
     }
   }

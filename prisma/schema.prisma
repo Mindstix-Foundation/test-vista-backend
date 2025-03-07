@@ -166,6 +166,7 @@ model User {
   user_roles            User_Role[]
   user_schools          User_School[]
   teacher_subjects      Teacher_Subject[]
+  passwordResets         PasswordReset[]
 
   @@map("user")
 }
@@ -311,4 +312,25 @@ model Subsection_Question_Type {
   /// Otherwise, it applies only to the specific question number
 
   @@unique([section_id, seqencial_subquestion_number])
+}
+
+model Blacklisted_Token {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@map("blacklisted_tokens")
+}
+
+model PasswordReset {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
 }

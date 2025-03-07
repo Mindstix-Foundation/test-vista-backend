@@ -1,7 +1,10 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, BadRequestException, ArgumentMetadata, Injectable, PipeTransform, ParseBoolPipe } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, BadRequestException, ArgumentMetadata, Injectable, PipeTransform, ParseBoolPipe, UseGuards } from '@nestjs/common';
 import { SchoolStandardService } from './school_standard.service';
 import { CreateSchoolStandardDto, SchoolStandardDto } from './dto/school-standard.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Injectable()
 class OptionalParseIntPipe implements PipeTransform<string | undefined, number | undefined> {
@@ -24,10 +27,13 @@ class OptionalParseIntPipe implements PipeTransform<string | undefined, number |
 
 @ApiTags('school-standards')
 @Controller('school-standards')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class SchoolStandardController {
   constructor(private readonly service: SchoolStandardService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new school standard mapping' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Successfully created', type: SchoolStandardDto })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School or Standard not found' })
@@ -37,6 +43,7 @@ export class SchoolStandardController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all school standard mappings' })
   @ApiQuery({ name: 'standardId', required: false, type: Number })
   @ApiQuery({ name: 'hasSyllabus', required: false, type: Boolean })
@@ -49,6 +56,7 @@ export class SchoolStandardController {
   }
 
   @Get('school/:schoolId')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get standards for a specific school' })
   @ApiQuery({ name: 'hasSyllabus', required: false, type: Boolean })
   @ApiResponse({ status: HttpStatus.OK, description: 'List of standards for the school', type: [SchoolStandardDto] })
@@ -61,6 +69,7 @@ export class SchoolStandardController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a school standard mapping' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Successfully deleted' })

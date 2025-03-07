@@ -1,14 +1,20 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { MediumStandardSubjectService } from './medium-standard-subject.service';
 import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('medium-standard-subjects')
 @Controller('medium-standard-subjects')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class MediumStandardSubjectController {
   constructor(private readonly mssService: MediumStandardSubjectService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create medium-standard-subject association' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Association created successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium, Standard or Subject not found' })
@@ -18,17 +24,29 @@ export class MediumStandardSubjectController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all medium-standard-subject associations' })
-  @ApiQuery({ name: 'board_id', required: false, type: Number })
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get all medium standard subjects' })
+  @ApiQuery({ name: 'boardId', required: false, type: Number })
   @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
   @ApiQuery({ name: 'standard_id', required: false, type: Number })
   @ApiQuery({ name: 'subject_id', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all associations' })
-  async findAll(@Query() query: GetMssQueryDto) {
-    return await this.mssService.findAll(query);
+  async findAll(
+    @Query('boardId', new ParseIntPipe({ optional: true })) boardId?: string,
+    @Query('instruction_medium_id', new ParseIntPipe({ optional: true })) instruction_medium_id?: string,
+    @Query('standard_id', new ParseIntPipe({ optional: true })) standard_id?: string,
+    @Query('subject_id', new ParseIntPipe({ optional: true })) subject_id?: string,
+  ) {
+    return this.mssService.findAll(
+      boardId,
+      instruction_medium_id,
+      standard_id,
+      subject_id
+    );
   }
 
   @Get('medium/:mediumId/standard/:standardId')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get subjects for medium and standard' })
   @ApiQuery({ name: 'board_id', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns subjects for the medium and standard' })
@@ -42,6 +60,7 @@ export class MediumStandardSubjectController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete medium-standard-subject association' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Association deleted successfully' })
@@ -52,6 +71,7 @@ export class MediumStandardSubjectController {
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get medium standard subject by ID' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns the medium standard subject' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium standard subject not found' })

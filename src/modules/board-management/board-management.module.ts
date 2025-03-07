@@ -7,6 +7,7 @@ import { AddressModule } from '../address/address.module';
 import { InstructionMediumModule } from '../instruction_medium/instruction-medium.module';
 import { StandardModule } from '../standard/standard.module';
 import { SubjectModule } from '../subject/subject.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SubjectModule } from '../subject/subject.module';
     InstructionMediumModule,
     StandardModule,
     SubjectModule,
+    AuthModule,
   ],
   controllers: [BoardManagementController],
   providers: [BoardManagementService],

@@ -10,19 +10,26 @@ import {
   HttpStatus,
   HttpCode,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ChapterService } from './chapter.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
-import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { ReorderChapterDto } from './dto/reorder-chapter.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('chapters')
 @Controller('chapters')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class ChapterController {
   constructor(private readonly chapterService: ChapterService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new chapter' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Chapter created successfully' })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Chapter already exists' })
@@ -32,6 +39,7 @@ export class ChapterController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all chapters' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all chapters' })
   @ApiQuery({
@@ -45,6 +53,7 @@ export class ChapterController {
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get a chapter by id' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Chapter found' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found' })
@@ -53,6 +62,7 @@ export class ChapterController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a chapter' })
   @ApiResponse({ status: HttpStatus.OK, description: 'The chapter has been successfully updated.' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found' })
@@ -61,6 +71,7 @@ export class ChapterController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a chapter' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Chapter deleted successfully' })
@@ -70,6 +81,7 @@ export class ChapterController {
   }
 
   @Put('reorder/:chapterId/:mediumStandardSubjectId')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Reorder a chapter within a medium standard subject' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Chapter reordered successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found' })

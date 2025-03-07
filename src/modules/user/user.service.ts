@@ -128,8 +128,6 @@ export class UserService {
 
   async update(id: number, updateDto: UpdateUserDto) {
     try {
-      
-
       if (updateDto.email_id) {
         if (!this.isValidEmail(updateDto.email_id)) {
           throw new BadRequestException('Invalid email format');
@@ -152,7 +150,6 @@ export class UserService {
         data: {
           ...updateDto,
           name: updateDto.name ? toTitleCase(updateDto.name) : undefined,
-          password: updateDto.password ? await this.hashPassword(updateDto.password) : undefined,
           contact_number: updateDto.contact_number,
           alternate_contact_number: updateDto.alternate_contact_number || null,
         },
@@ -296,5 +293,17 @@ export class UserService {
     }
 
     throw new InternalServerErrorException(`Failed to ${operation}`);
+  }
+
+  async findByEmail(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email_id: email }
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with email ${email} not found`);
+    }
+
+    return user;
   }
 } 

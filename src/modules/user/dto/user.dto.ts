@@ -77,16 +77,6 @@ export class CreateUserDto {
 }
 
 export class UpdateUserDto {
-  @ApiPropertyOptional({ 
-    example: 'NewPassword123!',
-    description: 'Password must be at least 8 characters long and contain uppercase, lowercase, number and special character'
-  })
-  @IsOptional()
-  @IsString({ message: 'Password must be a string' })
-  @IsNotEmpty({ message: 'Password cannot be empty if provided' })
-  @IsStrongPassword()
-  password?: string;
-
   @ApiPropertyOptional({ example: 'john.doe@example.com' })
   @IsOptional()
   @IsEmail()

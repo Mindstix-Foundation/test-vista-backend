@@ -1,14 +1,20 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards } from '@nestjs/common';
 import { UserRoleService } from './user-role.service';
 import { CreateUserRoleDto } from './dto/user-role.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('user-roles')
 @Controller('user-roles')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class UserRoleController {
   constructor(private readonly userRoleService: UserRoleService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Assign role to user' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Role assigned successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User or Role not found' })
@@ -18,6 +24,7 @@ export class UserRoleController {
   }
 
   @Get()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Get all user role assignments' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all user role assignments' })
   async findAll() {
@@ -25,6 +32,7 @@ export class UserRoleController {
   }
 
   @Get('user/:userId')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Get roles for a specific user' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns user roles' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User not found' })
@@ -33,6 +41,7 @@ export class UserRoleController {
   }
 
   @Delete('user/:userId/role/:roleId')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove role from user' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Role removed successfully' })

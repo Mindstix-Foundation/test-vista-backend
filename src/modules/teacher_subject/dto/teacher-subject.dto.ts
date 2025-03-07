@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsNotEmpty } from 'class-validator';
+import { IsNumber, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class TeacherSubjectDto {
   @ApiProperty({ example: 1 })
@@ -34,4 +35,18 @@ export class CreateTeacherSubjectDto {
   @IsNumber()
   @IsNotEmpty()
   medium_standard_subject_id: number;
+}
+
+export class GetTeacherSubjectsQueryDto {
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  userId?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  schoolStandardId?: number;
 } 

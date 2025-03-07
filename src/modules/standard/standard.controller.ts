@@ -1,14 +1,20 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { StandardService } from './standard.service';
 import { StandardDto, CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('standards')
 @Controller('standards')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class StandardController {
   constructor(private readonly standardService: StandardService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create standard' })
   @ApiResponse({ 
     status: 201, 
@@ -20,6 +26,7 @@ export class StandardController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all standards' })
   @ApiResponse({ 
     status: 200, 
@@ -32,6 +39,7 @@ export class StandardController {
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get a standard by id' })
   @ApiResponse({ 
     status: 200, 
@@ -43,6 +51,7 @@ export class StandardController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a standard' })
   @ApiResponse({ 
     status: 200, 
@@ -57,6 +66,7 @@ export class StandardController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Delete a standard' })
   @ApiResponse({ 
     status: 204, 
@@ -67,6 +77,8 @@ export class StandardController {
   }
 
   @Get('board/:boardId')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get standards by board id' })
   @ApiResponse({ status: 200, description: 'List of standards for the specified board' })
   async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
     return await this.standardService.findByBoard(boardId);

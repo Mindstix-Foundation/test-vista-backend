@@ -1,9 +1,12 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { SchoolService } from './school.service';
 import { SchoolDto, CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsOptional, IsNumber } from 'class-validator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 class GetSchoolsQueryDto {
   @IsOptional()
@@ -14,10 +17,13 @@ class GetSchoolsQueryDto {
 
 @ApiTags('schools')
 @Controller('schools')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class SchoolController {
   constructor(private readonly schoolService: SchoolService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new school' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'School created successfully' })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'School already exists' })
@@ -30,19 +36,26 @@ export class SchoolController {
   }
 
   @Get()
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all schools' })
-  @ApiQuery({ name: 'boardId', required: false, type: Number })
+  @ApiQuery({ 
+    name: 'boardId', 
+    required: false, 
+    type: Number,
+    description: 'Filter schools by board ID' 
+  })
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Returns all schools',
     type: SchoolDto,
     isArray: true
   })
-  async findAll(@Query() query: GetSchoolsQueryDto) {
-    return await this.schoolService.findAll(query.boardId);
+  async findAll(@Query('boardId', new ParseIntPipe({ optional: true })) boardId?: number) {
+    return this.schoolService.findAll(boardId);
   }
 
   @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get a school by id' })
   @ApiResponse({ status: HttpStatus.OK, description: 'School found' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found' })
@@ -51,6 +64,7 @@ export class SchoolController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a school' })
   @ApiResponse({ status: HttpStatus.OK, description: 'School updated successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found' })
@@ -63,6 +77,7 @@ export class SchoolController {
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a school' })
   @ApiResponse({ status: HttpStatus.OK, description: 'School deleted successfully or error message' })

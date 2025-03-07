@@ -1,14 +1,20 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards } from '@nestjs/common';
 import { UserSchoolService } from './user-school.service';
 import { CreateUserSchoolDto, UpdateUserSchoolDto } from './dto/user-school.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('user-schools')
 @Controller('user-schools')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class UserSchoolController {
   constructor(private readonly userSchoolService: UserSchoolService) {}
 
   @Post()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Assign school to user' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'School assigned successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User or School not found' })
@@ -18,6 +24,7 @@ export class UserSchoolController {
   }
 
   @Get()
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Get all user school assignments' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all user school assignments' })
   async findAll() {
@@ -25,6 +32,7 @@ export class UserSchoolController {
   }
 
   @Get('user/:userId')
+  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get schools for a specific user' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns user schools' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User not found' })
@@ -33,6 +41,7 @@ export class UserSchoolController {
   }
 
   @Put('user/:userId/school/:schoolId')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update user school association' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Association updated successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Association not found' })
@@ -45,6 +54,7 @@ export class UserSchoolController {
   }
 
   @Delete('user/:userId/school/:schoolId')
+  @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove school from user' })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'School removed successfully' })
@@ -59,6 +69,7 @@ export class UserSchoolController {
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update user school association by ID' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Association updated successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Association not found' })
