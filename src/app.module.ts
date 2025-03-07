@@ -30,6 +30,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { QuestionModule } from './modules/question/question.module';
 import { QuestionTextModule } from './modules/question_text/question-text.module';
 import { ImageModule } from './modules/image/image.module';
+import { QuestionTopicModule } from './modules/question_topic/question-topic.module';
 
 @Module({
   imports: [
@@ -63,7 +64,8 @@ import { ImageModule } from './modules/image/image.module';
     AuthModule,
     QuestionModule,
     QuestionTextModule,
-    ImageModule
+    ImageModule,
+    QuestionTopicModule
   ],
   controllers: [AppController],
   providers: [AppService],
