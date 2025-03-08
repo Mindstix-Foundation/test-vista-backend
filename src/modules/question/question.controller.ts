@@ -1,10 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField } from './dto/question.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { SortOrder } from '../../common/dto/pagination.dto';
 
 @ApiTags('questions')
 @Controller('questions')
@@ -23,13 +24,38 @@ export class QuestionController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all questions' })
-  @ApiQuery({ name: 'question_type_id', required: false, type: Number })
-  @ApiQuery({ name: 'is_verified', required: false, type: Boolean })
-  @ApiQuery({ name: 'topic_id', required: false, type: Number })
-  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
+  @ApiOperation({ summary: 'Get all questions with pagination and sorting' })
+  @ApiQuery({ name: 'question_type_id', required: false, type: Number, description: 'Filter by question type ID' })
+  @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'Filter by verification status' })
+  @ApiQuery({ name: 'topic_id', required: false, type: Number, description: 'Filter by topic ID' })
+  @ApiQuery({ name: 'chapter_id', required: false, type: Number, description: 'Filter by chapter ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1)' })
+  @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
+  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionSortField, description: 'Field to sort by (question_type_id, created_at, updated_at)' })
+  @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
+  @ApiResponse({ status: 200, description: 'Returns paginated questions' })
   async findAll(@Query() filters: QuestionFilterDto) {
-    return await this.questionService.findAll(filters);
+    const { 
+      question_type_id, 
+      is_verified, 
+      topic_id, 
+      chapter_id, 
+      page = 1, 
+      page_size = 10, 
+      sort_by = QuestionSortField.CREATED_AT, 
+      sort_order = SortOrder.DESC 
+    } = filters;
+    
+    return await this.questionService.findAll({
+      question_type_id,
+      is_verified,
+      topic_id,
+      chapter_id,
+      page,
+      page_size,
+      sort_by: sort_by as QuestionSortField,
+      sort_order
+    });
   }
 
   @Get(':id')

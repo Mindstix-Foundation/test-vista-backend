@@ -3,6 +3,7 @@ import { UserService } from './user.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 describe('UserService', () => {
   let service: UserService;
@@ -15,6 +16,7 @@ describe('UserService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      count: jest.fn(),
     },
     user_School: {
       count: jest.fn(),
@@ -34,6 +36,7 @@ describe('UserService', () => {
 
     service = module.get<UserService>(UserService);
     prisma = module.get<PrismaService>(PrismaService);
+    jest.clearAllMocks();
   });
 
   afterEach(() => {
@@ -89,22 +92,81 @@ describe('UserService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all users', async () => {
-      const expectedUsers = [{ id: 1, name: 'Test User' }];
-      mockPrismaService.user.findMany.mockResolvedValue(expectedUsers);
+    it('should return paginated users in alphabetical order', async () => {
+      const mockUsers = [
+        { id: 2, name: 'User A' },
+        { id: 1, name: 'User B' },
+      ];
       
-      const result = await service.findAll();
-      expect(result).toEqual(expectedUsers);
+      mockPrismaService.user.count.mockResolvedValue(2);
+      mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
+
+      const result = await service.findAll(undefined, 1, 15);
+      
+      expect(result).toEqual({
+        data: mockUsers,
+        meta: {
+          total: 2,
+          page: 1,
+          page_size: 15,
+          total_pages: 1,
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC
+        }
+      });
+      
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        where: {},
+        orderBy: { name: 'asc' },
+        select: expect.any(Object)
+      });
     });
+    
+    it('should filter users by schoolId', async () => {
+      const mockUsers = [
+        { id: 1, name: 'User A' },
+      ];
+      
+      mockPrismaService.user.count.mockResolvedValue(1);
+      mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
 
-    it('should return users filtered by school ID', async () => {
-      const schoolId = 1;
-      const expectedUsers = [{ id: 1, name: 'User 1' }];
+      const result = await service.findAll(1, 1, 15);
+      
+      expect(result.data).toEqual(mockUsers);
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        where: { 
+          user_schools: {
+            some: { school_id: 1 }
+          }
+        },
+        orderBy: { name: 'asc' },
+        select: expect.any(Object)
+      });
+    });
+    
+    it('should sort users by created_at in descending order', async () => {
+      const mockUsers = [
+        { id: 1, name: 'User A', created_at: new Date('2023-01-02') },
+        { id: 2, name: 'User B', created_at: new Date('2023-01-01') },
+      ];
+      
+      mockPrismaService.user.count.mockResolvedValue(2);
+      mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
 
-      mockPrismaService.user.findMany.mockResolvedValue(expectedUsers);
-
-      const result = await service.findAll(schoolId);
-      expect(result).toEqual(expectedUsers);
+      const result = await service.findAll(undefined, 1, 15, SortField.CREATED_AT, SortOrder.DESC);
+      
+      expect(result.data).toEqual(mockUsers);
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        where: {},
+        orderBy: { created_at: 'desc' },
+        select: expect.any(Object)
+      });
     });
   });
 

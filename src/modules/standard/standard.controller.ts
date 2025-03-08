@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards, Patch } from '@nestjs/common';
 import { StandardService } from './standard.service';
 import { StandardDto, CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ReorderStandardDto } from './dto/reorder-standard.dto';
 
 @ApiTags('standards')
 @Controller('standards')
@@ -82,5 +83,21 @@ export class StandardController {
   @ApiResponse({ status: 200, description: 'List of standards for the specified board' })
   async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
     return await this.standardService.findByBoard(boardId);
+  }
+
+  @Put(':id/reorder')
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Reorder a standard by changing its sequence number' })
+  @ApiParam({ name: 'id', description: 'Standard ID' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'The standard has been successfully reordered.' 
+  })
+  @ApiResponse({ status: 404, description: 'Standard not found.' })
+  reorder(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() reorderStandardDto: ReorderStandardDto
+  ) {
+    return this.standardService.reorderStandard(id, reorderStandardDto.newPosition, reorderStandardDto.boardId);
   }
 } 

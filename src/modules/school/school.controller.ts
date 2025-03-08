@@ -7,11 +7,14 @@ import { IsOptional, IsNumber } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { PaginationDto, SortField, SortOrder } from '../../common/dto/pagination.dto';
+import { ApiProperty } from '@nestjs/swagger';
 
-class GetSchoolsQueryDto {
+class GetSchoolsQueryDto extends PaginationDto {
+  @ApiProperty({ required: false })
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsNumber({}, { message: 'boardId must be a number' })
   boardId?: number;
 }
 
@@ -37,21 +40,19 @@ export class SchoolController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all schools' })
-  @ApiQuery({ 
-    name: 'boardId', 
-    required: false, 
-    type: Number,
-    description: 'Filter schools by board ID' 
-  })
+  @ApiOperation({ summary: 'Get all schools with pagination and sorting' })
+  @ApiQuery({ name: 'boardId', required: false, type: Number, description: 'Filter schools by board ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1)' })
+  @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
+  @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
+  @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Returns all schools',
-    type: SchoolDto,
-    isArray: true
+    description: 'Returns paginated schools'
   })
-  async findAll(@Query('boardId', new ParseIntPipe({ optional: true })) boardId?: number) {
-    return this.schoolService.findAll(boardId);
+  async findAll(@Query() query: GetSchoolsQueryDto) {
+    const { boardId, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC } = query;
+    return this.schoolService.findAll(boardId, page, page_size, sort_by, sort_order);
   }
 
   @Get(':id')

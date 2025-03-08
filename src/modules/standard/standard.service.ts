@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
+import { ReorderStandardDto } from './dto/reorder-standard.dto';
 
 import { toTitleCase } from '../../utils/titleCase';
 
@@ -57,7 +58,11 @@ export class StandardService {
       return await this.prisma.standard.findMany({
         include: {
           board: true
-        }
+        },
+        orderBy: [
+          { sequence_number: 'asc' },
+          { name: 'asc' }
+        ]
       });
     } catch (error) {
       this.logger.error('Failed to fetch standards:', error);
@@ -202,6 +207,113 @@ export class StandardService {
   async findByBoard(boardId: number) {
     return await this.prisma.standard.findMany({
       where: { board_id: boardId },
+      orderBy: [
+        { sequence_number: 'asc' },
+        { name: 'asc' }
+      ]
     });
+  }
+
+  async reorderStandard(standardId: number, newPosition: number, boardId?: number) {
+    try {
+      this.logger.log(`Starting reorder for standard ${standardId} to position ${newPosition}`);
+      
+      // Get the current standard and its details
+      const currentStandard = await this.prisma.standard.findUnique({
+        where: { id: standardId },
+        select: {
+          id: true,
+          board_id: true,
+          sequence_number: true
+        }
+      });
+
+      if (!currentStandard) {
+        throw new NotFoundException(`Standard with ID ${standardId} not found`);
+      }
+
+      this.logger.log(`Found current standard: ${JSON.stringify(currentStandard)}`);
+
+      // If boardId is provided, verify it matches
+      if (boardId && boardId !== currentStandard.board_id) {
+        throw new ConflictException('Standard does not belong to the specified board');
+      }
+
+      // Get total standards count to validate newPosition
+      const totalStandards = await this.prisma.standard.count({
+        where: { board_id: currentStandard.board_id }
+      });
+
+      this.logger.log(`Total standards in board: ${totalStandards}`);
+
+      // Validate newPosition
+      if (newPosition < 0 || newPosition > totalStandards - 1) {
+        throw new ConflictException(`New position must be between 0 and ${totalStandards - 1}`);
+      }
+
+      const currentPosition = currentStandard.sequence_number;
+
+      // If the positions are the same, no need to reorder
+      if (currentPosition === newPosition) {
+        return await this.findOne(standardId);
+      }
+
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // First move to temporary position
+          this.logger.log(`Moving standard ${standardId} to temporary position`);
+          await tx.standard.update({
+            where: { id: standardId },
+            data: { sequence_number: 999 }
+          });
+
+          if (currentPosition < newPosition) {
+            // Moving to a later position
+            for (let i = currentPosition + 1; i <= newPosition; i++) {
+              await tx.standard.updateMany({
+                where: {
+                  board_id: currentStandard.board_id,
+                  sequence_number: i
+                },
+                data: {
+                  sequence_number: i - 1
+                }
+              });
+            }
+          } else {
+            // Moving to an earlier position
+            for (let i = currentPosition - 1; i >= newPosition; i--) {
+              await tx.standard.updateMany({
+                where: {
+                  board_id: currentStandard.board_id,
+                  sequence_number: i
+                },
+                data: {
+                  sequence_number: i + 1
+                }
+              });
+            }
+          }
+
+          // Finally, move to new position
+          this.logger.log(`Moving standard to final position ${newPosition}`);
+          await tx.standard.update({
+            where: { id: standardId },
+            data: { sequence_number: newPosition }
+          });
+        });
+
+        return await this.findOne(standardId);
+      } catch (txError) {
+        this.logger.error(`Transaction failed: ${txError.message}`, txError.stack);
+        throw new InternalServerErrorException(`Failed to reorder: ${txError.message}`);
+      }
+    } catch (error) {
+      this.logger.error(`Reorder failed for standard ${standardId}: ${error.message}`, error.stack);
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(`Failed to reorder standard: ${error.message}`);
+    }
   }
 } 

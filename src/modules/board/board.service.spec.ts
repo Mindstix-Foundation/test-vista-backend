@@ -3,6 +3,7 @@ import { BoardService } from './board.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import { CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 describe('BoardService', () => {
   let service: BoardService;
@@ -16,6 +17,7 @@ describe('BoardService', () => {
       update: jest.fn(),
       delete: jest.fn(),
       findFirst: jest.fn(),
+      count: jest.fn(),
     },
     school: {
       count: jest.fn(),
@@ -79,16 +81,76 @@ describe('BoardService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all boards', async () => {
-      const expectedBoards = [
-        { id: 1, name: 'Board 1' },
-        { id: 2, name: 'Board 2' },
+    it('should return paginated boards in alphabetical order', async () => {
+      const mockBoards = [
+        { id: 2, name: 'Board A' },
+        { id: 1, name: 'Board B' },
       ];
+      
+      mockPrismaService.board.count.mockResolvedValue(2);
+      mockPrismaService.board.findMany.mockResolvedValue(mockBoards);
 
-      mockPrismaService.board.findMany.mockResolvedValue(expectedBoards);
+      const result = await service.findAll(1, 15);
+      
+      expect(result).toEqual({
+        data: mockBoards,
+        meta: {
+          total: 2,
+          page: 1,
+          page_size: 15,
+          total_pages: 1,
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC
+        }
+      });
+      
+      expect(mockPrismaService.board.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        orderBy: { name: 'asc' },
+        include: {
+          address: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
+        }
+      });
+    });
 
-      const result = await service.findAll();
-      expect(result).toEqual(expectedBoards);
+    it('should return sorted boards by created_at in descending order', async () => {
+      const mockBoards = [
+        { id: 1, name: 'Board A', created_at: new Date('2023-01-02') },
+        { id: 2, name: 'Board B', created_at: new Date('2023-01-01') },
+      ];
+      
+      mockPrismaService.board.count.mockResolvedValue(2);
+      mockPrismaService.board.findMany.mockResolvedValue(mockBoards);
+
+      const result = await service.findAll(1, 10, SortField.CREATED_AT, SortOrder.DESC);
+      
+      expect(result).toEqual({
+        data: mockBoards,
+        meta: {
+          total: 2,
+          page: 1,
+          page_size: 10,
+          total_pages: 1,
+          sort_by: SortField.CREATED_AT,
+          sort_order: SortOrder.DESC
+        }
+      });
+      
+      expect(mockPrismaService.board.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 10,
+        orderBy: { created_at: 'desc' },
+        include: {
+          address: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
+        }
+      });
     });
   });
 

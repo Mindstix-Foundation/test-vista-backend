@@ -1,6 +1,18 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionTextDto, UpdateQuestionTextDto, QuestionTextFilterDto } from './dto/question-text.dto';
+import { CreateQuestionTextDto, UpdateQuestionTextDto, QuestionTextFilterDto, QuestionTextSortField } from './dto/question-text.dto';
+import { SortOrder } from '../../common/dto/pagination.dto';
+import { Prisma } from '@prisma/client';
+
+interface QuestionTextFilters {
+  topic_id?: number;
+  chapter_id?: number;
+  question_type_id?: number;
+  page?: number;
+  page_size?: number;
+  sort_by?: QuestionTextSortField;
+  sort_order?: SortOrder;
+}
 
 @Injectable()
 export class QuestionTextService {
@@ -61,52 +73,77 @@ export class QuestionTextService {
     }
   }
 
-  async findAll(filters: QuestionTextFilterDto) {
+  async findAll(filters: QuestionTextFilters) {
     try {
-      const where: any = {};
+      const { 
+        topic_id, 
+        chapter_id, 
+        question_type_id, 
+        page = 1, 
+        page_size = 10, 
+        sort_by = QuestionTextSortField.CREATED_AT, 
+        sort_order = SortOrder.DESC 
+      } = filters;
       
-      if (filters.topic_id) {
+      const skip = (page - 1) * page_size;
+      
+      // Build where clause
+      const where: Prisma.Question_TextWhereInput = {};
+      
+      if (topic_id) {
         where.question = {
           question_topics: {
             some: {
-              topic_id: filters.topic_id
+              topic_id: topic_id
             }
           }
         };
       }
       
-      if (filters.chapter_id) {
+      if (chapter_id) {
         where.question = {
           question_topics: {
             some: {
               topic: {
-                chapter_id: filters.chapter_id
+                chapter_id: chapter_id
               }
             }
           }
         };
       }
       
-      if (filters.question_type_id) {
-        if (!where.question) {
-          where.question = {};
-        }
-        where.question.question_type_id = filters.question_type_id;
+      if (question_type_id) {
+        where.question = {
+          question_type_id: question_type_id
+        };
       }
-
-      return await this.prisma.question_Text.findMany({
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.question_Text.count({ where });
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: any = {};
+      
+      // Handle special case for question_type_id since it's a relation
+      if (sort_by === QuestionTextSortField.QUESTION_TYPE) {
+        orderBy.question = { question_type_id: sort_order };
+      } else {
+        orderBy[sort_by] = sort_order;
+      }
+      
+      // Get paginated data with sorting
+      const questionTexts = await this.prisma.question_Text.findMany({
+        skip,
+        take: page_size,
         where,
+        orderBy,
         include: {
           question: {
             include: {
               question_type: true,
               question_topics: {
                 include: {
-                  topic: {
-                    include: {
-                      chapter: true
-                    }
-                  }
+                  topic: true
                 }
               }
             }
@@ -116,6 +153,21 @@ export class QuestionTextService {
           match_pairs: true
         }
       });
+      
+      // Calculate total pages
+      const total_pages = Math.ceil(total / page_size);
+      
+      return {
+        data: questionTexts,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages,
+          sort_by,
+          sort_order
+        }
+      };
     } catch (error) {
       this.logger.error('Failed to fetch question texts:', error);
       throw new InternalServerErrorException('Failed to fetch question texts');
@@ -215,7 +267,8 @@ export class QuestionTextService {
       // Log what will be deleted
       this.logger.log(`Deleting question text ${id} will also delete:
         - ${questionText.mcq_options.length} MCQ options
-        - ${questionText.match_pairs.length} match pairs`);
+        - ${questionText.match_pairs.length} match pairs
+        and any image references will be preserved (set to null)`);
 
       await this.prisma.question_Text.delete({
         where: { id }
@@ -227,7 +280,7 @@ export class QuestionTextService {
         data: { is_verified: false }
       });
 
-      this.logger.log(`Successfully deleted question text ${id} and all related records`);
+      this.logger.log(`Successfully deleted question text ${id} and all related records through cascade delete`);
     } catch (error) {
       this.logger.error(`Failed to delete question text ${id}:`, error);
       if (error instanceof NotFoundException) {

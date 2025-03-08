@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 describe('UserController', () => {
   let controller: UserController;
@@ -28,6 +29,7 @@ describe('UserController', () => {
 
     controller = module.get<UserController>(UserController);
     service = module.get<UserService>(UserService);
+    jest.clearAllMocks();
   });
 
   describe('create', () => {
@@ -50,22 +52,72 @@ describe('UserController', () => {
   });
 
   describe('findAll', () => {
-    it('should return all users', async () => {
-      const expectedUsers = [{ id: 1, name: 'User 1' }];
-      mockUserService.findAll.mockResolvedValue(expectedUsers);
-
-      const result = await controller.findAll(undefined);
-      expect(result).toEqual(expectedUsers);
+    it('should return paginated users with default values', async () => {
+      const mockPaginatedResponse = {
+        data: [{ id: 1, name: 'User 1' }],
+        meta: { 
+          total: 1, 
+          page: 1, 
+          page_size: 15, 
+          total_pages: 1,
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC
+        }
+      };
+      
+      mockUserService.findAll.mockResolvedValue(mockPaginatedResponse);
+      
+      const result = await controller.findAll({});
+      
+      expect(result).toEqual(mockPaginatedResponse);
+      expect(service.findAll).toHaveBeenCalledWith(undefined, 1, 15, SortField.NAME, SortOrder.ASC);
     });
 
-    it('should return users filtered by school ID', async () => {
-      const schoolId = '1';
-      const expectedUsers = [{ id: 1, name: 'User 1' }];
-      mockUserService.findAll.mockResolvedValue(expectedUsers);
-
-      const result = await controller.findAll(schoolId);
-      expect(result).toEqual(expectedUsers);
-      expect(service.findAll).toHaveBeenCalledWith(1);
+    it('should return users filtered by school ID with pagination', async () => {
+      const mockPaginatedResponse = {
+        data: [{ id: 1, name: 'User 1' }],
+        meta: { 
+          total: 1, 
+          page: 2, 
+          page_size: 15, 
+          total_pages: 1,
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC
+        }
+      };
+      
+      mockUserService.findAll.mockResolvedValue(mockPaginatedResponse);
+      
+      const result = await controller.findAll({ schoolId: 1, page: 2 });
+      
+      expect(result).toEqual(mockPaginatedResponse);
+      expect(service.findAll).toHaveBeenCalledWith(1, 2, 15, SortField.NAME, SortOrder.ASC);
+    });
+    
+    it('should return users with custom sorting', async () => {
+      const mockPaginatedResponse = {
+        data: [{ id: 1, name: 'User 1' }],
+        meta: { 
+          total: 1, 
+          page: 1, 
+          page_size: 15, 
+          total_pages: 1,
+          sort_by: SortField.CREATED_AT,
+          sort_order: SortOrder.DESC
+        }
+      };
+      
+      mockUserService.findAll.mockResolvedValue(mockPaginatedResponse);
+      
+      const result = await controller.findAll({ 
+        sort_by: SortField.CREATED_AT, 
+        sort_order: SortOrder.DESC 
+      });
+      
+      expect(result).toEqual(mockPaginatedResponse);
+      expect(service.findAll).toHaveBeenCalledWith(
+        undefined, 1, 15, SortField.CREATED_AT, SortOrder.DESC
+      );
     });
   });
 

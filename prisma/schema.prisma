@@ -63,18 +63,20 @@ model Board {
 }
 
 model Standard {
-  id         Int      @id @default(autoincrement())
-  board      Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
-  board_id   Int
-  name       String   @db.VarChar
-  created_at DateTime @default(now()) @db.Timestamptz()
-  updated_at DateTime @updatedAt @db.Timestamptz()
+  id              Int      @id @default(autoincrement())
+  board           Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  board_id        Int
+  name            String   @db.VarChar
+  sequence_number Int      @default(0)
+  created_at      DateTime @default(now()) @db.Timestamptz()
+  updated_at      DateTime @updatedAt @db.Timestamptz()
 
   school_standards         School_Standard[]
   medium_standard_subjects Medium_Standard_Subject[]
   patterns                Pattern[]
 
   @@unique([board_id, name])
+  @@unique([board_id, sequence_number])
 }
 
 model Subject {
@@ -323,7 +325,7 @@ model Password_Reset {
   id         Int      @id @default(autoincrement())
   token      String   @unique
   user_id    Int
-  user       User     @relation(fields: [user_id], references: [id])
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
   used       Boolean  @default(false)
   expires_at DateTime
   created_at DateTime @default(now())
@@ -344,7 +346,7 @@ model Image {
 
 model Question {
   id                    Int                    @id @default(autoincrement())
-  question_type         Question_Type          @relation(fields: [question_type_id], references: [id])
+  question_type         Question_Type          @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
   question_type_id      Int
   board_question        Boolean
   is_verified           Boolean                @default(false)
@@ -357,9 +359,9 @@ model Question {
 
 model Question_Text {
   id            Int           @id @default(autoincrement())
-  question      Question      @relation(fields: [question_id], references: [id])
+  question      Question      @relation(fields: [question_id], references: [id], onDelete: Cascade)
   question_id   Int
-  image         Image?        @relation(fields: [image_id], references: [id])
+  image         Image?        @relation(fields: [image_id], references: [id], onDelete: SetNull)
   image_id      Int?
   question_text String
   created_at    DateTime      @default(now()) @db.Timestamptz()
@@ -370,9 +372,9 @@ model Question_Text {
 
 model Question_Topic {
   id          Int      @id @default(autoincrement())
-  question    Question @relation(fields: [question_id], references: [id])
+  question    Question @relation(fields: [question_id], references: [id], onDelete: Cascade)
   question_id Int
-  topic       Topic    @relation(fields: [topic_id], references: [id])
+  topic       Topic    @relation(fields: [topic_id], references: [id], onDelete: Cascade)
   topic_id    Int
   created_at  DateTime @default(now()) @db.Timestamptz()
   updated_at  DateTime @updatedAt @db.Timestamptz()
@@ -382,10 +384,10 @@ model Question_Topic {
 
 model Mcq_Option {
   id               Int            @id @default(autoincrement())
-  question_text    Question_Text  @relation(fields: [question_text_id], references: [id])
+  question_text    Question_Text  @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
   question_text_id Int
   option_text      String?        @db.VarChar
-  image            Image?         @relation(fields: [image_id], references: [id])
+  image            Image?         @relation(fields: [image_id], references: [id], onDelete: SetNull)
   image_id         Int?
   is_correct       Boolean
   created_at       DateTime       @default(now()) @db.Timestamptz()
@@ -394,13 +396,13 @@ model Mcq_Option {
 
 model Match_Pair {
   id               Int            @id @default(autoincrement())
-  question_text    Question_Text  @relation(fields: [question_text_id], references: [id])
+  question_text    Question_Text  @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
   question_text_id Int
   left_text        String?        @db.VarChar
   right_text       String?        @db.VarChar
-  left_image       Image?         @relation("LeftImage", fields: [left_image_id], references: [id])
+  left_image       Image?         @relation("LeftImage", fields: [left_image_id], references: [id], onDelete: SetNull)
   left_image_id    Int?
-  right_image      Image?         @relation("RightImage", fields: [right_image_id], references: [id])
+  right_image      Image?         @relation("RightImage", fields: [right_image_id], references: [id], onDelete: SetNull)
   right_image_id   Int?
   created_at       DateTime       @default(now()) @db.Timestamptz()
   updated_at       DateTime       @updatedAt @db.Timestamptz()
@@ -410,9 +412,9 @@ model Test_Paper {
   id                         Int                      @id @default(autoincrement())
   name                       String                   @db.VarChar
   exam_time                  DateTime                 @db.Time
-  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id])
+  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id], onDelete: Cascade)
   medium_standard_subject_id Int
-  pattern                    Pattern                 @relation(fields: [pattern_id], references: [id])
+  pattern                    Pattern                 @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
   pattern_id                 Int
   test_paper_origin_id      Int
   created_at                DateTime                 @default(now()) @db.Timestamptz()
@@ -422,9 +424,9 @@ model Test_Paper {
 
 model Test_Paper_Chapter {
   id            Int         @id @default(autoincrement())
-  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id])
+  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
   test_paper_id Int
-  chapter       Chapter    @relation(fields: [chapter_id], references: [id])
+  chapter       Chapter    @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
   chapter_id    Int
   weightage     Int
   created_at    DateTime   @default(now()) @db.Timestamptz()
@@ -432,10 +434,10 @@ model Test_Paper_Chapter {
 
 model Test_Paper_Question {
   id            Int         @id @default(autoincrement())
-  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id])
+  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
   test_paper_id Int
-  section       Section    @relation(fields: [section_id], references: [id])
+  section       Section    @relation(fields: [section_id], references: [id], onDelete: Cascade)
   section_id    Int
-  question      Question   @relation(fields: [question_id], references: [id])
+  question      Question   @relation(fields: [question_id], references: [id], onDelete: Cascade)
   question_id   Int
 }

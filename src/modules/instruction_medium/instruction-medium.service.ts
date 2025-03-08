@@ -56,6 +56,9 @@ export class InstructionMediumService {
       return await this.prisma.instruction_Medium.findMany({
         include: {
           board: true
+        },
+        orderBy: {
+          instruction_medium: 'asc'
         }
       });
     } catch (error) {
@@ -181,6 +184,9 @@ export class InstructionMediumService {
   async findByBoard(boardId: number) {
     return await this.prisma.instruction_Medium.findMany({
       where: { board_id: boardId },
+      orderBy: {
+        instruction_medium: 'asc'
+      }
     });
   }
 } 

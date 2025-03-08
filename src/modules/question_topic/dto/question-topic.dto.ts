@@ -1,5 +1,6 @@
 import { IsInt, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class CreateQuestionTopicDto {
   @ApiProperty({
@@ -25,8 +26,9 @@ export class QuestionTopicFilterDto {
     example: 1,
     description: 'Filter by question ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'question_id must be an integer' })
   question_id?: number;
 
   @ApiProperty({
@@ -34,8 +36,9 @@ export class QuestionTopicFilterDto {
     example: 1,
     description: 'Filter by topic ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'topic_id must be an integer' })
   topic_id?: number;
 
   @ApiProperty({
@@ -43,8 +46,9 @@ export class QuestionTopicFilterDto {
     example: 1,
     description: 'Filter by question type ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'question_type_id must be an integer' })
   question_type_id?: number;
 
   @ApiProperty({
@@ -52,7 +56,8 @@ export class QuestionTopicFilterDto {
     example: 1,
     description: 'Filter by chapter ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'chapter_id must be an integer' })
   chapter_id?: number;
 } 

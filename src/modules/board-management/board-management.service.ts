@@ -88,9 +88,9 @@ export class BoardManagementService {
 
   async findAll(): Promise<BoardManagementData[]> {
     try {
-      const boards = await this.boardService.findAll();
+      const boardsResponse = await this.boardService.findAll();
       return Promise.all(
-        boards.map(async (board) => ({
+        boardsResponse.data.map(async (board) => ({
           board,
           address: await this.addressService.findOne(board.address_id),
           instruction_mediums: await this.instructionMediumService.findByBoard(board.id),
