@@ -89,15 +89,18 @@ export class StandardController {
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Reorder a standard by changing its sequence number' })
   @ApiParam({ name: 'id', description: 'Standard ID' })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'The standard has been successfully reordered.' 
-  })
+  @ApiResponse({ status: 200, description: 'The standard has been successfully reordered.' })
   @ApiResponse({ status: 404, description: 'Standard not found.' })
-  reorder(
+  @ApiResponse({ status: 400, description: 'Invalid sequence number or board ID.' })
+  @ApiResponse({ status: 409, description: 'Conflict with existing data.' })
+  async reorder(
     @Param('id', ParseIntPipe) id: number,
     @Body() reorderStandardDto: ReorderStandardDto
   ) {
-    return this.standardService.reorderStandard(id, reorderStandardDto.newPosition, reorderStandardDto.boardId);
+    return await this.standardService.reorderStandard(
+      id, 
+      reorderStandardDto.newPosition, 
+      reorderStandardDto.boardId
+    );
   }
 } 

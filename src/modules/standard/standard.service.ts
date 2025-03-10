@@ -256,9 +256,9 @@ export class StandardService {
     });
   }
 
-  async reorderStandard(standardId: number, newPosition: number, boardId?: number) {
+  async reorderStandard(standardId: number, newPosition: number, boardId: number) {
     try {
-      this.logger.log(`Starting reorder for standard ${standardId} to position ${newPosition}`);
+      this.logger.log(`Starting reorder for standard ${standardId} to position ${newPosition} in board ${boardId}`);
       
       // Get the current standard and its details
       const currentStandard = await this.prisma.standard.findUnique({
@@ -266,7 +266,8 @@ export class StandardService {
         select: {
           id: true,
           board_id: true,
-          sequence_number: true
+          sequence_number: true,
+          name: true
         }
       });
 
@@ -276,33 +277,35 @@ export class StandardService {
 
       this.logger.log(`Found current standard: ${JSON.stringify(currentStandard)}`);
 
-      // If boardId is provided, verify it matches
-      if (boardId && boardId !== currentStandard.board_id) {
-        throw new ConflictException('Standard does not belong to the specified board');
+      // Verify board_id matches
+      if (boardId !== currentStandard.board_id) {
+        throw new ConflictException(`Standard does not belong to board with ID ${boardId}`);
       }
 
       // Get total standards count to validate newPosition
       const totalStandards = await this.prisma.standard.count({
-        where: { board_id: currentStandard.board_id }
+        where: { board_id: boardId }
       });
 
-      this.logger.log(`Total standards in board: ${totalStandards}`);
+      this.logger.log(`Total standards in board ${boardId}: ${totalStandards}`);
 
       // Validate newPosition
-      if (newPosition < 0 || newPosition > totalStandards - 1) {
-        throw new ConflictException(`New position must be between 0 and ${totalStandards - 1}`);
+      if (newPosition < 1 || newPosition > totalStandards) {
+        throw new ConflictException(`New position must be between 1 and ${totalStandards}`);
       }
 
       const currentPosition = currentStandard.sequence_number;
 
       // If the positions are the same, no need to reorder
       if (currentPosition === newPosition) {
+        this.logger.log(`Standard ${standardId} is already at position ${newPosition}`);
         return await this.findOne(standardId);
       }
 
       try {
-        await this.prisma.$transaction(async (tx) => {
-          // First move to temporary position
+        // Use transaction to ensure all updates are atomic
+        return await this.prisma.$transaction(async (tx) => {
+          // First move to temporary position to avoid unique constraint conflicts
           this.logger.log(`Moving standard ${standardId} to temporary position`);
           await tx.standard.update({
             where: { id: standardId },
@@ -310,45 +313,56 @@ export class StandardService {
           });
 
           if (currentPosition < newPosition) {
-            // Moving to a later position
-            for (let i = currentPosition + 1; i <= newPosition; i++) {
-              await tx.standard.updateMany({
-                where: {
-                  board_id: currentStandard.board_id,
-                  sequence_number: i
-                },
-                data: {
-                  sequence_number: i - 1
+            // Moving to a later position - shift standards in between down
+            this.logger.log(`Moving standard from ${currentPosition} to ${newPosition} (later position)`);
+            await tx.standard.updateMany({
+              where: {
+                board_id: boardId,
+                sequence_number: {
+                  gt: currentPosition,
+                  lte: newPosition
                 }
-              });
-            }
+              },
+              data: {
+                sequence_number: {
+                  decrement: 1
+                }
+              }
+            });
           } else {
-            // Moving to an earlier position
-            for (let i = currentPosition - 1; i >= newPosition; i--) {
-              await tx.standard.updateMany({
-                where: {
-                  board_id: currentStandard.board_id,
-                  sequence_number: i
-                },
-                data: {
-                  sequence_number: i + 1
+            // Moving to an earlier position - shift standards in between up
+            this.logger.log(`Moving standard from ${currentPosition} to ${newPosition} (earlier position)`);
+            await tx.standard.updateMany({
+              where: {
+                board_id: boardId,
+                sequence_number: {
+                  gte: newPosition,
+                  lt: currentPosition
                 }
-              });
-            }
+              },
+              data: {
+                sequence_number: {
+                  increment: 1
+                }
+              }
+            });
           }
 
           // Finally, move to new position
-          this.logger.log(`Moving standard to final position ${newPosition}`);
-          await tx.standard.update({
+          this.logger.log(`Moving standard ${standardId} to final position ${newPosition}`);
+          const updatedStandard = await tx.standard.update({
             where: { id: standardId },
-            data: { sequence_number: newPosition }
+            data: { sequence_number: newPosition },
+            include: {
+              board: true
+            }
           });
-        });
 
-        return await this.findOne(standardId);
+          return updatedStandard;
+        });
       } catch (txError) {
         this.logger.error(`Transaction failed: ${txError.message}`, txError.stack);
-        throw new InternalServerErrorException(`Failed to reorder: ${txError.message}`);
+        throw new InternalServerErrorException(`Failed to reorder standard: ${txError.message}`);
       }
     } catch (error) {
       this.logger.error(`Reorder failed for standard ${standardId}: ${error.message}`, error.stack);
