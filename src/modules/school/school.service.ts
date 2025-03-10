@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
 import { Prisma } from '@prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 @Injectable()
 export class SchoolService {
@@ -79,12 +80,37 @@ export class SchoolService {
     }
   }
 
-  async findAll(boardId?: number) {
+  async findAll(boardId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
     try {
-      return await this.prisma.school.findMany({
-        where: {
-          ...(boardId && { board_id: parseInt(boardId.toString()) })
-        },
+      const skip = (page - 1) * page_size;
+      
+      // Build where clause
+      const where: Prisma.SchoolWhereInput = {};
+      if (boardId) {
+        where.board_id = parseInt(boardId.toString());
+      }
+      
+      // Add search condition
+      if (search) {
+        where.name = {
+          contains: search,
+          mode: 'insensitive' // Case-insensitive search
+        };
+      }
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.school.count({ where });
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.SchoolOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get paginated data with sorting
+      const schools = await this.prisma.school.findMany({
+        skip,
+        take: page_size,
+        where,
+        orderBy,
         include: {
           address: {
             include: {
@@ -112,9 +138,88 @@ export class SchoolService {
           }
         }
       });
+      
+      return {
+        data: schools,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages: Math.ceil(total / page_size),
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
     } catch (error) {
-      this.logger.error('Failed to fetch schools:', error);
-      throw new InternalServerErrorException('Failed to fetch schools');
+      this.logger.error('Failed to fetch all schools:', error);
+      throw new InternalServerErrorException('Failed to fetch all schools');
+    }
+  }
+
+  async findAllWithoutPagination(boardId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+    try {
+      // Build where clause
+      const where: Prisma.SchoolWhereInput = {};
+      if (boardId) {
+        where.board_id = parseInt(boardId.toString());
+      }
+      
+      // Add search condition
+      if (search) {
+        where.name = {
+          contains: search,
+          mode: 'insensitive' // Case-insensitive search
+        };
+      }
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.SchoolOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get all schools with sorting but without pagination
+      const schools = await this.prisma.school.findMany({
+        where,
+        orderBy,
+        include: {
+          address: {
+            include: {
+              city: {
+                include: {
+                  state: {
+                    include: {
+                      country: true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          board: true,
+          school_standards: {
+            include: {
+              standard: true
+            }
+          },
+          school_instruction_mediums: {
+            include: {
+              instruction_medium: true
+            }
+          }
+        }
+      });
+      
+      return {
+        data: schools,
+        meta: {
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch all schools:', error);
+      throw new InternalServerErrorException('Failed to fetch all schools');
     }
   }
 

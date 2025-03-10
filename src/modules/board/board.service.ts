@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
 import { Prisma } from '@prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 
 @Injectable()
@@ -46,9 +47,32 @@ export class BoardService {
     }
   }
 
-  async findAll() {
+  async findAll(page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
     try {
-      return await this.prisma.board.findMany({
+      const skip = (page - 1) * page_size;
+      
+      // Build where clause for search
+      const where: Prisma.BoardWhereInput = {};
+      if (search) {
+        where.name = {
+          contains: search,
+          mode: 'insensitive' // Case-insensitive search
+        };
+      }
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.board.count({ where });
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.BoardOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get paginated data with sorting and search
+      const boards = await this.prisma.board.findMany({
+        skip,
+        take: page_size,
+        where,
+        orderBy,
         include: {
           address: true,
           standards: true,
@@ -56,9 +80,62 @@ export class BoardService {
           instruction_mediums: true
         }
       });
+      
+      return {
+        data: boards,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages: Math.ceil(total / page_size),
+          sort_by,
+          sort_order
+        }
+      };
     } catch (error) {
-      this.logger.error('Failed to fetch boards:', error);
-      throw new InternalServerErrorException('Failed to fetch boards');
+      this.logger.error('Failed to fetch all boards:', error);
+      throw new InternalServerErrorException('Failed to fetch all boards');
+    }
+  }
+
+  async findAllWithoutPagination(sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+    try {
+      // Build where clause for search
+      const where: Prisma.BoardWhereInput = {};
+      if (search) {
+        where.name = {
+          contains: search,
+          mode: 'insensitive' // Case-insensitive search
+        };
+      }
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.BoardOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get all boards with sorting and search but without pagination
+      const boards = await this.prisma.board.findMany({
+        where,
+        orderBy,
+        include: {
+          address: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
+        }
+      });
+      
+      return {
+        data: boards,
+        meta: {
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch all boards:', error);
+      throw new InternalServerErrorException('Failed to fetch all boards');
     }
   }
 

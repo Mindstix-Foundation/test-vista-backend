@@ -1,6 +1,20 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField } from './dto/question.dto';
+import { SortOrder } from '../../common/dto/pagination.dto';
+import { Prisma } from '@prisma/client';
+
+interface QuestionFilters {
+  question_type_id?: number;
+  is_verified?: boolean;
+  topic_id?: number;
+  chapter_id?: number;
+  page?: number;
+  page_size?: number;
+  sort_by?: QuestionSortField;
+  sort_order?: SortOrder;
+  search?: string;
+}
 
 @Injectable()
 export class QuestionService {
@@ -55,40 +69,78 @@ export class QuestionService {
     }
   }
 
-  async findAll(filters: QuestionFilterDto) {
+  async findAll(filters: QuestionFilters) {
     try {
-      const where: any = {};
+      const { 
+        question_type_id, 
+        is_verified, 
+        topic_id, 
+        chapter_id, 
+        page = 1, 
+        page_size = 10, 
+        sort_by = QuestionSortField.CREATED_AT, 
+        sort_order = SortOrder.DESC,
+        search
+      } = filters;
       
-      if (filters.question_type_id) {
-        where.question_type_id = filters.question_type_id;
+      const skip = (page - 1) * page_size;
+      
+      // Build where clause
+      const where: Prisma.QuestionWhereInput = {};
+      
+      if (question_type_id) {
+        where.question_type_id = question_type_id;
       }
       
-      if (filters.is_verified !== undefined) {
-        where.is_verified = filters.is_verified;
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
       }
       
       // Filter by topic ID if provided
-      if (filters.topic_id) {
+      if (topic_id) {
         where.question_topics = {
           some: {
-            topic_id: filters.topic_id
+            topic_id: topic_id
           }
         };
       }
       
       // Filter by chapter ID if provided
-      if (filters.chapter_id) {
+      if (chapter_id) {
         where.question_topics = {
           some: {
             topic: {
-              chapter_id: filters.chapter_id
+              chapter_id: chapter_id
             }
           }
         };
       }
-
-      return await this.prisma.question.findMany({
+      
+      // Add search condition
+      if (search) {
+        where.question_texts = {
+          some: {
+            question_text: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        };
+      }
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.question.count({ where });
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get paginated data with sorting
+      const questions = await this.prisma.question.findMany({
+        skip,
+        take: page_size,
         where,
+        orderBy,
         include: {
           question_type: true,
           question_texts: {
@@ -109,15 +161,27 @@ export class QuestionService {
           },
           question_topics: {
             include: {
-              topic: {
-                include: {
-                  chapter: true
-                }
-              }
+              topic: true
             }
           }
         }
       });
+      
+      // Calculate total pages
+      const total_pages = Math.ceil(total / page_size);
+      
+      return {
+        data: questions,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages,
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
     } catch (error) {
       this.logger.error('Failed to fetch questions:', error);
       throw new InternalServerErrorException('Failed to fetch questions');
@@ -229,13 +293,13 @@ export class QuestionService {
         - ${question.question_texts.reduce((sum, qt) => sum + qt.mcq_options.length, 0)} MCQ options
         - ${question.question_texts.reduce((sum, qt) => sum + qt.match_pairs.length, 0)} match pairs
         - ${question.question_topics.length} topic associations
-        and all their related images`);
+        and all their related images will be preserved (references set to null)`);
 
       await this.prisma.question.delete({
         where: { id }
       });
 
-      this.logger.log(`Successfully deleted question ${id} and all related records`);
+      this.logger.log(`Successfully deleted question ${id} and all related records through cascade delete`);
     } catch (error) {
       this.logger.error(`Failed to delete question ${id}:`, error);
       if (error instanceof NotFoundException) {
@@ -309,6 +373,107 @@ export class QuestionService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to remove topic association');
+    }
+  }
+
+  async findAllWithoutPagination(filters: Omit<QuestionFilters, 'page' | 'page_size'>) {
+    try {
+      const { 
+        question_type_id, 
+        is_verified, 
+        topic_id, 
+        chapter_id, 
+        sort_by = QuestionSortField.CREATED_AT, 
+        sort_order = SortOrder.DESC,
+        search
+      } = filters;
+      
+      // Build where clause
+      const where: Prisma.QuestionWhereInput = {};
+      
+      if (question_type_id) {
+        where.question_type_id = question_type_id;
+      }
+      
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
+      }
+      
+      // Filter by topic ID if provided
+      if (topic_id) {
+        where.question_topics = {
+          some: { topic_id }
+        };
+      }
+      
+      // Filter by chapter ID if provided
+      if (chapter_id) {
+        where.question_topics = {
+          some: {
+            topic: {
+              chapter_id
+            }
+          }
+        };
+      }
+      
+      // Add search condition
+      if (search) {
+        where.question_texts = {
+          some: {
+            question_text: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        };
+      }
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get all questions with sorting but without pagination
+      const questions = await this.prisma.question.findMany({
+        where,
+        orderBy,
+        include: {
+          question_type: true,
+          question_texts: {
+            include: {
+              image: true,
+              mcq_options: {
+                include: {
+                  image: true
+                }
+              },
+              match_pairs: {
+                include: {
+                  left_image: true,
+                  right_image: true
+                }
+              }
+            }
+          },
+          question_topics: {
+            include: {
+              topic: true
+            }
+          }
+        }
+      });
+      
+      return {
+        data: questions,
+        meta: {
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch all questions:', error);
+      throw new InternalServerErrorException('Failed to fetch all questions');
     }
   }
 } 

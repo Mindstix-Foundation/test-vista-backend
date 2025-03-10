@@ -144,7 +144,8 @@ export class ImageService {
         - ${image.mcq_options.length} MCQ options
         - ${image.match_pairs_left.length} match pairs (left side)
         - ${image.match_pairs_right.length} match pairs (right side)
-        - Affecting ${affectedQuestionIds.size} questions`);
+        - Affecting ${affectedQuestionIds.size} questions
+        All references will be set to null due to onDelete: SetNull`);
 
       // Delete the image
       await this.prisma.image.delete({

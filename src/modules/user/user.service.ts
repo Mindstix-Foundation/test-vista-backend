@@ -13,6 +13,7 @@ import { hash } from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { UserExistsException } from './exceptions/user-exists.exception';
 import { toTitleCase } from '../../utils/titleCase';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 @Injectable()
 export class UserService {
@@ -60,16 +61,54 @@ export class UserService {
     }
   }
 
-  async findAll(schoolId?: number) {
+  async findAll(schoolId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
     try {
-      const where = schoolId ? {
-        user_schools: {
-          some: { school_id: schoolId }
-        }
-      } : {};
-
-      const users = await this.prisma.user.findMany({ 
+      const skip = (page - 1) * page_size;
+      
+      // Build where clause
+      let where: Prisma.UserWhereInput = {};
+      if (schoolId) {
+        where = {
+          user_schools: {
+            some: { school_id: schoolId }
+          }
+        };
+      }
+      
+      // Add search condition
+      if (search) {
+        where = {
+          ...where,
+          OR: [
+            {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              email_id: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
+        };
+      }
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.user.count({ where });
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.UserOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get paginated data with sorting
+      const users = await this.prisma.user.findMany({
+        skip,
+        take: page_size,
         where,
+        orderBy,
         select: {
           id: true,
           name: true,
@@ -82,8 +121,22 @@ export class UserService {
           updated_at: true
         }
       });
-
-      return users;
+      
+      // Calculate total pages
+      const total_pages = Math.ceil(total / page_size);
+      
+      return {
+        data: users,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages,
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
     } catch (error) {
       this.logger.error('Failed to fetch users:', error);
       throw new InternalServerErrorException('Failed to fetch users');
@@ -305,5 +358,73 @@ export class UserService {
     }
 
     return user;
+  }
+
+  async findAllWithoutPagination(schoolId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+    try {
+      // Build where clause
+      let where: Prisma.UserWhereInput = {};
+      if (schoolId) {
+        where = {
+          user_schools: {
+            some: { school_id: schoolId }
+          }
+        };
+      }
+      
+      // Add search condition
+      if (search) {
+        where = {
+          ...where,
+          OR: [
+            {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              email_id: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
+        };
+      }
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.UserOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get all users with sorting but without pagination
+      const users = await this.prisma.user.findMany({
+        where,
+        orderBy,
+        select: {
+          id: true,
+          name: true,
+          email_id: true,
+          contact_number: true,
+          alternate_contact_number: true,
+          highest_qualification: true,
+          status: true,
+          created_at: true,
+          updated_at: true
+        }
+      });
+      
+      return {
+        data: users,
+        meta: {
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch all users:', error);
+      throw new InternalServerErrorException('Failed to fetch all users');
+    }
   }
 } 

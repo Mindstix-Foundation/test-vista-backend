@@ -1,5 +1,7 @@
 import { IsString, IsInt, IsOptional, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
 
 export class CreateQuestionTextDto {
   @ApiProperty({
@@ -48,14 +50,15 @@ export class UpdateQuestionTextDto {
   question_text?: string;
 }
 
-export class QuestionTextFilterDto {
+export class QuestionTextFilterDto extends PaginationDto {
   @ApiProperty({
     required: false,
     example: 1,
     description: 'Filter by topic ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'topic_id must be an integer' })
   topic_id?: number;
   
   @ApiProperty({
@@ -63,8 +66,9 @@ export class QuestionTextFilterDto {
     example: 1,
     description: 'Filter by chapter ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'chapter_id must be an integer' })
   chapter_id?: number;
   
   @ApiProperty({
@@ -72,7 +76,17 @@ export class QuestionTextFilterDto {
     example: 1,
     description: 'Filter by question type ID'
   })
-  @IsInt()
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'question_type_id must be an integer' })
   question_type_id?: number;
+}
+
+// Add a new enum for question text-specific sort fields
+export enum QuestionTextSortField {
+  QUESTION_TYPE = 'question.question_type_id',
+  QUESTION_TEXT = 'question_text',
+  // Include the standard sort fields
+  CREATED_AT = SortField.CREATED_AT,
+  UPDATED_AT = SortField.UPDATED_AT
 } 
