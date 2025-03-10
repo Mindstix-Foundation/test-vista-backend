@@ -34,9 +34,10 @@ export class BoardController {
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns boards, paginated if requested' })
   findAll(@Query() paginationDto: PaginationDto) {
+    // Extract values from DTO without defaults
     const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = paginationDto;
     
-    // If page and page_size are provided, use pagination
+    // If page and page_size are explicitly provided in the query parameters, use pagination
     if (page !== undefined && page_size !== undefined) {
       return this.boardService.findAll(page, page_size, sort_by, sort_order, search);
     }

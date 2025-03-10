@@ -67,7 +67,7 @@ model Standard {
   board           Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
   board_id        Int
   name            String   @db.VarChar
-  sequence_number Int      @default(0)
+  sequence_number Int
   created_at      DateTime @default(now()) @db.Timestamptz()
   updated_at      DateTime @updatedAt @db.Timestamptz()
 

@@ -252,4 +252,14 @@ export class BoardManagementService {
       }
     });
   }
+
+  private async getNextSequenceNumber(boardId: number): Promise<number> {
+    const highestSequence = await this.prisma.standard.findFirst({
+      where: { board_id: boardId },
+      orderBy: { sequence_number: 'desc' },
+      select: { sequence_number: true }
+    });
+    
+    return highestSequence ? highestSequence.sequence_number + 1 : 0;
+  }
 } 

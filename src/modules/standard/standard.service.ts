@@ -25,7 +25,7 @@ export class StandardService {
       // Check for duplicate standard in the same board
       const existing = await this.prisma.standard.findFirst({
         where: { 
-          name:toTitleCase( createDto.name),
+          name: toTitleCase(createDto.name),
           board_id: createDto.board_id 
         }
       });
@@ -33,11 +33,36 @@ export class StandardService {
       if (existing) {
         throw new ConflictException(`Standard '${createDto.name}' already exists for this board`);
       }
+      
+      // Auto-generate sequence number if not provided
+      let sequenceNumber = createDto.sequence_number;
+      if (sequenceNumber === undefined) {
+        const highestSequence = await this.prisma.standard.findFirst({
+          where: { board_id: createDto.board_id },
+          orderBy: { sequence_number: 'desc' },
+          select: { sequence_number: true }
+        });
+        
+        sequenceNumber = highestSequence ? highestSequence.sequence_number + 1 : 0;
+      } else {
+        // Check if provided sequence number is already used
+        const existingSequence = await this.prisma.standard.findFirst({
+          where: {
+            board_id: createDto.board_id,
+            sequence_number: sequenceNumber
+          }
+        });
+        
+        if (existingSequence) {
+          throw new ConflictException(`Sequence number ${sequenceNumber} is already used in this board`);
+        }
+      }
 
       return await this.prisma.standard.create({
         data: {
           name: toTitleCase(createDto.name),
           board_id: createDto.board_id,
+          sequence_number: sequenceNumber
         },
         include: {
           board: true
@@ -95,7 +120,7 @@ export class StandardService {
 
   async update(id: number, updateDto: UpdateStandardDto) {
     try {
-      await this.findOne(id);
+      const standard = await this.findOne(id);
 
       if (updateDto.board_id) {
         const board = await this.prisma.board.findUnique({
@@ -117,6 +142,23 @@ export class StandardService {
 
         if (existing) {
           throw new ConflictException(`Standard already exists in the target board`);
+        }
+      }
+      
+      // Check if sequence number is being updated and if it's already used
+      if (updateDto.sequence_number !== undefined && 
+          updateDto.sequence_number !== standard.sequence_number) {
+        
+        const existingSequence = await this.prisma.standard.findFirst({
+          where: {
+            board_id: updateDto.board_id || standard.board_id,
+            sequence_number: updateDto.sequence_number,
+            NOT: { id }
+          }
+        });
+        
+        if (existingSequence) {
+          throw new ConflictException(`Sequence number ${updateDto.sequence_number} is already used in this board`);
         }
       }
       
