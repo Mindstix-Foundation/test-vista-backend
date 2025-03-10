@@ -31,18 +31,12 @@ export class BoardController {
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
-  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name' })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Returns boards, paginated if requested',
-    type: BoardListDto,
-    isArray: true
-  })
-  findAll(@Query() paginationDto: PaginationDto) {
-    // Extract values from DTO without defaults
-    const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = paginationDto;
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name or abbreviation' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns boards, paginated if requested' })
+  async findAll(@Query() query: PaginationDto) {
+    const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = query;
     
-    // If page and page_size are explicitly provided in the query parameters, use pagination
+    // If page and page_size are provided, use pagination
     if (page !== undefined && page_size !== undefined) {
       return this.boardService.findAll(page, page_size, sort_by, sort_order, search);
     }

@@ -52,11 +52,23 @@ export class BoardService {
       const skip = (page - 1) * page_size;
       
       // Build where clause for search
-      const where: Prisma.BoardWhereInput = {};
+      let where: Prisma.BoardWhereInput = {};
       if (search) {
-        where.name = {
-          contains: search,
-          mode: 'insensitive' // Case-insensitive search
+        where = {
+          OR: [
+            {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              abbreviation: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
         };
       }
       
@@ -67,16 +79,17 @@ export class BoardService {
       const orderBy: Prisma.BoardOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get paginated data with sorting and search - only select essential fields
+      // Get paginated data with sorting
       const boards = await this.prisma.board.findMany({
         skip,
         take: page_size,
         where,
         orderBy,
-        select: {
-          id: true,
-          name: true,
-          abbreviation: true
+        include: {
+          address: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
         }
       });
       
@@ -88,23 +101,36 @@ export class BoardService {
           page_size,
           total_pages: Math.ceil(total / page_size),
           sort_by,
-          sort_order
+          sort_order,
+          search: search || undefined
         }
       };
     } catch (error) {
-      this.logger.error('Failed to fetch all boards:', error);
-      throw new InternalServerErrorException('Failed to fetch all boards');
+      this.logger.error('Failed to fetch boards:', error);
+      throw new InternalServerErrorException('Failed to fetch boards');
     }
   }
 
   async findAllWithoutPagination(sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
     try {
       // Build where clause for search
-      const where: Prisma.BoardWhereInput = {};
+      let where: Prisma.BoardWhereInput = {};
       if (search) {
-        where.name = {
-          contains: search,
-          mode: 'insensitive' // Case-insensitive search
+        where = {
+          OR: [
+            {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              abbreviation: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
         };
       }
       
@@ -112,14 +138,15 @@ export class BoardService {
       const orderBy: Prisma.BoardOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get all boards with sorting and search but without pagination - only select essential fields
+      // Get all boards with sorting but without pagination
       const boards = await this.prisma.board.findMany({
         where,
         orderBy,
-        select: {
-          id: true,
-          name: true,
-          abbreviation: true
+        include: {
+          address: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
         }
       });
       
