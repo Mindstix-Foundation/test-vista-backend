@@ -24,37 +24,54 @@ export class QuestionController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all questions with pagination and sorting' })
+  @ApiOperation({ summary: 'Get all questions with optional pagination, sorting and search' })
   @ApiQuery({ name: 'question_type_id', required: false, type: Number, description: 'Filter by question type ID' })
   @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'Filter by verification status' })
   @ApiQuery({ name: 'topic_id', required: false, type: Number, description: 'Filter by topic ID' })
   @ApiQuery({ name: 'chapter_id', required: false, type: Number, description: 'Filter by chapter ID' })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all questions.' })
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: QuestionSortField, description: 'Field to sort by (question_type_id, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
-  @ApiResponse({ status: 200, description: 'Returns paginated questions' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter questions by content in question texts' })
+  @ApiResponse({ status: 200, description: 'Returns questions, paginated if requested' })
   async findAll(@Query() filters: QuestionFilterDto) {
     const { 
       question_type_id, 
       is_verified, 
       topic_id, 
       chapter_id, 
-      page = 1, 
-      page_size = 10, 
+      page, 
+      page_size, 
       sort_by = QuestionSortField.CREATED_AT, 
-      sort_order = SortOrder.DESC 
+      sort_order = SortOrder.DESC,
+      search
     } = filters;
     
-    return await this.questionService.findAll({
+    // If page and page_size are provided, use pagination
+    if (page !== undefined && page_size !== undefined) {
+      return await this.questionService.findAll({
+        question_type_id,
+        is_verified,
+        topic_id,
+        chapter_id,
+        page,
+        page_size,
+        sort_by: sort_by as QuestionSortField,
+        sort_order,
+        search
+      });
+    }
+    
+    // Otherwise, get all questions without pagination
+    return await this.questionService.findAllWithoutPagination({
       question_type_id,
       is_verified,
       topic_id,
       chapter_id,
-      page,
-      page_size,
       sort_by: sort_by as QuestionSortField,
-      sort_order
+      sort_order,
+      search
     });
   }
 

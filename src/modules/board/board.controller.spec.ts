@@ -20,6 +20,7 @@ describe('BoardController', () => {
             findOne: jest.fn(),
             update: jest.fn(),
             remove: jest.fn(),
+            findAllWithoutPagination: jest.fn(),
           },
         },
       ],
@@ -34,24 +35,21 @@ describe('BoardController', () => {
   });
   
   describe('findAll', () => {
-    it('should call boardService.findAll with default pagination values', async () => {
-      const mockPaginatedResponse = {
+    it('should call boardService.findAllWithoutPagination when no pagination params are provided', async () => {
+      const mockResponse = {
         data: [],
         meta: { 
-          total: 0, 
-          page: 1, 
-          page_size: 15, 
-          total_pages: 0,
-          sort_by: SortField.CREATED_AT,
-          sort_order: SortOrder.DESC
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC,
+          search: undefined
         }
       };
       
-      jest.spyOn(boardService, 'findAll').mockResolvedValue(mockPaginatedResponse);
+      jest.spyOn(boardService, 'findAllWithoutPagination').mockResolvedValue(mockResponse);
       
       await controller.findAll({});
       
-      expect(boardService.findAll).toHaveBeenCalledWith(1, 15);
+      expect(boardService.findAllWithoutPagination).toHaveBeenCalledWith(SortField.NAME, SortOrder.ASC, undefined);
     });
     
     it('should call boardService.findAll with provided pagination values', async () => {
@@ -71,7 +69,7 @@ describe('BoardController', () => {
       
       await controller.findAll({ page: 2, page_size: 15 });
       
-      expect(boardService.findAll).toHaveBeenCalledWith(2, 15);
+      expect(boardService.findAll).toHaveBeenCalledWith(2, 15, SortField.NAME, SortOrder.ASC);
     });
 
     it('should call boardService.findAll with provided pagination and sorting values', async () => {
@@ -97,6 +95,44 @@ describe('BoardController', () => {
       });
       
       expect(boardService.findAll).toHaveBeenCalledWith(2, 15, SortField.CREATED_AT, SortOrder.DESC);
+    });
+
+    it('should call boardService.findAllWithoutPagination with search parameter', async () => {
+      const mockResponse = {
+        data: [],
+        meta: { 
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC,
+          search: 'CBSE'
+        }
+      };
+      
+      jest.spyOn(boardService, 'findAllWithoutPagination').mockResolvedValue(mockResponse);
+      
+      await controller.findAll({ search: 'CBSE' });
+      
+      expect(boardService.findAllWithoutPagination).toHaveBeenCalledWith(SortField.NAME, SortOrder.ASC, 'CBSE');
+    });
+
+    it('should call boardService.findAll with search parameter', async () => {
+      const mockPaginatedResponse = {
+        data: [],
+        meta: { 
+          total: 0, 
+          page: 1, 
+          page_size: 15, 
+          total_pages: 0, 
+          sort_by: SortField.NAME, 
+          sort_order: SortOrder.ASC,
+          search: 'CBSE'
+        }
+      };
+      
+      jest.spyOn(boardService, 'findAll').mockResolvedValue(mockPaginatedResponse);
+      
+      await controller.findAll({ page: 1, page_size: 15, search: 'CBSE' });
+      
+      expect(boardService.findAll).toHaveBeenCalledWith(1, 15, SortField.NAME, SortOrder.ASC, 'CBSE');
     });
   });
 });

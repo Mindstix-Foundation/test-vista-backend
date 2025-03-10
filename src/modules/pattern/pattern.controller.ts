@@ -67,37 +67,54 @@ export class PatternController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all patterns with pagination, sorting and optional filters' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns paginated patterns' })
+  @ApiOperation({ summary: 'Get all patterns with optional pagination, sorting, filters and search' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns patterns, paginated if requested' })
   @ApiQuery({ name: 'boardId', required: false, type: Number, description: 'Filter by board ID' })
   @ApiQuery({ name: 'standardId', required: false, type: Number, description: 'Filter by standard ID' })
   @ApiQuery({ name: 'subjectId', required: false, type: Number, description: 'Filter by subject ID' })
   @ApiQuery({ name: 'totalMarks', required: false, type: Number, description: 'Filter by total marks' })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all patterns.' })
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter patterns by name' })
   findAll(@Query() query: GetPatternsQueryDto) {
     const { 
       boardId, 
       standardId, 
       subjectId, 
       totalMarks, 
-      page = 1, 
-      page_size = 10, 
+      page, 
+      page_size, 
       sort_by = SortField.CREATED_AT, 
-      sort_order = SortOrder.DESC 
+      sort_order = SortOrder.DESC,
+      search
     } = query;
     
-    return this.patternService.findAll({
+    // If page and page_size are provided, use pagination
+    if (page !== undefined && page_size !== undefined) {
+      return this.patternService.findAll({
+        boardId,
+        standardId,
+        subjectId,
+        totalMarks,
+        page,
+        page_size,
+        sort_by,
+        sort_order,
+        search
+      });
+    }
+    
+    // Otherwise, get all patterns without pagination
+    return this.patternService.findAllWithoutPagination({
       boardId,
       standardId,
       subjectId,
       totalMarks,
-      page,
-      page_size,
       sort_by,
-      sort_order
+      sort_order,
+      search
     });
   }
 

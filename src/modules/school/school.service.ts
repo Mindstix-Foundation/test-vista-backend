@@ -80,7 +80,7 @@ export class SchoolService {
     }
   }
 
-  async findAll(boardId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC) {
+  async findAll(boardId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
     try {
       const skip = (page - 1) * page_size;
       
@@ -88,6 +88,14 @@ export class SchoolService {
       const where: Prisma.SchoolWhereInput = {};
       if (boardId) {
         where.board_id = parseInt(boardId.toString());
+      }
+      
+      // Add search condition
+      if (search) {
+        where.name = {
+          contains: search,
+          mode: 'insensitive' // Case-insensitive search
+        };
       }
       
       // Get total count for pagination metadata
@@ -131,23 +139,87 @@ export class SchoolService {
         }
       });
       
-      // Calculate total pages
-      const total_pages = Math.ceil(total / page_size);
-      
       return {
         data: schools,
         meta: {
           total,
           page,
           page_size,
-          total_pages,
+          total_pages: Math.ceil(total / page_size),
           sort_by,
-          sort_order
+          sort_order,
+          search: search || undefined
         }
       };
     } catch (error) {
-      this.logger.error('Failed to fetch schools:', error);
-      throw new InternalServerErrorException('Failed to fetch schools');
+      this.logger.error('Failed to fetch all schools:', error);
+      throw new InternalServerErrorException('Failed to fetch all schools');
+    }
+  }
+
+  async findAllWithoutPagination(boardId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+    try {
+      // Build where clause
+      const where: Prisma.SchoolWhereInput = {};
+      if (boardId) {
+        where.board_id = parseInt(boardId.toString());
+      }
+      
+      // Add search condition
+      if (search) {
+        where.name = {
+          contains: search,
+          mode: 'insensitive' // Case-insensitive search
+        };
+      }
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: Prisma.SchoolOrderByWithRelationInput = {};
+      orderBy[sort_by] = sort_order;
+      
+      // Get all schools with sorting but without pagination
+      const schools = await this.prisma.school.findMany({
+        where,
+        orderBy,
+        include: {
+          address: {
+            include: {
+              city: {
+                include: {
+                  state: {
+                    include: {
+                      country: true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          board: true,
+          school_standards: {
+            include: {
+              standard: true
+            }
+          },
+          school_instruction_mediums: {
+            include: {
+              instruction_medium: true
+            }
+          }
+        }
+      });
+      
+      return {
+        data: schools,
+        meta: {
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch all schools:', error);
+      throw new InternalServerErrorException('Failed to fetch all schools');
     }
   }
 

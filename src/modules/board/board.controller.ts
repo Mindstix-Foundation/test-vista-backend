@@ -26,15 +26,23 @@ export class BoardController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all boards with pagination and sorting' })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1)' })
+  @ApiOperation({ summary: 'Get all boards with optional pagination, sorting and search' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all boards.' })
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns paginated boards' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns boards, paginated if requested' })
   findAll(@Query() paginationDto: PaginationDto) {
-    const { page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC } = paginationDto;
-    return this.boardService.findAll(page, page_size, sort_by, sort_order);
+    const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = paginationDto;
+    
+    // If page and page_size are provided, use pagination
+    if (page !== undefined && page_size !== undefined) {
+      return this.boardService.findAll(page, page_size, sort_by, sort_order, search);
+    }
+    
+    // Otherwise, get all boards without pagination
+    return this.boardService.findAllWithoutPagination(sort_by, sort_order, search);
   }
 
   @Get(':id')

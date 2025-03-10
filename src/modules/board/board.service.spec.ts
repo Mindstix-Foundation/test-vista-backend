@@ -231,4 +231,35 @@ describe('BoardService', () => {
       await expect(service.remove(boardId)).rejects.toThrow(ConflictException);
     });
   });
+
+  describe('findAllWithoutPagination', () => {
+    it('should return all boards without pagination', async () => {
+      const mockBoards = [
+        { id: 1, name: 'Board A' },
+        { id: 2, name: 'Board B' },
+      ];
+      
+      mockPrismaService.board.findMany.mockResolvedValue(mockBoards);
+
+      const result = await service.findAllWithoutPagination();
+      
+      expect(result).toEqual({
+        data: mockBoards,
+        meta: {
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC
+        }
+      });
+      
+      expect(mockPrismaService.board.findMany).toHaveBeenCalledWith({
+        orderBy: { name: 'asc' },
+        include: {
+          address: true,
+          standards: true,
+          subjects: true,
+          instruction_mediums: true
+        }
+      });
+    });
+  });
 });

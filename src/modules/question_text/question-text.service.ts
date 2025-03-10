@@ -12,6 +12,7 @@ interface QuestionTextFilters {
   page_size?: number;
   sort_by?: QuestionTextSortField;
   sort_order?: SortOrder;
+  search?: string;
 }
 
 @Injectable()
@@ -82,7 +83,8 @@ export class QuestionTextService {
         page = 1, 
         page_size = 10, 
         sort_by = QuestionTextSortField.CREATED_AT, 
-        sort_order = SortOrder.DESC 
+        sort_order = SortOrder.DESC,
+        search
       } = filters;
       
       const skip = (page - 1) * page_size;
@@ -115,6 +117,14 @@ export class QuestionTextService {
       if (question_type_id) {
         where.question = {
           question_type_id: question_type_id
+        };
+      }
+      
+      // Add search condition
+      if (search) {
+        where.question_text = {
+          contains: search,
+          mode: 'insensitive'
         };
       }
       
@@ -165,7 +175,8 @@ export class QuestionTextService {
           page_size,
           total_pages,
           sort_by,
-          sort_order
+          sort_order,
+          search: search || undefined
         }
       };
     } catch (error) {
@@ -287,6 +298,101 @@ export class QuestionTextService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete question text');
+    }
+  }
+
+  async findAllWithoutPagination(filters: Omit<QuestionTextFilters, 'page' | 'page_size'>) {
+    try {
+      const { 
+        topic_id, 
+        chapter_id, 
+        question_type_id, 
+        sort_by = QuestionTextSortField.CREATED_AT, 
+        sort_order = SortOrder.DESC,
+        search
+      } = filters;
+      
+      // Build where clause
+      const where: Prisma.Question_TextWhereInput = {};
+      
+      if (topic_id) {
+        where.question = {
+          question_topics: {
+            some: {
+              topic_id: topic_id
+            }
+          }
+        };
+      }
+      
+      if (chapter_id) {
+        where.question = {
+          question_topics: {
+            some: {
+              topic: {
+                chapter_id: chapter_id
+              }
+            }
+          }
+        };
+      }
+      
+      if (question_type_id) {
+        where.question = {
+          question_type_id: question_type_id
+        };
+      }
+      
+      // Add search condition
+      if (search) {
+        where.question_text = {
+          contains: search,
+          mode: 'insensitive'
+        };
+      }
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: any = {};
+      
+      // Handle special cases for sort fields that require joins
+      if (sort_by === QuestionTextSortField.QUESTION_TYPE) {
+        orderBy.question = { question_type_id: sort_order };
+      } else {
+        orderBy[sort_by] = sort_order;
+      }
+      
+      // Get all question texts with sorting but without pagination
+      const questionTexts = await this.prisma.question_Text.findMany({
+        where,
+        orderBy,
+        include: {
+          question: {
+            include: {
+              question_type: true,
+              question_topics: {
+                include: {
+                  topic: true
+                }
+              }
+            }
+          },
+          image: true,
+          mcq_options: true,
+          match_pairs: true
+        }
+      });
+      
+      return {
+        data: questionTexts,
+        meta: {
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch all question texts:', error);
+      throw new InternalServerErrorException('Failed to fetch all question texts');
     }
   }
 } 
