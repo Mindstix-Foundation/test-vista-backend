@@ -1,9 +1,9 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { SchoolService } from './school.service';
-import { SchoolDto, CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
+import { SchoolDto, CreateSchoolDto, UpdateSchoolDto, SchoolListDto } from './dto/school.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsOptional, IsNumber } from 'class-validator';
+import { IsOptional, IsNumber, IsString } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -16,6 +16,11 @@ class GetSchoolsQueryDto extends PaginationDto {
   @Type(() => Number)
   @IsNumber({}, { message: 'boardId must be a number' })
   boardId?: number;
+
+  @ApiProperty({ required: false, description: 'Search term to filter schools by board name or abbreviation' })
+  @IsOptional()
+  @IsString()
+  boardSearch?: string;
 }
 
 @ApiTags('schools')
@@ -47,26 +52,35 @@ export class SchoolController {
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter schools by name' })
+  @ApiQuery({ name: 'boardSearch', required: false, type: String, description: 'Search term to filter schools by board name or abbreviation' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Returns schools, paginated if requested'
+    description: 'Returns schools with minimal data, paginated if requested',
+    type: SchoolListDto,
+    isArray: true
   })
   async findAll(@Query() query: GetSchoolsQueryDto) {
-    const { boardId, page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = query;
+    const { boardId, page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search, boardSearch } = query;
     
     // If page and page_size are provided, use pagination
     if (page !== undefined && page_size !== undefined) {
-      return this.schoolService.findAll(boardId, page, page_size, sort_by, sort_order, search);
+      return this.schoolService.findAll(boardId, page, page_size, sort_by, sort_order, search, boardSearch);
     }
     
     // Otherwise, get all schools without pagination
-    return this.schoolService.findAllWithoutPagination(boardId, sort_by, sort_order, search);
+    return this.schoolService.findAllWithoutPagination(boardId, sort_by, sort_order, search, boardSearch);
   }
 
   @Get(':id')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get a school by id' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'School found' })
+  @ApiOperation({ 
+    summary: 'Get a school by id',
+    description: 'Returns school details with address, board, instruction mediums (alphabetical), and standards (by sequence)'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'School found with properly sorted related data'
+  })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
     return await this.schoolService.findOne(id);

@@ -64,4 +64,18 @@ export class UpdateBoardDto {
   @IsNumber({}, { message: 'Address ID must be a number' })
   @IsNotEmpty({ message: 'Address ID cannot be empty if provided' })
   address_id?: number;
+}
+
+export class BoardListDto {
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  id: number;
+
+  @ApiProperty({ example: 'CBSE Board' })
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: 'CBSE' })
+  @IsString()
+  abbreviation: string;
 } 

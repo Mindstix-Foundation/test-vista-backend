@@ -114,4 +114,22 @@ export class UpdateSchoolDto {
   @IsOptional()
   @IsPhoneNumber()
   alternate_contact_number?: string;
+}
+
+export class SchoolListDto {
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  id: number;
+
+  @ApiProperty({ example: 'Delhi Public School' })
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: 'Central Board of Secondary Education' })
+  @IsString()
+  board_name: string;
+
+  @ApiProperty({ example: 'CBSE' })
+  @IsString()
+  board_abbreviation: string;
 } 

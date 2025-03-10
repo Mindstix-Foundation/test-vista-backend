@@ -80,21 +80,43 @@ export class SchoolService {
     }
   }
 
-  async findAll(boardId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+  async findAll(boardId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string, boardSearch?: string) {
     try {
       const skip = (page - 1) * page_size;
       
       // Build where clause
-      const where: Prisma.SchoolWhereInput = {};
+      let where: Prisma.SchoolWhereInput = {};
+      
+      // Filter by board ID if provided
       if (boardId) {
         where.board_id = parseInt(boardId.toString());
       }
       
-      // Add search condition
+      // Add search condition for school name
       if (search) {
         where.name = {
           contains: search,
           mode: 'insensitive' // Case-insensitive search
+        };
+      }
+      
+      // Add search condition for board name/abbreviation
+      if (boardSearch) {
+        where.board = {
+          OR: [
+            {
+              name: {
+                contains: boardSearch,
+                mode: 'insensitive'
+              }
+            },
+            {
+              abbreviation: {
+                contains: boardSearch,
+                mode: 'insensitive'
+              }
+            }
+          ]
         };
       }
       
@@ -105,42 +127,34 @@ export class SchoolService {
       const orderBy: Prisma.SchoolOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get paginated data with sorting
+      // Get paginated data with sorting - only select essential fields
       const schools = await this.prisma.school.findMany({
         skip,
         take: page_size,
         where,
         orderBy,
-        include: {
-          address: {
-            include: {
-              city: {
-                include: {
-                  state: {
-                    include: {
-                      country: true
-                    }
-                  }
-                }
-              }
-            }
-          },
-          board: true,
-          school_standards: {
-            include: {
-              standard: true
-            }
-          },
-          school_instruction_mediums: {
-            include: {
-              instruction_medium: true
+        select: {
+          id: true,
+          name: true,
+          board: {
+            select: {
+              name: true,
+              abbreviation: true
             }
           }
         }
       });
       
+      // Transform the data to match the SchoolListDto format
+      const formattedSchools = schools.map(school => ({
+        id: school.id,
+        name: school.name,
+        board_name: school.board.name,
+        board_abbreviation: school.board.abbreviation
+      }));
+      
       return {
-        data: schools,
+        data: formattedSchools,
         meta: {
           total,
           page,
@@ -148,24 +162,27 @@ export class SchoolService {
           total_pages: Math.ceil(total / page_size),
           sort_by,
           sort_order,
-          search: search || undefined
+          search: search || undefined,
+          boardSearch: boardSearch || undefined
         }
       };
     } catch (error) {
-      this.logger.error('Failed to fetch all schools:', error);
-      throw new InternalServerErrorException('Failed to fetch all schools');
+      this.logger.error('Failed to fetch schools:', error);
+      throw new InternalServerErrorException('Failed to fetch schools');
     }
   }
 
-  async findAllWithoutPagination(boardId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+  async findAllWithoutPagination(boardId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string, boardSearch?: string) {
     try {
       // Build where clause
-      const where: Prisma.SchoolWhereInput = {};
+      let where: Prisma.SchoolWhereInput = {};
+      
+      // Filter by board ID if provided
       if (boardId) {
         where.board_id = parseInt(boardId.toString());
       }
       
-      // Add search condition
+      // Add search condition for school name
       if (search) {
         where.name = {
           contains: search,
@@ -173,48 +190,61 @@ export class SchoolService {
         };
       }
       
+      // Add search condition for board name/abbreviation
+      if (boardSearch) {
+        where.board = {
+          OR: [
+            {
+              name: {
+                contains: boardSearch,
+                mode: 'insensitive'
+              }
+            },
+            {
+              abbreviation: {
+                contains: boardSearch,
+                mode: 'insensitive'
+              }
+            }
+          ]
+        };
+      }
+      
       // Build orderBy object based on sort parameters
       const orderBy: Prisma.SchoolOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get all schools with sorting but without pagination
+      // Get all schools with sorting but without pagination - only select essential fields
       const schools = await this.prisma.school.findMany({
         where,
         orderBy,
-        include: {
-          address: {
-            include: {
-              city: {
-                include: {
-                  state: {
-                    include: {
-                      country: true
-                    }
-                  }
-                }
-              }
-            }
-          },
-          board: true,
-          school_standards: {
-            include: {
-              standard: true
-            }
-          },
-          school_instruction_mediums: {
-            include: {
-              instruction_medium: true
+        select: {
+          id: true,
+          name: true,
+          board: {
+            select: {
+              name: true,
+              abbreviation: true
             }
           }
         }
       });
       
+      // Transform the data to match the SchoolListDto format
+      const formattedSchools = schools.map(school => ({
+        id: school.id,
+        name: school.name,
+        board_name: school.board.name,
+        board_abbreviation: school.board.abbreviation
+      }));
+      
       return {
-        data: schools,
+        data: formattedSchools,
         meta: {
           sort_by,
           sort_order,
-          search: search || undefined
+          search: search || undefined,
+          boardSearch: boardSearch || undefined
         }
       };
     } catch (error) {
@@ -227,17 +257,80 @@ export class SchoolService {
     try {
       const school = await this.prisma.school.findUnique({
         where: { id },
-        include: {
-          address: true,
-          board: true,
-          school_standards: {
-            include: {
-              standard: true
+        select: {
+          id: true,
+          name: true,
+          principal_name: true,
+          email: true,
+          contact_number: true,
+          alternate_contact_number: true,
+          created_at: true,
+          updated_at: true,
+          board: {
+            select: {
+              id: true,
+              name: true,
+              abbreviation: true
             }
           },
+          address: {
+            select: {
+              id: true,
+              postal_code: true,
+              street: true,
+              city: {
+                select: {
+                  id: true,
+                  name: true,
+                  state: {
+                    select: {
+                      id: true,
+                      name: true,
+                      country: {
+                        select: {
+                          id: true,
+                          name: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          // Sort instruction mediums alphabetically
           school_instruction_mediums: {
-            include: {
-              instruction_medium: true
+            orderBy: {
+              instruction_medium: {
+                instruction_medium: 'asc'
+              }
+            },
+            select: {
+              id: true,
+              instruction_medium: {
+                select: {
+                  id: true,
+                  instruction_medium: true
+                }
+              }
+            }
+          },
+          // Sort standards by sequence number
+          school_standards: {
+            orderBy: {
+              standard: {
+                sequence_number: 'asc'
+              }
+            },
+            select: {
+              id: true,
+              standard: {
+                select: {
+                  id: true,
+                  name: true,
+                  sequence_number: true
+                }
+              }
             }
           }
         }
@@ -247,7 +340,32 @@ export class SchoolService {
         throw new NotFoundException(`School with ID ${id} not found`);
       }
 
-      return school;
+      // Transform the response to a more readable format
+      return {
+        id: school.id,
+        name: school.name,
+        principal_name: school.principal_name,
+        email: school.email,
+        contact_number: school.contact_number,
+        alternate_contact_number: school.alternate_contact_number,
+        created_at: school.created_at,
+        updated_at: school.updated_at,
+        board: {
+          id: school.board.id,
+          name: school.board.name,
+          abbreviation: school.board.abbreviation
+        },
+        address: school.address,
+        instruction_mediums: school.school_instruction_mediums.map(sim => ({
+          id: sim.instruction_medium.id,
+          name: sim.instruction_medium.instruction_medium
+        })),
+        standards: school.school_standards.map(ss => ({
+          id: ss.standard.id,
+          name: ss.standard.name,
+          sequence_number: ss.standard.sequence_number
+        }))
+      };
     } catch (error) {
       this.logger.error(`Failed to fetch school ${id}:`, error);
       if (error instanceof NotFoundException) {

@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards, Query } from '@nestjs/common';
 import { BoardService } from './board.service';
-import { BoardDto, CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
+import { BoardDto, CreateBoardDto, UpdateBoardDto, BoardListDto } from './dto/board.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -32,7 +32,12 @@ export class BoardController {
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns boards, paginated if requested' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Returns boards, paginated if requested',
+    type: BoardListDto,
+    isArray: true
+  })
   findAll(@Query() paginationDto: PaginationDto) {
     // Extract values from DTO without defaults
     const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = paginationDto;
@@ -48,7 +53,15 @@ export class BoardController {
 
   @Get(':id')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get a board by id' })
+  @ApiOperation({ 
+    summary: 'Get a board by id',
+    description: 'Returns board details with address, instruction mediums (alphabetical), standards (by sequence), and subjects (alphabetical)'
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Returns board details with properly sorted related data'
+  })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.boardService.findOne(id);
   }

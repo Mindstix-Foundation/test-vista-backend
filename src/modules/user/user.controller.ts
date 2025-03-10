@@ -1,13 +1,13 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards } from '@nestjs/common';
 import { UserService } from './user.service';
-import { UserDto, CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { UserDto, CreateUserDto, UpdateUserDto, UserListDto } from './dto/user.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { PaginationDto, SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { Type } from 'class-transformer';
-import { IsOptional, IsNumber } from 'class-validator';
+import { IsOptional, IsNumber, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 class GetUsersQueryDto extends PaginationDto {
@@ -16,6 +16,17 @@ class GetUsersQueryDto extends PaginationDto {
   @Type(() => Number)
   @IsNumber({}, { message: 'schoolId must be a number' })
   schoolId?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'roleId must be a number' })
+  roleId?: number;
+
+  @ApiProperty({ required: false, description: 'Search term to filter users by school name' })
+  @IsOptional()
+  @IsString()
+  schoolSearch?: string;
 }
 
 @ApiTags('users')
@@ -41,31 +52,41 @@ export class UserController {
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Get all users with optional pagination, sorting and search' })
   @ApiQuery({ name: 'schoolId', required: false, type: Number, description: 'Filter users by school ID' })
+  @ApiQuery({ name: 'roleId', required: false, type: Number, description: 'Filter users by role ID' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all users.' })
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter users by name or email' })
+  @ApiQuery({ name: 'schoolSearch', required: false, type: String, description: 'Search term to filter users by school name' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Returns users, paginated if requested'
+    description: 'Returns users with minimal data, paginated if requested',
+    type: UserListDto,
+    isArray: true
   })
   async findAll(@Query() query: GetUsersQueryDto) {
-    const { schoolId, page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = query;
+    const { schoolId, roleId, page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search, schoolSearch } = query;
     
     // If page and page_size are provided, use pagination
     if (page !== undefined && page_size !== undefined) {
-      return await this.userService.findAll(schoolId, page, page_size, sort_by, sort_order, search);
+      return await this.userService.findAll(schoolId, roleId, page, page_size, sort_by, sort_order, search, schoolSearch);
     }
     
     // Otherwise, get all users without pagination
-    return await this.userService.findAllWithoutPagination(schoolId, sort_by, sort_order, search);
+    return await this.userService.findAllWithoutPagination(schoolId, roleId, sort_by, sort_order, search, schoolSearch);
   }
 
   @Get(':id')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Get a user by id' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'User found' })
+  @ApiOperation({ 
+    summary: 'Get a user by id',
+    description: 'Returns user details with roles, schools, and teaching assignments (standards in sequence order, subjects in alphabetical order)'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'User found with properly sorted related data'
+  })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
     return await this.userService.findOne(id);
