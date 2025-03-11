@@ -110,4 +110,26 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   status?: boolean;
-} 
+}
+
+export class UserListDto {
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  id: number;
+
+  @ApiProperty({ example: 'John Doe' })
+  @IsString()
+  name: string;
+
+  @ApiProperty({ example: ['Delhi Public School'] })
+  @IsString({ each: true })
+  schools: string[];
+
+  @ApiProperty({ example: ['ADMIN', 'TEACHER'] })
+  @IsString({ each: true })
+  roles: string[];
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  status: boolean;
+}

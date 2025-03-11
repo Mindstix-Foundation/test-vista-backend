@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsInt, IsNotEmpty, Min } from 'class-validator';
 
 export class ReorderStandardDto {
   @ApiProperty({
@@ -8,14 +8,14 @@ export class ReorderStandardDto {
   })
   @IsInt()
   @IsNotEmpty()
+  @Min(1)
   newPosition: number;
 
   @ApiProperty({
-    description: 'Board ID (optional, for verification)',
-    example: 1,
-    required: false
+    description: 'Board ID (required for verification)',
+    example: 1
   })
   @IsInt()
-  @IsOptional()
-  boardId?: number;
+  @IsNotEmpty()
+  boardId: number;
 } 

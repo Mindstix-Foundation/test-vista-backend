@@ -52,11 +52,23 @@ export class BoardService {
       const skip = (page - 1) * page_size;
       
       // Build where clause for search
-      const where: Prisma.BoardWhereInput = {};
+      let where: Prisma.BoardWhereInput = {};
       if (search) {
-        where.name = {
-          contains: search,
-          mode: 'insensitive' // Case-insensitive search
+        where = {
+          OR: [
+            {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              abbreviation: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
         };
       }
       
@@ -67,7 +79,7 @@ export class BoardService {
       const orderBy: Prisma.BoardOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get paginated data with sorting and search
+      // Get paginated data with sorting
       const boards = await this.prisma.board.findMany({
         skip,
         take: page_size,
@@ -89,23 +101,36 @@ export class BoardService {
           page_size,
           total_pages: Math.ceil(total / page_size),
           sort_by,
-          sort_order
+          sort_order,
+          search: search || undefined
         }
       };
     } catch (error) {
-      this.logger.error('Failed to fetch all boards:', error);
-      throw new InternalServerErrorException('Failed to fetch all boards');
+      this.logger.error('Failed to fetch boards:', error);
+      throw new InternalServerErrorException('Failed to fetch boards');
     }
   }
 
   async findAllWithoutPagination(sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
     try {
       // Build where clause for search
-      const where: Prisma.BoardWhereInput = {};
+      let where: Prisma.BoardWhereInput = {};
       if (search) {
-        where.name = {
-          contains: search,
-          mode: 'insensitive' // Case-insensitive search
+        where = {
+          OR: [
+            {
+              name: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            },
+            {
+              abbreviation: {
+                contains: search,
+                mode: 'insensitive'
+              }
+            }
+          ]
         };
       }
       
@@ -113,7 +138,7 @@ export class BoardService {
       const orderBy: Prisma.BoardOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get all boards with sorting and search but without pagination
+      // Get all boards with sorting but without pagination
       const boards = await this.prisma.board.findMany({
         where,
         orderBy,
@@ -141,13 +166,81 @@ export class BoardService {
 
   async findOne(id: number) {
     try {
+      // Fetch the board with only necessary relations and fields
       const board = await this.prisma.board.findUnique({
         where: { id },
-        include: {
-          address: true,
-          standards: true,
-          subjects: true,
-          instruction_mediums: true
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true,
+          address_id: true,
+          created_at: true,
+          updated_at: true,
+          address: {
+            select: {
+              id: true,
+              postal_code: true,
+              street: true,
+              city_id: true,
+              city: {
+                select: {
+                  id: true,
+                  name: true,
+                  state_id: true,
+                  state: {
+                    select: {
+                      id: true,
+                      name: true,
+                      country_id: true,
+                      country: {
+                        select: {
+                          id: true,
+                          name: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          // Sort instruction mediums alphabetically
+          instruction_mediums: {
+            orderBy: {
+              instruction_medium: 'asc'
+            },
+            select: {
+              id: true,
+              instruction_medium: true,
+              created_at: true,
+              updated_at: true
+            }
+          },
+          // Sort standards by sequence_number
+          standards: {
+            orderBy: {
+              sequence_number: 'asc'
+            },
+            select: {
+              id: true,
+              name: true,
+              sequence_number: true,
+              created_at: true,
+              updated_at: true
+            }
+          },
+          // Sort subjects alphabetically
+          subjects: {
+            orderBy: {
+              name: 'asc'
+            },
+            select: {
+              id: true,
+              name: true,
+              created_at: true,
+              updated_at: true
+            }
+          }
         }
       });
       
@@ -192,17 +285,18 @@ export class BoardService {
         }
       }
       
-      return await this.prisma.board.update({
+      // Update the board
+      await this.prisma.board.update({
         where: { id },
         data: {
           ...updateBoardDto,
           name: updateBoardDto.name ? toTitleCase(updateBoardDto.name) : undefined,
           abbreviation: updateBoardDto.abbreviation ? updateBoardDto.abbreviation.toUpperCase() : undefined,
-        },
-        include: {
-          address: true
         }
       });
+      
+      // Return the complete updated board using findOne
+      return await this.findOne(id);
     } catch (error) {
       this.logger.error(`Failed to update board ${id}:`, error);
       if (error instanceof NotFoundException || 

@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards, Query } from '@nestjs/common';
 import { BoardService } from './board.service';
-import { BoardDto, CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
+import { BoardDto, CreateBoardDto, UpdateBoardDto, BoardListDto } from './dto/board.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -31,13 +31,12 @@ export class BoardController {
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
-  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter boards by name or abbreviation' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns boards, paginated if requested' })
-  findAll(@Query() paginationDto: PaginationDto) {
-    // Extract values from DTO without defaults
-    const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = paginationDto;
+  async findAll(@Query() query: PaginationDto) {
+    const { page, page_size, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search } = query;
     
-    // If page and page_size are explicitly provided in the query parameters, use pagination
+    // If page and page_size are provided, use pagination
     if (page !== undefined && page_size !== undefined) {
       return this.boardService.findAll(page, page_size, sort_by, sort_order, search);
     }
@@ -48,7 +47,15 @@ export class BoardController {
 
   @Get(':id')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get a board by id' })
+  @ApiOperation({ 
+    summary: 'Get a board by id',
+    description: 'Returns board details with address, instruction mediums (alphabetical), standards (by sequence), and subjects (alphabetical)'
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Returns board details with properly sorted related data'
+  })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Board not found' })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.boardService.findOne(id);
   }

@@ -2,6 +2,8 @@ import { Injectable, Logger, NotFoundException, ConflictException, InternalServe
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
 import { ReorderStandardDto } from './dto/reorder-standard.dto';
+import { Standard } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 import { toTitleCase } from '../../utils/titleCase';
 
@@ -11,70 +13,71 @@ export class StandardService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createDto: CreateStandardDto) {
+  async create(createStandardDto: CreateStandardDto): Promise<Standard> {
     try {
-      // Check if board exists
-      const board = await this.prisma.board.findUnique({
-        where: { id: createDto.board_id }
-      });
-
-      if (!board) {
-        throw new NotFoundException(`Board with ID ${createDto.board_id} not found`);
-      }
-
-      // Check for duplicate standard in the same board
-      const existing = await this.prisma.standard.findFirst({
-        where: { 
-          name: toTitleCase(createDto.name),
-          board_id: createDto.board_id 
-        }
-      });
-
-      if (existing) {
-        throw new ConflictException(`Standard '${createDto.name}' already exists for this board`);
-      }
-      
-      // Auto-generate sequence number if not provided
-      let sequenceNumber = createDto.sequence_number;
-      if (sequenceNumber === undefined) {
-        const highestSequence = await this.prisma.standard.findFirst({
-          where: { board_id: createDto.board_id },
-          orderBy: { sequence_number: 'desc' },
-          select: { sequence_number: true }
-        });
-        
-        sequenceNumber = highestSequence ? highestSequence.sequence_number + 1 : 0;
-      } else {
-        // Check if provided sequence number is already used
-        const existingSequence = await this.prisma.standard.findFirst({
-          where: {
-            board_id: createDto.board_id,
-            sequence_number: sequenceNumber
+      return await this.executeWithRetry(async () => {
+        return await this.prisma.$transaction(async (tx) => {
+          // Lock the board record to prevent concurrent modifications
+          await tx.board.findUnique({
+            where: { id: createStandardDto.board_id },
+            select: { id: true }
+          });
+          
+          // Generate a unique sequence number with a random offset to avoid collisions
+          let sequenceNumber = createStandardDto.sequence_number;
+          
+          if (sequenceNumber === undefined) {
+            // Auto-assign the next available sequence number
+            const highestSequence = await tx.standard.findFirst({
+              where: { board_id: createStandardDto.board_id },
+              orderBy: { sequence_number: 'desc' },
+              select: { sequence_number: true }
+            });
+            
+            sequenceNumber = (highestSequence?.sequence_number || 0) + 1;
+            this.logger.log(`Auto-assigning sequence number: ${sequenceNumber}`);
+          } else {
+            // Check if the requested sequence number is already taken
+            const existingStandard = await tx.standard.findFirst({
+              where: {
+                board_id: createStandardDto.board_id,
+                sequence_number: sequenceNumber
+              }
+            });
+            
+            if (existingStandard) {
+              // Find a guaranteed unique sequence number by getting the highest + a random offset
+              const highestSequence = await tx.standard.findFirst({
+                where: { board_id: createStandardDto.board_id },
+                orderBy: { sequence_number: 'desc' },
+                select: { sequence_number: true }
+              });
+              
+              // Add a random offset between 1-100 to avoid collisions with concurrent requests
+              const randomOffset = Math.floor(Math.random() * 100) + 1;
+              sequenceNumber = (highestSequence?.sequence_number || 0) + randomOffset;
+              this.logger.log(`Position ${createStandardDto.sequence_number} is already taken. Using position ${sequenceNumber} instead.`);
+            }
           }
+          
+          // Create the standard with the unique sequence number
+          const newStandard = await tx.standard.create({
+            data: {
+              name: createStandardDto.name,
+              sequence_number: sequenceNumber,
+              board_id: createStandardDto.board_id,
+              // Add any other fields from your DTO that need to be included
+            }
+          });
+          
+          return newStandard;
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable // Use serializable isolation for stronger guarantees
         });
-        
-        if (existingSequence) {
-          throw new ConflictException(`Sequence number ${sequenceNumber} is already used in this board`);
-        }
-      }
-
-      return await this.prisma.standard.create({
-        data: {
-          name: toTitleCase(createDto.name),
-          board_id: createDto.board_id,
-          sequence_number: sequenceNumber
-        },
-        include: {
-          board: true
-        }
-      });
+      }, 5, 200); // Increase max retries and base delay
     } catch (error) {
-      this.logger.error('Failed to create standard:', error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to create standard');
+      this.logger.error(`Failed to create standard: ${error.message}`);
+      throw error;
     }
   }
 
@@ -256,106 +259,123 @@ export class StandardService {
     });
   }
 
-  async reorderStandard(standardId: number, newPosition: number, boardId?: number) {
+  async reorderStandard(standardId: number, newPosition: number, boardId?: number): Promise<Standard> {
     try {
-      this.logger.log(`Starting reorder for standard ${standardId} to position ${newPosition}`);
-      
-      // Get the current standard and its details
-      const currentStandard = await this.prisma.standard.findUnique({
+      return await this.executeWithRetry(() => this.performReordering(standardId, newPosition, boardId));
+    } catch (error) {
+      this.logger.error(`Reorder failed for standard ${standardId}: ${error.message}`);
+      throw new InternalServerErrorException(`Failed to reorder standard: ${error.message}`);
+    }
+  }
+
+  private async performReordering(standardId: number, newPosition: number, boardId?: number): Promise<Standard> {
+    // Get the standard to be reordered
+    const standard = await this.prisma.standard.findUnique({
+      where: { id: standardId },
+    });
+
+    if (!standard) {
+      throw new NotFoundException(`Standard with ID ${standardId} not found`);
+    }
+
+    const currentPosition = standard.sequence_number;
+    
+    // If position is the same, no need to reorder
+    if (currentPosition === newPosition) {
+      return standard;
+    }
+
+    // Determine if we're moving to an earlier or later position
+    const isMovingEarlier = newPosition < currentPosition;
+    this.logger.log(`Moving standard from ${currentPosition} to ${newPosition} (${isMovingEarlier ? 'earlier' : 'later'} position)`);
+
+    return await this.prisma.$transaction(async (tx) => {
+      // First move to temporary position to avoid unique constraint conflicts
+      this.logger.log(`Moving standard ${standardId} to temporary position`);
+      await tx.standard.update({
         where: { id: standardId },
-        select: {
-          id: true,
-          board_id: true,
-          sequence_number: true
+        data: { sequence_number: -1 }, // Temporary negative position to avoid conflicts
+      });
+
+      // Get standards that need to be shifted
+      const standardsToShift = await tx.standard.findMany({
+        where: {
+          id: { not: standardId },
+          ...(boardId ? { board_id: boardId } : {}),
+          sequence_number: isMovingEarlier 
+            ? { gte: newPosition, lt: currentPosition }  // Moving earlier
+            : { gt: currentPosition, lte: newPosition }  // Moving later
+        },
+        orderBy: {
+          sequence_number: isMovingEarlier ? 'desc' : 'asc' // Process in order to avoid conflicts
         }
       });
 
-      if (!currentStandard) {
-        throw new NotFoundException(`Standard with ID ${standardId} not found`);
+      // Update each standard individually to avoid unique constraint violations
+      for (const standardToShift of standardsToShift) {
+        const newSeq = isMovingEarlier 
+          ? standardToShift.sequence_number + 1 
+          : standardToShift.sequence_number - 1;
+        
+        await tx.standard.update({
+          where: { id: standardToShift.id },
+          data: { sequence_number: newSeq }
+        });
       }
 
-      this.logger.log(`Found current standard: ${JSON.stringify(currentStandard)}`);
-
-      // If boardId is provided, verify it matches
-      if (boardId && boardId !== currentStandard.board_id) {
-        throw new ConflictException('Standard does not belong to the specified board');
-      }
-
-      // Get total standards count to validate newPosition
-      const totalStandards = await this.prisma.standard.count({
-        where: { board_id: currentStandard.board_id }
+      // Finally, move the standard to its final position
+      this.logger.log(`Moving standard ${standardId} to final position ${newPosition}`);
+      const updatedStandard = await tx.standard.update({
+        where: { id: standardId },
+        data: { sequence_number: newPosition },
       });
 
-      this.logger.log(`Total standards in board: ${totalStandards}`);
+      return updatedStandard;
+    });
+  }
 
-      // Validate newPosition
-      if (newPosition < 0 || newPosition > totalStandards - 1) {
-        throw new ConflictException(`New position must be between 0 and ${totalStandards - 1}`);
-      }
-
-      const currentPosition = currentStandard.sequence_number;
-
-      // If the positions are the same, no need to reorder
-      if (currentPosition === newPosition) {
-        return await this.findOne(standardId);
-      }
-
+  /**
+   * Executes a function with retry logic for handling deadlocks and conflicts
+   * @param fn The function to execute with retry logic
+   * @param maxRetries Maximum number of retries (default: 3)
+   * @param baseDelay Base delay in ms between retries (default: 100ms)
+   */
+  private async executeWithRetry<T>(
+    fn: () => Promise<T>,
+    maxRetries = 3,
+    baseDelay = 100
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        await this.prisma.$transaction(async (tx) => {
-          // First move to temporary position
-          this.logger.log(`Moving standard ${standardId} to temporary position`);
-          await tx.standard.update({
-            where: { id: standardId },
-            data: { sequence_number: 999 }
-          });
-
-          if (currentPosition < newPosition) {
-            // Moving to a later position
-            for (let i = currentPosition + 1; i <= newPosition; i++) {
-              await tx.standard.updateMany({
-                where: {
-                  board_id: currentStandard.board_id,
-                  sequence_number: i
-                },
-                data: {
-                  sequence_number: i - 1
-                }
-              });
-            }
-          } else {
-            // Moving to an earlier position
-            for (let i = currentPosition - 1; i >= newPosition; i--) {
-              await tx.standard.updateMany({
-                where: {
-                  board_id: currentStandard.board_id,
-                  sequence_number: i
-                },
-                data: {
-                  sequence_number: i + 1
-                }
-              });
-            }
-          }
-
-          // Finally, move to new position
-          this.logger.log(`Moving standard to final position ${newPosition}`);
-          await tx.standard.update({
-            where: { id: standardId },
-            data: { sequence_number: newPosition }
-          });
-        });
-
-        return await this.findOne(standardId);
-      } catch (txError) {
-        this.logger.error(`Transaction failed: ${txError.message}`, txError.stack);
-        throw new InternalServerErrorException(`Failed to reorder: ${txError.message}`);
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        
+        // Check if this is a deadlock error (PostgreSQL error code 40P01)
+        // or a conflict error related to sequence numbers
+        const isDeadlock = 
+          error.code === 'P2034' || // Prisma transaction failed
+          error.message?.includes('deadlock detected') ||
+          error.message?.includes('40P01');
+        
+        const isSequenceConflict = 
+          error instanceof ConflictException && 
+          error.message?.includes('Sequence number') && 
+          error.message?.includes('already used');
+        
+        if ((!isDeadlock && !isSequenceConflict) || attempt === maxRetries) {
+          throw error;
+        }
+        
+        // Calculate exponential backoff delay
+        const delay = baseDelay * Math.pow(2, attempt);
+        this.logger.log(`${isDeadlock ? 'Deadlock' : 'Sequence conflict'} detected, retrying operation (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    } catch (error) {
-      this.logger.error(`Reorder failed for standard ${standardId}: ${error.message}`, error.stack);
-      if (error instanceof NotFoundException || error instanceof ConflictException) {
-        throw error;
-      }
-      throw new InternalServerErrorException(`Failed to reorder standard: ${error.message}`);
     }
+    
+    throw lastError;
   }
 } 

@@ -61,38 +61,56 @@ export class UserService {
     }
   }
 
-  async findAll(schoolId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+  async findAll(schoolId?: number, roleId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string, schoolSearch?: string) {
     try {
       const skip = (page - 1) * page_size;
       
       // Build where clause
       let where: Prisma.UserWhereInput = {};
+      
+      // Filter by school ID if provided
       if (schoolId) {
-        where = {
-          user_schools: {
-            some: { school_id: schoolId }
-          }
+        where.user_schools = {
+          some: { school_id: schoolId }
         };
       }
       
-      // Add search condition
+      // Filter by role ID if provided
+      if (roleId) {
+        where.user_roles = {
+          some: { role_id: roleId }
+        };
+      }
+      
+      // Add search condition for user name or email
       if (search) {
-        where = {
-          ...where,
-          OR: [
-            {
+        where.OR = [
+          {
+            name: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            email_id: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        ];
+      }
+      
+      // Add search condition for school name
+      if (schoolSearch) {
+        where.user_schools = {
+          some: {
+            school: {
               name: {
-                contains: search,
-                mode: 'insensitive'
-              }
-            },
-            {
-              email_id: {
-                contains: search,
+                contains: schoolSearch,
                 mode: 'insensitive'
               }
             }
-          ]
+          }
         };
       }
       
@@ -103,7 +121,7 @@ export class UserService {
       const orderBy: Prisma.UserOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get paginated data with sorting
+      // Get paginated data with sorting - only select essential fields
       const users = await this.prisma.user.findMany({
         skip,
         take: page_size,
@@ -112,29 +130,48 @@ export class UserService {
         select: {
           id: true,
           name: true,
-          email_id: true,
-          contact_number: true,
-          alternate_contact_number: true,
-          highest_qualification: true,
           status: true,
-          created_at: true,
-          updated_at: true
+          user_schools: {
+            select: {
+              school: {
+                select: {
+                  name: true
+                }
+              }
+            }
+          },
+          user_roles: {
+            select: {
+              role: {
+                select: {
+                  role_name: true
+                }
+              }
+            }
+          }
         }
       });
       
-      // Calculate total pages
-      const total_pages = Math.ceil(total / page_size);
+      // Transform the data to match the UserListDto format
+      const formattedUsers = users.map(user => ({
+        id: user.id,
+        name: user.name,
+        schools: user.user_schools.map(us => us.school.name),
+        roles: user.user_roles.map(ur => ur.role.role_name),
+        status: user.status
+      }));
       
       return {
-        data: users,
+        data: formattedUsers,
         meta: {
           total,
           page,
           page_size,
-          total_pages,
+          total_pages: Math.ceil(total / page_size),
           sort_by,
           sort_order,
-          search: search || undefined
+          search: search || undefined,
+          schoolSearch: schoolSearch || undefined
         }
       };
     } catch (error) {
@@ -157,10 +194,75 @@ export class UserService {
           status: true,
           created_at: true,
           updated_at: true,
-          user_schools: {
-            include: {
-              school: true
+          user_roles: {
+            select: {
+              role: {
+                select: {
+                  id: true,
+                  role_name: true
+                }
+              }
             }
+          },
+          user_schools: {
+            select: {
+              school: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          teacher_subjects: {
+            select: {
+              id: true,
+              school_standard: {
+                select: {
+                  id: true,
+                  standard: {
+                    select: {
+                      id: true,
+                      name: true,
+                      sequence_number: true
+                    }
+                  }
+                }
+              },
+              medium_standard_subject: {
+                select: {
+                  id: true,
+                  subject: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  },
+                  instruction_medium: {
+                    select: {
+                      id: true,
+                      instruction_medium: true
+                    }
+                  }
+                }
+              }
+            },
+            orderBy: [
+              {
+                school_standard: {
+                  standard: {
+                    sequence_number: 'asc'
+                  }
+                }
+              },
+              {
+                medium_standard_subject: {
+                  subject: {
+                    name: 'asc'
+                  }
+                }
+              }
+            ]
           }
         }
       });
@@ -169,7 +271,42 @@ export class UserService {
         throw new NotFoundException(`User with ID ${id} not found`);
       }
 
-      return user;
+      // Transform the response to a more readable format
+      return {
+        id: user.id,
+        name: user.name,
+        email_id: user.email_id,
+        contact_number: user.contact_number,
+        alternate_contact_number: user.alternate_contact_number,
+        highest_qualification: user.highest_qualification,
+        status: user.status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        roles: user.user_roles.map(ur => ({
+          id: ur.role.id,
+          name: ur.role.role_name
+        })),
+        schools: user.user_schools.map(us => ({
+          id: us.school.id,
+          name: us.school.name
+        })),
+        teaching_assignments: user.teacher_subjects.map(ts => ({
+          id: ts.id,
+          standard: {
+            id: ts.school_standard.standard.id,
+            name: ts.school_standard.standard.name,
+            sequence_number: ts.school_standard.standard.sequence_number
+          },
+          subject: {
+            id: ts.medium_standard_subject.subject.id,
+            name: ts.medium_standard_subject.subject.name
+          },
+          medium: {
+            id: ts.medium_standard_subject.instruction_medium.id,
+            name: ts.medium_standard_subject.instruction_medium.instruction_medium
+          }
+        }))
+      };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -360,36 +497,54 @@ export class UserService {
     return user;
   }
 
-  async findAllWithoutPagination(schoolId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string) {
+  async findAllWithoutPagination(schoolId?: number, roleId?: number, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string, schoolSearch?: string) {
     try {
       // Build where clause
       let where: Prisma.UserWhereInput = {};
+      
+      // Filter by school ID if provided
       if (schoolId) {
-        where = {
-          user_schools: {
-            some: { school_id: schoolId }
-          }
+        where.user_schools = {
+          some: { school_id: schoolId }
         };
       }
       
-      // Add search condition
+      // Filter by role ID if provided
+      if (roleId) {
+        where.user_roles = {
+          some: { role_id: roleId }
+        };
+      }
+      
+      // Add search condition for user name or email
       if (search) {
-        where = {
-          ...where,
-          OR: [
-            {
+        where.OR = [
+          {
+            name: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          },
+          {
+            email_id: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        ];
+      }
+      
+      // Add search condition for school name
+      if (schoolSearch) {
+        where.user_schools = {
+          some: {
+            school: {
               name: {
-                contains: search,
-                mode: 'insensitive'
-              }
-            },
-            {
-              email_id: {
-                contains: search,
+                contains: schoolSearch,
                 mode: 'insensitive'
               }
             }
-          ]
+          }
         };
       }
       
@@ -397,29 +552,51 @@ export class UserService {
       const orderBy: Prisma.UserOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get all users with sorting but without pagination
+      // Get all users with sorting but without pagination - only select essential fields
       const users = await this.prisma.user.findMany({
         where,
         orderBy,
         select: {
           id: true,
           name: true,
-          email_id: true,
-          contact_number: true,
-          alternate_contact_number: true,
-          highest_qualification: true,
           status: true,
-          created_at: true,
-          updated_at: true
+          user_schools: {
+            select: {
+              school: {
+                select: {
+                  name: true
+                }
+              }
+            }
+          },
+          user_roles: {
+            select: {
+              role: {
+                select: {
+                  role_name: true
+                }
+              }
+            }
+          }
         }
       });
       
+      // Transform the data to match the UserListDto format
+      const formattedUsers = users.map(user => ({
+        id: user.id,
+        name: user.name,
+        schools: user.user_schools.map(us => us.school.name),
+        roles: user.user_roles.map(ur => ur.role.role_name),
+        status: user.status
+      }));
+      
       return {
-        data: users,
+        data: formattedUsers,
         meta: {
           sort_by,
           sort_order,
-          search: search || undefined
+          search: search || undefined,
+          schoolSearch: schoolSearch || undefined
         }
       };
     } catch (error) {

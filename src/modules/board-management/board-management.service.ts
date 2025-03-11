@@ -88,15 +88,23 @@ export class BoardManagementService {
 
   async findAll(): Promise<BoardManagementData[]> {
     try {
-      const boardsResponse = await this.boardService.findAll();
+      // Get all board IDs first with minimal data
+      const boardsMinimal = await this.boardService.findAllWithoutPagination();
+      
+      // Then fetch complete data for each board individually
       return Promise.all(
-        boardsResponse.data.map(async (board) => ({
-          board,
-          address: await this.addressService.findOne(board.address_id),
-          instruction_mediums: await this.instructionMediumService.findByBoard(board.id),
-          standards: await this.standardService.findByBoard(board.id),
-          subjects: await this.subjectService.findByBoard(board.id),
-        }))
+        boardsMinimal.data.map(async (boardMinimal) => {
+          // Get the complete board data with all fields
+          const board = await this.boardService.findOne(boardMinimal.id);
+          
+          return {
+            board,
+            address: await this.addressService.findOne(board.address_id),
+            instruction_mediums: await this.instructionMediumService.findByBoard(board.id),
+            standards: await this.standardService.findByBoard(board.id),
+            subjects: await this.subjectService.findByBoard(board.id),
+          };
+        })
       );
     } catch (error) {
       this.logger.error('Failed to fetch all boards:', error);
@@ -179,13 +187,9 @@ export class BoardManagementService {
         // Update board if provided
         let updatedBoard = existingBoard;
         if (updateDto.board) {
-          const boardUpdate = await this.boardService.update(id, updateDto.board);
-          updatedBoard = {
-            ...boardUpdate,
-            standards: existingBoard.standards,
-            subjects: existingBoard.subjects,
-            instruction_mediums: existingBoard.instruction_mediums
-          };
+          // Get the updated board with all fields
+          updatedBoard = await this.boardService.update(id, updateDto.board);
+          // No need to manually merge fields as findOne now returns properly structured data
         }
 
         // Update address if provided
