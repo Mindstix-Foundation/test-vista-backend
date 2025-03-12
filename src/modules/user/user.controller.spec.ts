@@ -14,6 +14,7 @@ describe('UserController', () => {
     findOne: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
+    checkEmailAvailability: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -153,6 +154,23 @@ describe('UserController', () => {
       const userId = 1;
       await controller.remove(userId);
       expect(service.remove).toHaveBeenCalledWith(userId);
+    });
+  });
+
+  describe('checkEmailAvailability', () => {
+    it('should check if an email is available', async () => {
+      const email = 'test@example.com';
+      const expectedResult = { 
+        email, 
+        available: true,
+        message: `Email ${email} is available`
+      };
+      
+      mockUserService.checkEmailAvailability.mockResolvedValue(expectedResult);
+      
+      const result = await controller.checkEmailAvailability(email);
+      expect(result).toEqual(expectedResult);
+      expect(service.checkEmailAvailability).toHaveBeenCalledWith(email);
     });
   });
 }); 

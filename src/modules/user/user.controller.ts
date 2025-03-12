@@ -114,4 +114,12 @@ export class UserController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.userService.remove(id);
   }
+
+  @Get('check-email/:email')
+  @ApiOperation({ summary: 'Check if an email is available (not already registered)' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns availability status of the email' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid email format' })
+  async checkEmailAvailability(@Param('email') email: string) {
+    return await this.userService.checkEmailAvailability(email);
+  }
 } 
