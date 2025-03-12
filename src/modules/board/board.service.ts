@@ -79,17 +79,16 @@ export class BoardService {
       const orderBy: Prisma.BoardOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get paginated data with sorting
+      // Get paginated data with sorting - only return essential fields
       const boards = await this.prisma.board.findMany({
         skip,
         take: page_size,
         where,
         orderBy,
-        include: {
-          address: true,
-          standards: true,
-          subjects: true,
-          instruction_mediums: true
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true
         }
       });
       
@@ -138,15 +137,14 @@ export class BoardService {
       const orderBy: Prisma.BoardOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get all boards with sorting but without pagination
+      // Get all boards with sorting but without pagination - only return essential fields
       const boards = await this.prisma.board.findMany({
         where,
         orderBy,
-        include: {
-          address: true,
-          standards: true,
-          subjects: true,
-          instruction_mediums: true
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true
         }
       });
       
