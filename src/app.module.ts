@@ -31,6 +31,7 @@ import { QuestionModule } from './modules/question/question.module';
 import { QuestionTextModule } from './modules/question_text/question-text.module';
 import { ImageModule } from './modules/image/image.module';
 import { QuestionTopicModule } from './modules/question_topic/question-topic.module';
+import { McqOptionModule } from './modules/mcq-option/mcq-option.module';
 
 @Module({
   imports: [
@@ -65,7 +66,8 @@ import { QuestionTopicModule } from './modules/question_topic/question-topic.mod
     QuestionModule,
     QuestionTextModule,
     ImageModule,
-    QuestionTopicModule
+    QuestionTopicModule,
+    McqOptionModule
   ],
   controllers: [AppController],
   providers: [AppService],

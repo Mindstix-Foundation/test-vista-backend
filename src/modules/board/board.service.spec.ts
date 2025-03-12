@@ -83,8 +83,8 @@ describe('BoardService', () => {
   describe('findAll', () => {
     it('should return paginated boards in alphabetical order', async () => {
       const mockBoards = [
-        { id: 2, name: 'Board A' },
-        { id: 1, name: 'Board B' },
+        { id: 2, name: 'Board A', abbreviation: 'BA' },
+        { id: 1, name: 'Board B', abbreviation: 'BB' },
       ];
       
       mockPrismaService.board.count.mockResolvedValue(2);
@@ -108,19 +108,18 @@ describe('BoardService', () => {
         skip: 0,
         take: 15,
         orderBy: { name: 'asc' },
-        include: {
-          address: true,
-          standards: true,
-          subjects: true,
-          instruction_mediums: true
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true
         }
       });
     });
 
     it('should return sorted boards by created_at in descending order', async () => {
       const mockBoards = [
-        { id: 1, name: 'Board A', created_at: new Date('2023-01-02') },
-        { id: 2, name: 'Board B', created_at: new Date('2023-01-01') },
+        { id: 1, name: 'Board A', abbreviation: 'BA' },
+        { id: 2, name: 'Board B', abbreviation: 'BB' },
       ];
       
       mockPrismaService.board.count.mockResolvedValue(2);
@@ -136,7 +135,8 @@ describe('BoardService', () => {
           page_size: 10,
           total_pages: 1,
           sort_by: SortField.CREATED_AT,
-          sort_order: SortOrder.DESC
+          sort_order: SortOrder.DESC,
+          search: undefined
         }
       });
       
@@ -144,11 +144,10 @@ describe('BoardService', () => {
         skip: 0,
         take: 10,
         orderBy: { created_at: 'desc' },
-        include: {
-          address: true,
-          standards: true,
-          subjects: true,
-          instruction_mediums: true
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true
         }
       });
     });
@@ -235,8 +234,8 @@ describe('BoardService', () => {
   describe('findAllWithoutPagination', () => {
     it('should return all boards without pagination', async () => {
       const mockBoards = [
-        { id: 1, name: 'Board A' },
-        { id: 2, name: 'Board B' },
+        { id: 1, name: 'Board A', abbreviation: 'BA' },
+        { id: 2, name: 'Board B', abbreviation: 'BB' },
       ];
       
       mockPrismaService.board.findMany.mockResolvedValue(mockBoards);
@@ -253,11 +252,10 @@ describe('BoardService', () => {
       
       expect(mockPrismaService.board.findMany).toHaveBeenCalledWith({
         orderBy: { name: 'asc' },
-        include: {
-          address: true,
-          standards: true,
-          subjects: true,
-          instruction_mediums: true
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true
         }
       });
     });

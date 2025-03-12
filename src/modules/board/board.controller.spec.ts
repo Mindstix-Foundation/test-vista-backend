@@ -61,7 +61,8 @@ describe('BoardController', () => {
           page_size: 15, 
           total_pages: 0,
           sort_by: SortField.CREATED_AT,
-          sort_order: SortOrder.DESC
+          sort_order: SortOrder.DESC,
+          search: undefined
         }
       };
       
@@ -81,7 +82,8 @@ describe('BoardController', () => {
           page_size: 15, 
           total_pages: 0, 
           sort_by: SortField.CREATED_AT, 
-          sort_order: SortOrder.DESC 
+          sort_order: SortOrder.DESC,
+          search: undefined
         }
       };
       
