@@ -82,17 +82,11 @@ export class UserService {
         };
       }
       
-      // Add search condition for user name or email
+      // Add search condition for user name
       if (search) {
         where.OR = [
           {
             name: {
-              contains: search,
-              mode: 'insensitive'
-            }
-          },
-          {
-            email_id: {
               contains: search,
               mode: 'insensitive'
             }
@@ -516,17 +510,11 @@ export class UserService {
         };
       }
       
-      // Add search condition for user name or email
+      // Add search condition for user name
       if (search) {
         where.OR = [
           {
             name: {
-              contains: search,
-              mode: 'insensitive'
-            }
-          },
-          {
-            email_id: {
               contains: search,
               mode: 'insensitive'
             }

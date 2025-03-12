@@ -10,11 +10,19 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
   
-  // CORS configuration with your EC2 IP
+  // Enhanced CORS configuration
+  const corsOrigins = process.env.CORS_ORIGINS 
+    ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
+    : [process.env.FRONTEND_URL || 'http://localhost:5173'];
+  
+  logger.log(`CORS enabled for origins: ${corsOrigins.join(', ')}`);
+  
   app.enableCors({
-    origin: ['http://16.170.201.149:5173', 'http://localhost:5173'],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    origin: corsOrigins,
+    methods: process.env.CORS_METHODS || 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
+    allowedHeaders: process.env.CORS_ALLOWED_HEADERS || 'Content-Type, Accept, Authorization',
+    maxAge: parseInt(process.env.CORS_MAX_AGE || '86400'), // 24 hours in seconds
   });
   
   // Global exception filter with logger
