@@ -93,15 +93,10 @@ export class QuestionService {
       }
       
       if (is_verified !== undefined) {
-        // Convert to boolean if it's a string
-        const isVerifiedBool = typeof is_verified === 'string' 
-          ? is_verified === 'true' 
-          : !!is_verified;
-        
-        where.is_verified = isVerifiedBool;
+        where.is_verified = is_verified;
         
         // Log for debugging
-        this.logger.log(`Filtering questions with is_verified=${isVerifiedBool} (original value: ${is_verified})`);
+        this.logger.log(`Filtering questions with is_verified=${is_verified} (type: ${typeof is_verified})`);
       }
       
       // Filter by topic ID if provided
@@ -192,6 +187,8 @@ export class QuestionService {
       
       // Calculate total pages
       const total_pages = Math.ceil(total / page_size);
+      
+      this.logger.log(`Constructed where clause: ${JSON.stringify(where)}`);
       
       return {
         data: questions,
@@ -419,21 +416,18 @@ export class QuestionService {
       }
       
       if (is_verified !== undefined) {
-        // Convert to boolean if it's a string
-        const isVerifiedBool = typeof is_verified === 'string' 
-          ? is_verified === 'true' 
-          : !!is_verified;
-        
-        where.is_verified = isVerifiedBool;
+        where.is_verified = is_verified;
         
         // Log for debugging
-        this.logger.log(`Filtering questions with is_verified=${isVerifiedBool} (original value: ${is_verified})`);
+        this.logger.log(`Filtering questions with is_verified=${is_verified} (type: ${typeof is_verified})`);
       }
       
       // Filter by topic ID if provided
       if (topic_id) {
         where.question_topics = {
-          some: { topic_id }
+          some: {
+            topic_id: topic_id
+          }
         };
       }
       
@@ -509,9 +503,16 @@ export class QuestionService {
         }
       });
       
+      // Get total count
+      const total = await this.prisma.question.count({ where });
+      
+      // Remove the page_size reference and page/page_size from the return object
+      this.logger.log(`Constructed where clause: ${JSON.stringify(where)}`);
+      
       return {
         data: questions,
         meta: {
+          total,
           sort_by,
           sort_order,
           search: search || undefined

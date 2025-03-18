@@ -68,13 +68,12 @@ export class QuestionFilterDto extends PaginationDto {
   
   @ApiProperty({
     required: false,
-    example: true,
-    description: 'Filter by verification status'
+    example: 'false',
+    description: 'Filter by verification status (true or false)',
+    enum: ['true', 'false']
   })
   @IsOptional()
-  @Type(() => Boolean)
-  @IsBoolean({ message: 'is_verified must be a boolean' })
-  is_verified?: boolean;
+  is_verified?: string;
   
   @ApiProperty({
     required: false,
