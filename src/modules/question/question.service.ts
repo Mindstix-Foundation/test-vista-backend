@@ -93,7 +93,15 @@ export class QuestionService {
       }
       
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        // Convert to boolean if it's a string
+        const isVerifiedBool = typeof is_verified === 'string' 
+          ? is_verified === 'true' 
+          : !!is_verified;
+        
+        where.is_verified = isVerifiedBool;
+        
+        // Log for debugging
+        this.logger.log(`Filtering questions with is_verified=${isVerifiedBool} (original value: ${is_verified})`);
       }
       
       // Filter by topic ID if provided
@@ -411,7 +419,15 @@ export class QuestionService {
       }
       
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        // Convert to boolean if it's a string
+        const isVerifiedBool = typeof is_verified === 'string' 
+          ? is_verified === 'true' 
+          : !!is_verified;
+        
+        where.is_verified = isVerifiedBool;
+        
+        // Log for debugging
+        this.logger.log(`Filtering questions with is_verified=${isVerifiedBool} (original value: ${is_verified})`);
       }
       
       // Filter by topic ID if provided
