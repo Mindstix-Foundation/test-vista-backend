@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserService } from './user.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotFoundException, ConflictException } from '@nestjs/common';
+import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
@@ -157,7 +157,7 @@ describe('UserService', () => {
       mockPrismaService.user.count.mockResolvedValue(2);
       mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
 
-      const result = await service.findAll(undefined, 1, 15, SortField.CREATED_AT, SortOrder.DESC);
+      const result = await service.findAll(undefined, undefined, 1, 15, SortField.CREATED_AT, SortOrder.DESC);
       
       expect(result.data).toEqual(mockUsers);
       expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
@@ -249,6 +249,45 @@ describe('UserService', () => {
       mockPrismaService.user_School.count.mockResolvedValue(1);
 
       await expect(service.remove(userId)).rejects.toThrow('Cannot delete user because they are associated with schools');
+    });
+  });
+
+  describe('checkEmailAvailability', () => {
+    it('should return available: true when email is not registered', async () => {
+      const email = 'new@example.com';
+      
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      
+      const result = await service.checkEmailAvailability(email);
+      
+      expect(result).toEqual({
+        email,
+        available: true,
+        message: `Email ${email} is available`
+      });
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { email_id: email }
+      });
+    });
+    
+    it('should return available: false when email is already registered', async () => {
+      const email = 'existing@example.com';
+      
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: 1, email_id: email });
+      
+      const result = await service.checkEmailAvailability(email);
+      
+      expect(result).toEqual({
+        email,
+        available: false,
+        message: `Email ${email} is already registered`
+      });
+    });
+    
+    it('should throw BadRequestException for invalid email format', async () => {
+      const invalidEmail = 'invalid-email';
+      
+      await expect(service.checkEmailAvailability(invalidEmail)).rejects.toThrow(BadRequestException);
     });
   });
 }); 

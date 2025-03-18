@@ -61,7 +61,16 @@ export class UserService {
     }
   }
 
-  async findAll(schoolId?: number, roleId?: number, page = 1, page_size = 15, sort_by = SortField.NAME, sort_order = SortOrder.ASC, search?: string, schoolSearch?: string) {
+  async findAll(
+    schoolId?: number, 
+    roleId?: number, 
+    page = 1, 
+    page_size = 15, 
+    sort_by: SortField = SortField.NAME, 
+    sort_order: SortOrder = SortOrder.ASC, 
+    search?: string, 
+    schoolSearch?: string
+  ) {
     try {
       const skip = (page - 1) * page_size;
       
@@ -82,17 +91,11 @@ export class UserService {
         };
       }
       
-      // Add search condition for user name or email
+      // Add search condition for user name
       if (search) {
         where.OR = [
           {
             name: {
-              contains: search,
-              mode: 'insensitive'
-            }
-          },
-          {
-            email_id: {
               contains: search,
               mode: 'insensitive'
             }
@@ -516,17 +519,11 @@ export class UserService {
         };
       }
       
-      // Add search condition for user name or email
+      // Add search condition for user name
       if (search) {
         where.OR = [
           {
             name: {
-              contains: search,
-              mode: 'insensitive'
-            }
-          },
-          {
-            email_id: {
               contains: search,
               mode: 'insensitive'
             }
@@ -602,6 +599,34 @@ export class UserService {
     } catch (error) {
       this.logger.error('Failed to fetch all users:', error);
       throw new InternalServerErrorException('Failed to fetch all users');
+    }
+  }
+
+  async checkEmailAvailability(email: string) {
+    try {
+      // Validate email format
+      if (!this.isValidEmail(email)) {
+        throw new BadRequestException('Invalid email format');
+      }
+
+      // Check if email exists
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email_id: email }
+      });
+
+      return {
+        email,
+        available: !existingUser,
+        message: existingUser 
+          ? `Email ${email} is already registered` 
+          : `Email ${email} is available`
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error('Failed to check email availability:', error);
+      throw new InternalServerErrorException('Failed to check email availability');
     }
   }
 } 

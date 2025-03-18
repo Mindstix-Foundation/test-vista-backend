@@ -57,7 +57,7 @@ export class UserController {
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
   @ApiQuery({ name: 'sort_by', required: false, enum: SortField, description: 'Field to sort by (name, created_at, updated_at)' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
-  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter users by name or email' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter users by name' })
   @ApiQuery({ name: 'schoolSearch', required: false, type: String, description: 'Search term to filter users by school name' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
@@ -113,5 +113,13 @@ export class UserController {
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'User not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.userService.remove(id);
+  }
+
+  @Get('check-email/:email')
+  @ApiOperation({ summary: 'Check if an email is available (not already registered)' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns availability status of the email' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid email format' })
+  async checkEmailAvailability(@Param('email') email: string) {
+    return await this.userService.checkEmailAvailability(email);
   }
 } 
