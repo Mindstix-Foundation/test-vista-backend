@@ -97,11 +97,12 @@ export class QuestionFilterDto extends PaginationDto {
   chapter_id?: number;
 }
 
-// Add a new enum for question-specific sort fields
+// Update the enum for question-specific sort fields
 export enum QuestionSortField {
   QUESTION_TYPE = 'question_type_id',
-  // Include the standard sort fields
-  NAME = SortField.NAME,
+  IS_VERIFIED = 'is_verified',
+  BOARD_QUESTION = 'board_question',
+  QUESTION_TEXT = 'question_text',
   CREATED_AT = SortField.CREATED_AT,
   UPDATED_AT = SortField.UPDATED_AT
 } 

@@ -82,9 +82,9 @@ export class QuestionTextFilterDto extends PaginationDto {
   question_type_id?: number;
 }
 
-// Add a new enum for question text-specific sort fields
+// Update the enum for question text-specific sort fields
 export enum QuestionTextSortField {
-  QUESTION_TYPE = 'question.question_type_id',
+  QUESTION_ID = 'question_id',
   QUESTION_TEXT = 'question_text',
   // Include the standard sort fields
   CREATED_AT = SortField.CREATED_AT,

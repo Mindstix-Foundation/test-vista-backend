@@ -132,8 +132,23 @@ export class QuestionService {
       const total = await this.prisma.question.count({ where });
       
       // Build orderBy object based on sort parameters
-      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
-      orderBy[sort_by] = sort_order;
+      const orderBy: any = {};
+      
+      // Handle special case for sorting by question text
+      if (sort_by === QuestionSortField.QUESTION_TEXT) {
+        // Sort by the first question text of each question
+        orderBy.question_texts = {
+          _first: {
+            question_text: sort_order
+          }
+        };
+      } else if (Object.values(QuestionSortField).includes(sort_by)) {
+        // For regular fields, sort directly
+        orderBy[sort_by] = sort_order;
+      } else {
+        // Default to created_at if an invalid sort field is provided
+        orderBy[QuestionSortField.CREATED_AT] = sort_order;
+      }
       
       // Get paginated data with sorting
       const questions = await this.prisma.question.findMany({
@@ -430,8 +445,23 @@ export class QuestionService {
       }
       
       // Build orderBy object based on sort parameters
-      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
-      orderBy[sort_by] = sort_order;
+      const orderBy: any = {};
+      
+      // Handle special case for sorting by question text
+      if (sort_by === QuestionSortField.QUESTION_TEXT) {
+        // Sort by the first question text of each question
+        orderBy.question_texts = {
+          _first: {
+            question_text: sort_order
+          }
+        };
+      } else if (Object.values(QuestionSortField).includes(sort_by)) {
+        // For regular fields, sort directly
+        orderBy[sort_by] = sort_order;
+      } else {
+        // Default to created_at if an invalid sort field is provided
+        orderBy[QuestionSortField.CREATED_AT] = sort_order;
+      }
       
       // Get all questions with sorting but without pagination
       const questions = await this.prisma.question.findMany({

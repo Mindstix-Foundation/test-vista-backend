@@ -134,11 +134,12 @@ export class QuestionTextService {
       // Build orderBy object based on sort parameters
       const orderBy: any = {};
       
-      // Handle special case for question_type_id since it's a relation
-      if (sort_by === QuestionTextSortField.QUESTION_TYPE) {
-        orderBy.question = { question_type_id: sort_order };
-      } else {
+      // Make sure we're using a valid field for sorting
+      if (Object.values(QuestionTextSortField).includes(sort_by)) {
         orderBy[sort_by] = sort_order;
+      } else {
+        // Default to created_at if an invalid sort field is provided
+        orderBy[QuestionTextSortField.CREATED_AT] = sort_order;
       }
       
       // Get paginated data with sorting
@@ -354,11 +355,12 @@ export class QuestionTextService {
       // Build orderBy object based on sort parameters
       const orderBy: any = {};
       
-      // Handle special cases for sort fields that require joins
-      if (sort_by === QuestionTextSortField.QUESTION_TYPE) {
-        orderBy.question = { question_type_id: sort_order };
-      } else {
+      // Make sure we're using a valid field for sorting
+      if (Object.values(QuestionTextSortField).includes(sort_by)) {
         orderBy[sort_by] = sort_order;
+      } else {
+        // Default to created_at if an invalid sort field is provided
+        orderBy[QuestionTextSortField.CREATED_AT] = sort_order;
       }
       
       // Get all question texts with sorting but without pagination
