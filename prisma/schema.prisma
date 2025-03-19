@@ -336,6 +336,11 @@ model Password_Reset {
 model Image {
   id                Int                    @id @default(autoincrement())
   image_url         String                 @db.VarChar
+  original_filename String                 @db.VarChar
+  file_size         Int                    // Size in bytes
+  file_type         String                 @db.VarChar // MIME type (image/jpeg, image/png, etc.)
+  width             Int                    // Image width in pixels
+  height            Int                    // Image height in pixels
   created_at        DateTime               @default(now()) @db.Timestamptz()
   updated_at        DateTime               @updatedAt @db.Timestamptz()
   question_texts    Question_Text[]
