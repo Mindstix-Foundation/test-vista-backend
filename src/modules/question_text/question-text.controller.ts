@@ -28,9 +28,10 @@ export class QuestionTextController {
   @ApiQuery({ name: 'topic_id', required: false, type: Number, description: 'Filter by topic ID' })
   @ApiQuery({ name: 'chapter_id', required: false, type: Number, description: 'Filter by chapter ID' })
   @ApiQuery({ name: 'question_type_id', required: false, type: Number, description: 'Filter by question type ID' })
+  @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number, description: 'Filter by instruction medium ID' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all question texts.' })
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
-  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionTextSortField, description: 'Field to sort by (question_text, question.question_type_id, created_at, updated_at)' })
+  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionTextSortField, description: 'Field to sort by' })
   @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter question texts by content' })
   @ApiResponse({ status: 200, description: 'Returns question texts, paginated if requested' })
@@ -38,7 +39,8 @@ export class QuestionTextController {
     const { 
       topic_id, 
       chapter_id, 
-      question_type_id, 
+      question_type_id,
+      instruction_medium_id,
       page, 
       page_size, 
       sort_by = QuestionTextSortField.CREATED_AT, 
@@ -52,6 +54,7 @@ export class QuestionTextController {
         topic_id,
         chapter_id,
         question_type_id,
+        instruction_medium_id,
         page,
         page_size,
         sort_by: sort_by as QuestionTextSortField,
@@ -65,6 +68,7 @@ export class QuestionTextController {
       topic_id,
       chapter_id,
       question_type_id,
+      instruction_medium_id,
       sort_by: sort_by as QuestionTextSortField,
       sort_order,
       search

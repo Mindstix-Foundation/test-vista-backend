@@ -2,10 +2,15 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class UpdateChapterDto {
-  @ApiPropertyOptional({ description: 'Medium Standard Subject ID', example: 1 })
+  @ApiPropertyOptional({ description: 'Subject ID', example: 1 })
   @IsInt()
   @IsOptional()
-  medium_standard_subject_id?: number;
+  subject_id?: number;
+
+  @ApiPropertyOptional({ description: 'Standard ID', example: 1 })
+  @IsInt()
+  @IsOptional()
+  standard_id?: number;
 
   @ApiPropertyOptional({ description: 'Sequential number of the chapter', example: 1 })
   @IsInt()

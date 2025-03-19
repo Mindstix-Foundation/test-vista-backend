@@ -14,6 +14,8 @@ interface QuestionFilters {
   sort_by?: QuestionSortField;
   sort_order?: SortOrder;
   search?: string;
+  board_question?: boolean;
+  instruction_medium_id?: number;
 }
 
 @Injectable()
@@ -71,18 +73,20 @@ export class QuestionService {
 
   async findAll(filters: QuestionFilters) {
     try {
-      const { 
-        question_type_id, 
-        is_verified, 
-        topic_id, 
-        chapter_id, 
-        page = 1, 
-        page_size = 10, 
-        sort_by = QuestionSortField.CREATED_AT, 
+      const {
+        question_type_id,
+        topic_id,
+        chapter_id,
+        board_question,
+        is_verified,
+        instruction_medium_id,
+        page = 1,
+        page_size = 10,
+        sort_by = QuestionSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
         search
       } = filters;
-      
+
       const skip = (page - 1) * page_size;
       
       // Build where clause
@@ -92,14 +96,6 @@ export class QuestionService {
         where.question_type_id = question_type_id;
       }
       
-      if (is_verified !== undefined) {
-        where.is_verified = is_verified;
-        
-        // Log for debugging
-        this.logger.log(`Filtering questions with is_verified=${is_verified} (type: ${typeof is_verified})`);
-      }
-      
-      // Filter by topic ID if provided
       if (topic_id) {
         where.question_topics = {
           some: {
@@ -108,7 +104,6 @@ export class QuestionService {
         };
       }
       
-      // Filter by chapter ID if provided
       if (chapter_id) {
         where.question_topics = {
           some: {
@@ -119,7 +114,23 @@ export class QuestionService {
         };
       }
       
-      // Add search condition
+      if (board_question !== undefined) {
+        where.board_question = board_question;
+      }
+      
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
+      }
+      
+      if (instruction_medium_id) {
+        where.question_texts = {
+          some: {
+            instruction_medium_id: instruction_medium_id
+          }
+        };
+      }
+      
+      // Add search capability if needed
       if (search) {
         where.question_texts = {
           some: {
@@ -134,35 +145,30 @@ export class QuestionService {
       // Get total count for pagination metadata
       const total = await this.prisma.question.count({ where });
       
-      // Build orderBy object based on sort parameters
+      // Build orderBy object
       const orderBy: any = {};
-      
-      // Handle special case for sorting by question text
-      if (sort_by === QuestionSortField.QUESTION_TEXT) {
-        // Sort by the first question text of each question
-        orderBy.question_texts = {
-          _first: {
-            question_text: sort_order
-          }
-        };
-      } else if (Object.values(QuestionSortField).includes(sort_by)) {
-        // For regular fields, sort directly
-        orderBy[sort_by] = sort_order;
-      } else {
-        // Default to created_at if an invalid sort field is provided
-        orderBy[QuestionSortField.CREATED_AT] = sort_order;
-      }
+      orderBy[sort_by] = sort_order;
       
       // Get paginated data with sorting
       const questions = await this.prisma.question.findMany({
-        skip,
-        take: page_size,
         where,
         orderBy,
+        skip,
+        take: page_size,
         include: {
           question_type: true,
+          question_topics: {
+            include: {
+              topic: {
+                include: {
+                  chapter: true
+                }
+              }
+            }
+          },
           question_texts: {
             include: {
+              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -176,19 +182,12 @@ export class QuestionService {
                 }
               }
             }
-          },
-          question_topics: {
-            include: {
-              topic: true
-            }
           }
         }
       });
       
       // Calculate total pages
       const total_pages = Math.ceil(total / page_size);
-      
-      this.logger.log(`Constructed where clause: ${JSON.stringify(where)}`);
       
       return {
         data: questions,
@@ -198,8 +197,7 @@ export class QuestionService {
           page_size,
           total_pages,
           sort_by,
-          sort_order,
-          search: search || undefined
+          sort_order
         }
       };
     } catch (error) {

@@ -8,6 +8,7 @@ interface QuestionTextFilters {
   topic_id?: number;
   chapter_id?: number;
   question_type_id?: number;
+  instruction_medium_id?: number;
   page?: number;
   page_size?: number;
   sort_by?: QuestionTextSortField;
@@ -32,6 +33,15 @@ export class QuestionTextService {
         throw new NotFoundException(`Question with ID ${createDto.question_id} not found`);
       }
 
+      // Verify instruction medium exists
+      const instructionMedium = await this.prisma.instruction_Medium.findUnique({
+        where: { id: createDto.instruction_medium_id }
+      });
+
+      if (!instructionMedium) {
+        throw new NotFoundException(`Instruction medium with ID ${createDto.instruction_medium_id} not found`);
+      }
+
       // Verify image exists if provided
       if (createDto.image_id) {
         const image = await this.prisma.image.findUnique({
@@ -45,13 +55,25 @@ export class QuestionTextService {
 
       // Create the question text
       const questionText = await this.prisma.question_Text.create({
-        data: createDto,
+        data: {
+          question: {
+            connect: { id: createDto.question_id }
+          },
+          instruction_medium: {
+            connect: { id: createDto.instruction_medium_id }
+          },
+          question_text: createDto.question_text,
+          image: createDto.image_id ? {
+            connect: { id: createDto.image_id }
+          } : undefined
+        },
         include: {
           question: {
             include: {
               question_type: true
             }
           },
+          instruction_medium: true,
           image: true,
           mcq_options: true,
           match_pairs: true
@@ -79,7 +101,8 @@ export class QuestionTextService {
       const { 
         topic_id, 
         chapter_id, 
-        question_type_id, 
+        question_type_id,
+        instruction_medium_id,
         page = 1, 
         page_size = 10, 
         sort_by = QuestionTextSortField.CREATED_AT, 
@@ -118,6 +141,10 @@ export class QuestionTextService {
         where.question = {
           question_type_id: question_type_id
         };
+      }
+      
+      if (instruction_medium_id) {
+        where.instruction_medium_id = instruction_medium_id;
       }
       
       // Add search condition
@@ -159,6 +186,7 @@ export class QuestionTextService {
               }
             }
           },
+          instruction_medium: true,
           image: true,
           mcq_options: true,
           match_pairs: true
@@ -193,14 +221,10 @@ export class QuestionTextService {
         include: {
           question: {
             include: {
-              question_type: true,
-              question_topics: {
-                include: {
-                  topic: true
-                }
-              }
+              question_type: true
             }
           },
+          instruction_medium: true,
           image: true,
           mcq_options: true,
           match_pairs: true
@@ -225,6 +249,18 @@ export class QuestionTextService {
     try {
       const questionText = await this.findOne(id);
 
+      // Verify instruction medium exists if provided
+      if (updateDto.instruction_medium_id) {
+        const instructionMedium = await this.prisma.instruction_Medium.findUnique({
+          where: { id: updateDto.instruction_medium_id }
+        });
+
+        if (!instructionMedium) {
+          throw new NotFoundException(`Instruction medium with ID ${updateDto.instruction_medium_id} not found`);
+        }
+      }
+
+      // Verify image exists if provided
       if (updateDto.image_id) {
         const image = await this.prisma.image.findUnique({
           where: { id: updateDto.image_id }
@@ -235,34 +271,45 @@ export class QuestionTextService {
         }
       }
 
-      // Update the question text
-      const updatedQuestionText = await this.prisma.question_Text.update({
+      const data: any = {};
+      
+      if (updateDto.instruction_medium_id) {
+        data.instruction_medium = { connect: { id: updateDto.instruction_medium_id } };
+      }
+      
+      if (updateDto.image_id) {
+        data.image = { connect: { id: updateDto.image_id } };
+      } else if (updateDto.image_id === null) {
+        data.image = { disconnect: true };
+      }
+      
+      if (updateDto.question_text) {
+        data.question_text = updateDto.question_text;
+      }
+
+      const updated = await this.prisma.question_Text.update({
         where: { id },
-        data: updateDto,
+        data,
         include: {
           question: {
             include: {
-              question_type: true,
-              question_topics: {
-                include: {
-                  topic: true
-                }
-              }
+              question_type: true
             }
           },
+          instruction_medium: true,
           image: true,
           mcq_options: true,
           match_pairs: true
         }
       });
-      
+
       // Set question as unverified when text is updated
       await this.prisma.question.update({
         where: { id: questionText.question_id },
         data: { is_verified: false }
       });
 
-      return updatedQuestionText;
+      return updated;
     } catch (error) {
       this.logger.error(`Failed to update question text ${id}:`, error);
       if (error instanceof NotFoundException) {
@@ -307,7 +354,8 @@ export class QuestionTextService {
       const { 
         topic_id, 
         chapter_id, 
-        question_type_id, 
+        question_type_id,
+        instruction_medium_id,
         sort_by = QuestionTextSortField.CREATED_AT, 
         sort_order = SortOrder.DESC,
         search
@@ -342,6 +390,10 @@ export class QuestionTextService {
         where.question = {
           question_type_id: question_type_id
         };
+      }
+      
+      if (instruction_medium_id) {
+        where.instruction_medium_id = instruction_medium_id;
       }
       
       // Add search condition

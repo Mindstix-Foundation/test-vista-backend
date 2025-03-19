@@ -43,13 +43,25 @@ export class ChapterController {
   @ApiOperation({ summary: 'Get all chapters' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all chapters' })
   @ApiQuery({
-    name: 'mediumStandardSubjectId',
+    name: 'subjectId',
     required: false,
     type: Number,
-    description: 'Filter chapters by medium standard subject ID'
+    description: 'Filter chapters by subject ID'
   })
-  findAll(@Query('mediumStandardSubjectId') mediumStandardSubjectId?: string) {
-    return this.chapterService.findAll(mediumStandardSubjectId ? +mediumStandardSubjectId : undefined);
+  @ApiQuery({
+    name: 'standardId',
+    required: false,
+    type: Number,
+    description: 'Filter chapters by standard ID'
+  })
+  findAll(
+    @Query('subjectId') subjectId?: string,
+    @Query('standardId') standardId?: string
+  ) {
+    return this.chapterService.findAll(
+      subjectId ? +subjectId : undefined,
+      standardId ? +standardId : undefined
+    );
   }
 
   @Get(':id')
@@ -80,21 +92,19 @@ export class ChapterController {
     return await this.chapterService.remove(id);
   }
 
-  @Put('reorder/:chapterId/:mediumStandardSubjectId')
+  @Put('reorder/:chapterId')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Reorder a chapter within a medium standard subject' })
+  @ApiOperation({ summary: 'Reorder a chapter within a subject and standard' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Chapter reordered successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Chapter not found' })
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid sequence number' })
   async reorder(
     @Param('chapterId', ParseIntPipe) chapterId: number,
-    @Param('mediumStandardSubjectId', ParseIntPipe) mediumStandardSubjectId: number,
     @Body() reorderChapterDto: ReorderChapterDto
   ) {
     return await this.chapterService.reorderChapter(
       chapterId,
-      reorderChapterDto.sequential_chapter_number,
-      mediumStandardSubjectId
+      reorderChapterDto.sequential_chapter_number
     );
   }
 } 

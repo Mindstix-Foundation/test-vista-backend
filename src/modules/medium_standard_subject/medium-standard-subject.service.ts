@@ -237,16 +237,11 @@ export class MediumStandardSubjectService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if medium standard subject exists with its relationships
+      // Check if medium standard subject exists
       const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
         where: { id },
         include: {
-          teacher_subjects: true,
-          chapters: {
-            include: {
-              topics: true
-            }
-          }
+          teacher_subjects: true
         }
       });
 
@@ -254,11 +249,22 @@ export class MediumStandardSubjectService {
         throw new NotFoundException(`Medium standard subject with ID ${id} not found`);
       }
 
+      // Get chapters related to this subject and standard combination
+      const chapters = await this.prisma.chapter.findMany({
+        where: {
+          subject_id: mediumStandardSubject.subject_id,
+          standard_id: mediumStandardSubject.standard_id
+        },
+        include: {
+          topics: true
+        }
+      });
+
       // Get counts of related entities for informative message
       const relatedCounts = {
         teacherSubjects: mediumStandardSubject.teacher_subjects.length,
-        chapters: mediumStandardSubject.chapters.length,
-        topics: mediumStandardSubject.chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
+        chapters: chapters.length,
+        topics: chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
       };
 
       // Log what will be deleted

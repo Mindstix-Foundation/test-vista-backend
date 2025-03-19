@@ -14,6 +14,14 @@ export class CreateQuestionTextDto {
 
   @ApiProperty({
     example: 1,
+    description: 'ID of the instruction medium'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  instruction_medium_id: number;
+
+  @ApiProperty({
+    example: 1,
     description: 'ID of the image (optional)',
     required: false
   })
@@ -31,6 +39,15 @@ export class CreateQuestionTextDto {
 }
 
 export class UpdateQuestionTextDto {
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the instruction medium',
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  instruction_medium_id?: number;
+
   @ApiProperty({
     example: 1,
     description: 'ID of the image',
@@ -80,6 +97,16 @@ export class QuestionTextFilterDto extends PaginationDto {
   @Type(() => Number)
   @IsInt({ message: 'question_type_id must be an integer' })
   question_type_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by instruction medium ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'instruction_medium_id must be an integer' })
+  instruction_medium_id?: number;
 }
 
 // Update the enum for question text-specific sort fields
