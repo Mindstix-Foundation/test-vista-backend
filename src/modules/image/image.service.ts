@@ -1,12 +1,16 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateImageDto } from './dto/image.dto';
+import { AwsS3Service } from '../aws/aws-s3.service';
 
 @Injectable()
 export class ImageService {
   private readonly logger = new Logger(ImageService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly awsS3Service: AwsS3Service
+  ) {}
 
   async create(createDto: CreateImageDto) {
     try {
@@ -16,6 +20,31 @@ export class ImageService {
     } catch (error) {
       this.logger.error('Failed to create image:', error);
       throw new InternalServerErrorException('Failed to create image');
+    }
+  }
+
+  async uploadImage(file: Express.Multer.File) {
+    try {
+      // Upload to S3 and get metadata
+      const { url, metadata } = await this.awsS3Service.uploadFile(file);
+      
+      // Create image record in database
+      const image = await this.prisma.image.create({
+        data: {
+          image_url: url,
+          original_filename: metadata.originalFilename,
+          file_size: metadata.fileSize,
+          file_type: metadata.fileType,
+          width: metadata.width,
+          height: metadata.height
+        }
+      });
+      
+      this.logger.log(`Created image record with ID ${image.id}`);
+      return image;
+    } catch (error) {
+      this.logger.error('Failed to upload image:', error);
+      throw error;
     }
   }
 
@@ -105,7 +134,68 @@ export class ImageService {
 
   async remove(id: number): Promise<void> {
     try {
-      const image = await this.findOne(id);
+      // First, find the image to get its S3 URL
+      const image = await this.prisma.image.findUnique({
+        where: { id },
+        include: {
+          question_texts: {
+            select: {
+              id: true,
+              question: {
+                select: {
+                  id: true
+                }
+              }
+            }
+          },
+          mcq_options: {
+            select: {
+              id: true,
+              question_text: {
+                select: {
+                  question: {
+                    select: {
+                      id: true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          match_pairs_left: {
+            select: {
+              id: true,
+              question_text: {
+                select: {
+                  question: {
+                    select: {
+                      id: true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          match_pairs_right: {
+            select: {
+              id: true,
+              question_text: {
+                select: {
+                  question: {
+                    select: {
+                      id: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!image) {
+        throw new NotFoundException(`Image with ID ${id} not found`);
+      }
 
       // Get all affected questions to mark them as unverified
       const affectedQuestionIds = new Set<number>();
@@ -147,7 +237,10 @@ export class ImageService {
         - Affecting ${affectedQuestionIds.size} questions
         All references will be set to null due to onDelete: SetNull`);
 
-      // Delete the image
+      // Delete the image from S3
+      await this.awsS3Service.deleteFile(image.image_url);
+
+      // Delete the image from database
       await this.prisma.image.delete({
         where: { id }
       });
@@ -177,4 +270,24 @@ export class ImageService {
       throw new InternalServerErrorException('Failed to delete image');
     }
   }
-} 
+
+  async getPresignedUrl(id: number, expiresIn?: number): Promise<string> {
+    try {
+      const image = await this.prisma.image.findUnique({
+        where: { id }
+      });
+
+      if (!image) {
+        throw new NotFoundException(`Image with ID ${id} not found`);
+      }
+
+      return await this.awsS3Service.generatePresignedUrl(image.image_url, expiresIn);
+    } catch (error) {
+      this.logger.error(`Failed to generate pre-signed URL for image ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to generate pre-signed URL');
+    }
+  }
+}
