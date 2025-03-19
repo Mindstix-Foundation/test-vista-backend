@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, InternalServerErrorException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../user/user.service';
 import { RoleService } from '../role/role.service';
@@ -331,7 +331,7 @@ export class AuthService {
       // Verify current password
       const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
       if (!isPasswordValid) {
-        throw new UnauthorizedException('Current password is incorrect');
+        throw new BadRequestException('Current password is incorrect');
       }
 
       // Hash new password
@@ -349,7 +349,7 @@ export class AuthService {
       return { message: 'Password changed successfully' };
     } catch (error) {
       this.logger.error('Failed to change password:', error);
-      if (error instanceof UnauthorizedException || 
+      if (error instanceof BadRequestException || 
           error instanceof NotFoundException) {
         throw error;
       }
