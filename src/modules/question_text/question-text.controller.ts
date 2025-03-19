@@ -104,4 +104,49 @@ export class QuestionTextController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.questionTextService.remove(id);
   }
+
+  @Get('untranslated/:mediumId')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get question texts that need translation to the specified medium' })
+  @ApiQuery({ name: 'topic_id', required: false, type: Number, description: 'Filter by topic ID' })
+  @ApiQuery({ name: 'chapter_id', required: false, type: Number, description: 'Filter by chapter ID' })
+  @ApiQuery({ name: 'question_type_id', required: false, type: Number, description: 'Filter by question type ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1)' })
+  @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
+  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionTextSortField, description: 'Field to sort by' })
+  @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder, description: 'Sort order (asc, desc)' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter question texts by content' })
+  @ApiResponse({ status: 200, description: 'Returns question texts that need translation' })
+  async findUntranslatedTexts(
+    @Param('mediumId', ParseIntPipe) mediumId: number,
+    @Query() filters: QuestionTextFilterDto
+  ) {
+    const { 
+      topic_id, 
+      chapter_id, 
+      question_type_id,
+      page, 
+      page_size, 
+      sort_by = QuestionTextSortField.CREATED_AT, 
+      sort_order = SortOrder.DESC,
+      search
+    } = filters;
+    
+    // Ensure we have a valid sort_by value
+    const validSortFields = Object.values(QuestionTextSortField);
+    const validatedSortBy = validSortFields.includes(sort_by as any) 
+      ? sort_by as QuestionTextSortField 
+      : QuestionTextSortField.CREATED_AT;
+    
+    return await this.questionTextService.findUntranslatedTexts(mediumId, {
+      topic_id,
+      chapter_id,
+      question_type_id,
+      page,
+      page_size,
+      sort_by: validatedSortBy,
+      sort_order,
+      search
+    });
+  }
 } 

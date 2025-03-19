@@ -449,4 +449,150 @@ export class QuestionTextService {
       throw new InternalServerErrorException('Failed to fetch all question texts');
     }
   }
+
+  async findUntranslatedTexts(mediumId: number, filters: QuestionTextFilters) {
+    try {
+      const { 
+        topic_id, 
+        chapter_id, 
+        question_type_id,
+        page = 1, 
+        page_size = 10, 
+        sort_by = QuestionTextSortField.CREATED_AT, 
+        sort_order = SortOrder.DESC,
+        search
+      } = filters;
+      
+      const skip = (page - 1) * page_size;
+      
+      // Find questions that have text in other mediums but not in this one
+      const questionsWithOtherTexts = await this.prisma.question.findMany({
+        where: {
+          question_texts: {
+            some: {} // Has some texts
+          },
+          NOT: {
+            question_texts: {
+              some: {
+                instruction_medium_id: mediumId
+              }
+            }
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+      
+      const questionIds = questionsWithOtherTexts.map(q => q.id);
+      
+      // Build where clause for question texts
+      const where: Prisma.Question_TextWhereInput = {
+        // Only include texts for questions that need translation
+        question_id: {
+          in: questionIds
+        },
+        // Exclude texts in the target medium (should be none anyway)
+        NOT: {
+          instruction_medium_id: mediumId
+        }
+      };
+      
+      // Add topic filter if provided
+      if (topic_id) {
+        where.question = {
+          question_topics: {
+            some: {
+              topic_id: topic_id
+            }
+          }
+        };
+      }
+      
+      // Add chapter filter if provided
+      if (chapter_id) {
+        where.question = {
+          question_topics: {
+            some: {
+              topic: {
+                chapter_id: chapter_id
+              }
+            }
+          }
+        };
+      }
+      
+      // Add question type filter if provided
+      if (question_type_id) {
+        where.question = {
+          question_type_id: question_type_id
+        };
+      }
+      
+      // Add search condition
+      if (search) {
+        where.question_text = {
+          contains: search,
+          mode: 'insensitive'
+        };
+      }
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.question_Text.count({ where });
+      
+      // Build orderBy object based on sort parameters
+      const orderBy: any = {};
+      
+      // Make sure we're using a valid field for sorting
+      if (Object.values(QuestionTextSortField).includes(sort_by)) {
+        orderBy[sort_by] = sort_order;
+      } else {
+        // Default to created_at if an invalid sort field is provided
+        orderBy[QuestionTextSortField.CREATED_AT] = sort_order;
+      }
+      
+      // Get paginated data with sorting
+      const questionTexts = await this.prisma.question_Text.findMany({
+        where,
+        orderBy,
+        skip,
+        take: page_size,
+        include: {
+          question: {
+            include: {
+              question_type: true,
+              question_topics: {
+                include: {
+                  topic: true
+                }
+              }
+            }
+          },
+          instruction_medium: true,
+          image: true,
+          mcq_options: true,
+          match_pairs: true
+        }
+      });
+      
+      // Calculate total pages
+      const total_pages = Math.ceil(total / page_size);
+      
+      return {
+        data: questionTexts,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages,
+          sort_by,
+          sort_order,
+          search: search || undefined
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch question texts for translation:', error);
+      throw new InternalServerErrorException('Failed to fetch question texts for translation');
+    }
+  }
 } 

@@ -521,4 +521,152 @@ export class QuestionService {
       throw new InternalServerErrorException('Failed to fetch all questions');
     }
   }
+
+  async findUntranslatedQuestions(mediumId: number, filters: QuestionFilters) {
+    try {
+      const {
+        question_type_id,
+        topic_id,
+        chapter_id,
+        board_question,
+        is_verified,
+        page = 1,
+        page_size = 10,
+        sort_by = QuestionSortField.CREATED_AT,
+        sort_order = SortOrder.DESC,
+        search
+      } = filters;
+
+      const skip = (page - 1) * page_size;
+      
+      // Build where clause
+      const where: Prisma.QuestionWhereInput = {
+        // Questions that don't have any question_texts with the specified medium
+        // OR questions that don't have any question_texts at all
+        OR: [
+          {
+            question_texts: {
+              none: {
+                instruction_medium_id: mediumId
+              }
+            }
+          }
+        ]
+      };
+      
+      // Add the other filters
+      if (question_type_id) {
+        where.question_type_id = question_type_id;
+      }
+      
+      if (topic_id) {
+        where.question_topics = {
+          some: {
+            topic_id: topic_id
+          }
+        };
+      }
+      
+      if (chapter_id) {
+        where.question_topics = {
+          some: {
+            topic: {
+              chapter_id: chapter_id
+            }
+          }
+        };
+      }
+      
+      if (board_question !== undefined) {
+        where.board_question = board_question;
+      }
+      
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
+      }
+      
+      // Add search capability if needed
+      if (search) {
+        where.question_texts = {
+          some: {
+            question_text: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        };
+      }
+      
+      // Get total count for pagination metadata
+      const total = await this.prisma.question.count({ where });
+      
+      // Build orderBy object
+      const orderBy: any = {};
+      
+      // Make sure we're using a valid field for sorting
+      // Valid question sort fields are checked against the QuestionSortField enum
+      if (Object.values(QuestionSortField).includes(sort_by)) {
+        orderBy[sort_by] = sort_order;
+      } else {
+        // Default to created_at if an invalid sort field is provided
+        orderBy[QuestionSortField.CREATED_AT] = sort_order;
+        this.logger.warn(`Invalid sort field "${sort_by}" provided, defaulting to created_at`);
+      }
+      
+      // Get paginated data with sorting
+      const questions = await this.prisma.question.findMany({
+        where,
+        orderBy,
+        skip,
+        take: page_size,
+        include: {
+          question_type: true,
+          question_topics: {
+            include: {
+              topic: {
+                include: {
+                  chapter: true
+                }
+              }
+            }
+          },
+          question_texts: {
+            include: {
+              instruction_medium: true,
+              image: true,
+              mcq_options: {
+                include: {
+                  image: true
+                }
+              },
+              match_pairs: {
+                include: {
+                  left_image: true,
+                  right_image: true
+                }
+              }
+            }
+          }
+        }
+      });
+      
+      // Calculate total pages
+      const total_pages = Math.ceil(total / page_size);
+      
+      return {
+        data: questions,
+        meta: {
+          total,
+          page,
+          page_size,
+          total_pages,
+          sort_by,
+          sort_order
+        }
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch untranslated questions:', error);
+      throw new InternalServerErrorException('Failed to fetch untranslated questions');
+    }
+  }
 } 

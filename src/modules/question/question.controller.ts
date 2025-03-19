@@ -99,4 +99,55 @@ export class QuestionController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.questionService.remove(id);
   }
+
+  @Get('untranslated/:mediumId')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get questions not translated in specified medium' })
+  @ApiQuery({ name: 'question_type_id', required: false, type: Number })
+  @ApiQuery({ name: 'topic_id', required: false, type: Number })
+  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
+  @ApiQuery({ name: 'board_question', required: false, type: Boolean })
+  @ApiQuery({ name: 'is_verified', required: false, type: Boolean })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'page_size', required: false, type: Number })
+  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionSortField })
+  @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Returns untranslated questions for the specified medium' })
+  async findUntranslatedQuestions(
+    @Param('mediumId', ParseIntPipe) mediumId: number,
+    @Query() filters: QuestionFilterDto
+  ) {
+    const {
+      question_type_id,
+      topic_id,
+      chapter_id,
+      board_question,
+      is_verified,
+      page,
+      page_size,
+      sort_by,
+      sort_order,
+      search
+    } = filters;
+
+    // Ensure we have a valid sort_by value
+    const validSortFields = Object.values(QuestionSortField);
+    const validatedSortBy = validSortFields.includes(sort_by as any) 
+      ? sort_by as unknown as QuestionSortField 
+      : QuestionSortField.CREATED_AT;
+
+    return await this.questionService.findUntranslatedQuestions(mediumId, {
+      question_type_id,
+      topic_id,
+      chapter_id,
+      board_question,
+      is_verified,
+      page,
+      page_size,
+      sort_by: validatedSortBy,
+      sort_order,
+      search
+    });
+  }
 }
