@@ -358,7 +358,6 @@ model Question {
   question_type         Question_Type          @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
   question_type_id      Int
   board_question        Boolean
-  is_verified           Boolean                @default(false)
   created_at            DateTime               @default(now()) @db.Timestamptz()
   updated_at            DateTime               @updatedAt @db.Timestamptz()
   question_texts        Question_Text[]
@@ -375,6 +374,7 @@ model Question_Text {
   instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
   instruction_medium_id Int
   question_text         String
+  is_verified           Boolean            @default(false)
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
   mcq_options           Mcq_Option[]

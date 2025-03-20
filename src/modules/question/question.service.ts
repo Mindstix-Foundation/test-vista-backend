@@ -7,7 +7,6 @@ import { AwsS3Service } from '../aws/aws-s3.service';
 
 interface QuestionFilters {
   question_type_id?: number;
-  is_verified?: boolean;
   topic_id?: number;
   chapter_id?: number;
   page?: number;
@@ -17,6 +16,7 @@ interface QuestionFilters {
   search?: string;
   board_question?: boolean;
   instruction_medium_id?: number;
+  is_verified?: boolean;
 }
 
 @Injectable()
@@ -32,20 +32,36 @@ export class QuestionService {
   private async transformImageData(image) {
     if (!image) return null;
     
-    const { image_url, ...imageData } = image;
+    // Deep clone to avoid mutation
+    const imageData = { ...image };
+    
+    // If no image_url, return the image data as is
+    if (!imageData.image_url) {
+      this.logger.warn(`Image ${imageData.id} has no image_url`);
+      return imageData;
+    }
     
     try {
       // Generate presigned URL with 1-hour expiration
-      const presignedUrl = await this.awsS3Service.generatePresignedUrl(image_url, 3600);
+      const presignedUrl = await this.awsS3Service.generatePresignedUrl(imageData.image_url, 3600);
+      
+      // Remove the original URL and add the presigned URL
+      const { image_url, ...restImageData } = imageData;
+      
+      this.logger.debug(`Generated presigned URL for image ${imageData.id}, expires in 1 hour`);
       
       return {
-        ...imageData,
+        ...restImageData,
         presigned_url: presignedUrl
       };
     } catch (error) {
-      this.logger.error(`Failed to generate presigned URL for image ${image.id}:`, error);
-      // Return the image data without the presigned URL if generation fails
-      return imageData;
+      this.logger.error(`Failed to generate presigned URL for image ${imageData.id}:`, error);
+      
+      // Remove image_url to avoid exposing the direct S3 URL
+      const { image_url, ...restImageData } = imageData;
+      
+      // Return the image data without the URL
+      return restImageData;
     }
   }
 
@@ -65,35 +81,50 @@ export class QuestionService {
     const result = { ...question };
     
     // Process question texts and their images
-    if (result.question_texts) {
+    if (result.question_texts && result.question_texts.length > 0) {
       result.question_texts = await Promise.all(result.question_texts.map(async (text) => {
+        if (!text) return null;
+        
+        // Deep clone to avoid mutation
         const textResult = { ...text };
         
         // Transform main image
         if (textResult.image) {
           textResult.image = await this.transformImageData(textResult.image);
+          // Log for debugging
+          this.logger.debug(`Transformed image ${textResult.image?.id} for question text ${textResult.id}`);
         }
         
         // Transform MCQ option images
-        if (textResult.mcq_options) {
+        if (textResult.mcq_options && textResult.mcq_options.length > 0) {
           textResult.mcq_options = await Promise.all(textResult.mcq_options.map(async (option) => {
+            if (!option) return null;
+            
             const optionResult = { ...option };
             if (optionResult.image) {
               optionResult.image = await this.transformImageData(optionResult.image);
+              // Log for debugging
+              this.logger.debug(`Transformed image ${optionResult.image?.id} for MCQ option ${optionResult.id}`);
             }
             return optionResult;
           }));
         }
         
         // Transform match pair images
-        if (textResult.match_pairs) {
+        if (textResult.match_pairs && textResult.match_pairs.length > 0) {
           textResult.match_pairs = await Promise.all(textResult.match_pairs.map(async (pair) => {
+            if (!pair) return null;
+            
             const pairResult = { ...pair };
             if (pairResult.left_image) {
               pairResult.left_image = await this.transformImageData(pairResult.left_image);
+              // Log for debugging
+              this.logger.debug(`Transformed left image ${pairResult.left_image?.id} for match pair ${pairResult.id}`);
             }
             if (pairResult.right_image) {
               pairResult.right_image = await this.transformImageData(pairResult.right_image);
+              // Log for debugging
+              this.logger.debug(`Transformed right image ${pairResult.right_image?.id} for match pair ${pairResult.id}`);
             }
             return pairResult;
           }));
@@ -158,24 +189,25 @@ export class QuestionService {
 
   async findAll(filters: QuestionFilters) {
     try {
-      const {
-        question_type_id,
-        topic_id,
-        chapter_id,
+      const { 
+        question_type_id, 
+        topic_id, 
+        chapter_id, 
         board_question,
         is_verified,
         instruction_medium_id,
-        page = 1,
-        page_size = 10,
-        sort_by = QuestionSortField.CREATED_AT,
+        page = 1, 
+        page_size = 10, 
+        sort_by = QuestionSortField.CREATED_AT, 
         sort_order = SortOrder.DESC,
         search
       } = filters;
-
+      
       const skip = (page - 1) * page_size;
       
       // Build where clause
-      const where: Prisma.QuestionWhereInput = {};
+      let where: Prisma.QuestionWhereInput = {};
+      const andConditions: Array<Prisma.QuestionWhereInput> = [];
       
       if (question_type_id) {
         where.question_type_id = question_type_id;
@@ -203,27 +235,48 @@ export class QuestionService {
         where.board_question = board_question;
       }
       
+      // is_verified now applies to question_texts
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        // We need to ensure the question has at least one question_text with the specified is_verified status
+        andConditions.push({
+          question_texts: {
+            some: {
+              is_verified: is_verified
+            }
+          }
+        });
       }
       
+      // If instruction_medium_id is provided, filter questions that have text in that medium
       if (instruction_medium_id) {
-        where.question_texts = {
-          some: {
-            instruction_medium_id: instruction_medium_id
+        andConditions.push({
+          question_texts: {
+            some: {
+              instruction_medium_id: instruction_medium_id
+            }
           }
-        };
+        });
       }
       
       // Add search capability if needed
       if (search) {
-        where.question_texts = {
+        andConditions.push({
+          question_texts: {
           some: {
             question_text: {
               contains: search,
               mode: 'insensitive'
             }
           }
+          }
+        });
+      }
+      
+      // If we have AND conditions, add them to the where clause
+      if (andConditions.length > 0) {
+        where = {
+          ...where,
+          AND: andConditions
         };
       }
       
@@ -512,20 +565,21 @@ export class QuestionService {
 
   async findAllWithoutPagination(filters: Omit<QuestionFilters, 'page' | 'page_size'>) {
     try {
-      const {
-        question_type_id,
-        topic_id,
-        chapter_id,
+      const { 
+        question_type_id, 
+        topic_id, 
+        chapter_id, 
         board_question,
         is_verified,
         instruction_medium_id,
-        sort_by = QuestionSortField.CREATED_AT,
+        sort_by = QuestionSortField.CREATED_AT, 
         sort_order = SortOrder.DESC,
         search
       } = filters;
       
       // Build where clause
-      const where: Prisma.QuestionWhereInput = {};
+      let where: Prisma.QuestionWhereInput = {};
+      const andConditions: Array<Prisma.QuestionWhereInput> = [];
       
       if (question_type_id) {
         where.question_type_id = question_type_id;
@@ -553,27 +607,48 @@ export class QuestionService {
         where.board_question = board_question;
       }
       
+      // is_verified now applies to question_texts
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        // We need to ensure the question has at least one question_text with the specified is_verified status
+        andConditions.push({
+          question_texts: {
+            some: {
+              is_verified: is_verified
+            }
+          }
+        });
       }
       
+      // If instruction_medium_id is provided, filter questions that have text in that medium
       if (instruction_medium_id) {
-        where.question_texts = {
-          some: {
-            instruction_medium_id: instruction_medium_id
+        andConditions.push({
+          question_texts: {
+            some: {
+              instruction_medium_id: instruction_medium_id
+            }
           }
-        };
+        });
       }
       
       // Add search capability if needed
       if (search) {
-        where.question_texts = {
+        andConditions.push({
+          question_texts: {
           some: {
             question_text: {
               contains: search,
               mode: 'insensitive'
             }
           }
+          }
+        });
+      }
+      
+      // If we have AND conditions, add them to the where clause
+      if (andConditions.length > 0) {
+        where = {
+          ...where,
+          AND: andConditions
         };
       }
       
@@ -634,6 +709,8 @@ export class QuestionService {
 
   async findUntranslatedQuestions(mediumId: number, filters: QuestionFilters) {
     try {
+      this.logger.log(`Finding untranslated questions for medium ID ${mediumId}`);
+      
       const {
         question_type_id,
         topic_id,
@@ -649,8 +726,8 @@ export class QuestionService {
 
       const skip = (page - 1) * page_size;
       
-      // Build where clause
-      const where: Prisma.QuestionWhereInput = {
+      // Build base where clause
+      let where: Prisma.QuestionWhereInput = {
         // The question must have at least one question_text entry (in any medium)
         question_texts: {
           some: {}
@@ -664,6 +741,9 @@ export class QuestionService {
           }
         }
       };
+      
+      // Create an array to collect AND conditions
+      const andConditions: Prisma.QuestionWhereInput[] = [];
       
       // Add the other filters
       if (question_type_id) {
@@ -692,28 +772,43 @@ export class QuestionService {
         where.board_question = board_question;
       }
       
+      // is_verified now applies to question_texts
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        // We need to ensure the question has at least one question_text with the specified is_verified status
+        andConditions.push({
+          question_texts: {
+            some: {
+              is_verified: is_verified
+            }
+          }
+        });
       }
       
       // Add search capability if needed
       if (search) {
-        where.AND = [
-          {
-            question_texts: {
-              some: {
-                question_text: {
-                  contains: search,
-                  mode: 'insensitive'
-                }
+        andConditions.push({
+          question_texts: {
+            some: {
+              question_text: {
+                contains: search,
+                mode: 'insensitive'
               }
             }
           }
-        ];
+        });
+      }
+      
+      // If we have AND conditions, add them to the where clause
+      if (andConditions.length > 0) {
+        where = {
+          ...where,
+          AND: andConditions
+        };
       }
       
       // Get total count for pagination metadata
       const total = await this.prisma.question.count({ where });
+      this.logger.log(`Found ${total} untranslated questions for medium ID ${mediumId}`);
       
       // Build orderBy object
       const orderBy: any = {};
@@ -729,6 +824,7 @@ export class QuestionService {
       }
       
       // Get paginated data with sorting
+      this.logger.log(`Fetching untranslated questions with pagination (page ${page}, size ${page_size})`);
       const questions = await this.prisma.question.findMany({
         where,
         orderBy,
@@ -765,6 +861,7 @@ export class QuestionService {
         }
       });
       
+      this.logger.log(`Transforming ${questions.length} untranslated questions to include presigned URLs`);
       // Transform questions to include presigned URLs
       const transformedQuestions = await this.transformQuestionResults(questions);
       

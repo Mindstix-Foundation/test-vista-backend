@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, InternalServerErrorException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateQuestionTextDto, UpdateQuestionTextDto, QuestionTextFilterDto, QuestionTextSortField } from './dto/question-text.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
@@ -9,6 +9,7 @@ interface QuestionTextFilters {
   chapter_id?: number;
   question_type_id?: number;
   instruction_medium_id?: number;
+  is_verified?: boolean;
   page?: number;
   page_size?: number;
   sort_by?: QuestionTextSortField;
@@ -53,20 +54,15 @@ export class QuestionTextService {
         }
       }
 
-      // Create the question text
+      // Create question text with optional is_verified field
       const questionText = await this.prisma.question_Text.create({
         data: {
-          question: {
-            connect: { id: createDto.question_id }
-          },
-          instruction_medium: {
-            connect: { id: createDto.instruction_medium_id }
-          },
+          question_id: createDto.question_id,
+          instruction_medium_id: createDto.instruction_medium_id,
+          image_id: createDto.image_id,
           question_text: createDto.question_text,
-          image: createDto.image_id ? {
-            connect: { id: createDto.image_id }
-          } : undefined
-        },
+          is_verified: createDto.is_verified !== undefined ? createDto.is_verified : false,
+        } as any,
         include: {
           question: {
             include: {
@@ -74,16 +70,8 @@ export class QuestionTextService {
             }
           },
           instruction_medium: true,
-          image: true,
-          mcq_options: true,
-          match_pairs: true
+          image: true
         }
-      });
-      
-      // Set question as unverified when new text is added
-      await this.prisma.question.update({
-        where: { id: createDto.question_id },
-        data: { is_verified: false }
       });
 
       return questionText;
@@ -103,6 +91,7 @@ export class QuestionTextService {
         chapter_id, 
         question_type_id,
         instruction_medium_id,
+        is_verified,
         page = 1, 
         page_size = 10, 
         sort_by = QuestionTextSortField.CREATED_AT, 
@@ -113,38 +102,43 @@ export class QuestionTextService {
       const skip = (page - 1) * page_size;
       
       // Build where clause
-      const where: Prisma.Question_TextWhereInput = {};
+      let where: Prisma.Question_TextWhereInput = {};
+      const questionConditions: any = {};
       
       if (topic_id) {
-        where.question = {
-          question_topics: {
-            some: {
-              topic_id: topic_id
-            }
+        questionConditions.question_topics = {
+          some: {
+            topic_id: topic_id
           }
         };
       }
       
       if (chapter_id) {
-        where.question = {
-          question_topics: {
-            some: {
-              topic: {
-                chapter_id: chapter_id
-              }
+        questionConditions.question_topics = {
+          some: {
+            topic: {
+              chapter_id: chapter_id
             }
           }
         };
       }
       
       if (question_type_id) {
-        where.question = {
-          question_type_id: question_type_id
-        };
+        questionConditions.question_type_id = question_type_id;
+      }
+      
+      // Apply question conditions if any were set
+      if (Object.keys(questionConditions).length > 0) {
+        where.question = questionConditions;
       }
       
       if (instruction_medium_id) {
         where.instruction_medium_id = instruction_medium_id;
+      }
+      
+      // Add is_verified filter if provided
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
       }
       
       // Add search condition
@@ -286,6 +280,11 @@ export class QuestionTextService {
       if (updateDto.question_text) {
         data.question_text = updateDto.question_text;
       }
+      
+      // Handle is_verified field if provided
+      if (updateDto.is_verified !== undefined) {
+        data.is_verified = updateDto.is_verified;
+      }
 
       const updated = await this.prisma.question_Text.update({
         where: { id },
@@ -303,16 +302,13 @@ export class QuestionTextService {
         }
       });
 
-      // Set question as unverified when text is updated
-      await this.prisma.question.update({
-        where: { id: questionText.question_id },
-        data: { is_verified: false }
-      });
+      // No longer need to set question as unverified when text is updated
+      // since verification status is now stored on the question_text
 
       return updated;
     } catch (error) {
       this.logger.error(`Failed to update question text ${id}:`, error);
-      if (error instanceof NotFoundException) {
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to update question text');
@@ -323,20 +319,8 @@ export class QuestionTextService {
     try {
       const questionText = await this.findOne(id);
 
-      // Log what will be deleted
-      this.logger.log(`Deleting question text ${id} will also delete:
-        - ${questionText.mcq_options.length} MCQ options
-        - ${questionText.match_pairs.length} match pairs
-        and any image references will be preserved (set to null)`);
-
       await this.prisma.question_Text.delete({
         where: { id }
-      });
-      
-      // Set question as unverified when text is deleted
-      await this.prisma.question.update({
-        where: { id: questionText.question_id },
-        data: { is_verified: false }
       });
 
       this.logger.log(`Successfully deleted question text ${id} and all related records through cascade delete`);
@@ -356,44 +340,50 @@ export class QuestionTextService {
         chapter_id, 
         question_type_id,
         instruction_medium_id,
+        is_verified,
         sort_by = QuestionTextSortField.CREATED_AT, 
         sort_order = SortOrder.DESC,
         search
       } = filters;
       
       // Build where clause
-      const where: Prisma.Question_TextWhereInput = {};
+      let where: Prisma.Question_TextWhereInput = {};
+      const questionConditions: any = {};
       
       if (topic_id) {
-        where.question = {
-          question_topics: {
-            some: {
-              topic_id: topic_id
-            }
+        questionConditions.question_topics = {
+          some: {
+            topic_id: topic_id
           }
         };
       }
       
       if (chapter_id) {
-        where.question = {
-          question_topics: {
-            some: {
-              topic: {
-                chapter_id: chapter_id
-              }
+        questionConditions.question_topics = {
+          some: {
+            topic: {
+              chapter_id: chapter_id
             }
           }
         };
       }
       
       if (question_type_id) {
-        where.question = {
-          question_type_id: question_type_id
-        };
+        questionConditions.question_type_id = question_type_id;
+      }
+      
+      // Apply question conditions if any were set
+      if (Object.keys(questionConditions).length > 0) {
+        where.question = questionConditions;
       }
       
       if (instruction_medium_id) {
         where.instruction_medium_id = instruction_medium_id;
+      }
+      
+      // Add is_verified filter if provided
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
       }
       
       // Add search condition
@@ -404,21 +394,12 @@ export class QuestionTextService {
         };
       }
       
-      // Build orderBy object based on sort parameters
-      const orderBy: any = {};
-      
-      // Make sure we're using a valid field for sorting
-      if (Object.values(QuestionTextSortField).includes(sort_by)) {
-        orderBy[sort_by] = sort_order;
-      } else {
-        // Default to created_at if an invalid sort field is provided
-        orderBy[QuestionTextSortField.CREATED_AT] = sort_order;
-      }
-      
       // Get all question texts with sorting but without pagination
       const questionTexts = await this.prisma.question_Text.findMany({
         where,
-        orderBy,
+        orderBy: {
+          [sort_by]: sort_order
+        },
         include: {
           question: {
             include: {
@@ -456,6 +437,7 @@ export class QuestionTextService {
         topic_id, 
         chapter_id, 
         question_type_id,
+        is_verified,
         page = 1, 
         page_size = 10, 
         sort_by = QuestionTextSortField.CREATED_AT, 
@@ -463,9 +445,7 @@ export class QuestionTextService {
         search
       } = filters;
       
-      const skip = (page - 1) * page_size;
-      
-      // Find questions that have text in other mediums but not in this one
+      // First find questions that have texts in other mediums but not in the target medium
       const questionsWithOtherTexts = await this.prisma.question.findMany({
         where: {
           question_texts: {
@@ -487,7 +467,7 @@ export class QuestionTextService {
       const questionIds = questionsWithOtherTexts.map(q => q.id);
       
       // Build where clause for question texts
-      const where: Prisma.Question_TextWhereInput = {
+      let where: Prisma.Question_TextWhereInput = {
         // Only include texts for questions that need translation
         question_id: {
           in: questionIds
@@ -498,25 +478,23 @@ export class QuestionTextService {
         }
       };
       
+      const questionConditions: any = {};
+      
       // Add topic filter if provided
       if (topic_id) {
-        where.question = {
-          question_topics: {
-            some: {
-              topic_id: topic_id
-            }
+        questionConditions.question_topics = {
+          some: {
+            topic_id: topic_id
           }
         };
       }
       
       // Add chapter filter if provided
       if (chapter_id) {
-        where.question = {
-          question_topics: {
-            some: {
-              topic: {
-                chapter_id: chapter_id
-              }
+        questionConditions.question_topics = {
+          some: {
+            topic: {
+              chapter_id: chapter_id
             }
           }
         };
@@ -524,9 +502,17 @@ export class QuestionTextService {
       
       // Add question type filter if provided
       if (question_type_id) {
-        where.question = {
-          question_type_id: question_type_id
-        };
+        questionConditions.question_type_id = question_type_id;
+      }
+      
+      // Apply question conditions if any were set
+      if (Object.keys(questionConditions).length > 0) {
+        where.question = questionConditions;
+      }
+      
+      // Add is_verified filter if provided
+      if (is_verified !== undefined) {
+        where.is_verified = is_verified;
       }
       
       // Add search condition
@@ -555,7 +541,7 @@ export class QuestionTextService {
       const questionTexts = await this.prisma.question_Text.findMany({
         where,
         orderBy,
-        skip,
+        skip: (page - 1) * page_size,
         take: page_size,
         include: {
           question: {

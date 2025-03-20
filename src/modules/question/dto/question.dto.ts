@@ -20,14 +20,6 @@ export class CreateQuestionDto {
   @IsBoolean()
   @IsNotEmpty()
   board_question: boolean;
-  
-  @ApiProperty({
-    example: false,
-    description: 'Whether this question is verified'
-  })
-  @IsBoolean()
-  @IsOptional()
-  is_verified?: boolean;
 }
 
 export class UpdateQuestionDto {
@@ -46,14 +38,6 @@ export class UpdateQuestionDto {
   @IsBoolean()
   @IsOptional()
   board_question?: boolean;
-  
-  @ApiProperty({
-    example: true,
-    description: 'Whether this question is verified'
-  })
-  @IsBoolean()
-  @IsOptional()
-  is_verified?: boolean;
 }
 
 export class QuestionFilterDto extends PaginationDto {
@@ -104,7 +88,7 @@ export class QuestionFilterDto extends PaginationDto {
   @ApiProperty({
     required: false,
     example: true,
-    description: 'Filter by verification status'
+    description: 'Filter by verification status (applies to question texts)'
   })
   @IsOptional()
   @Transform(({ value }) => {
