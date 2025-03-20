@@ -4,6 +4,41 @@ import { Type } from 'class-transformer';
 import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
 import { Transform } from 'class-transformer';
 
+// Add a new DTO for verification
+export class VerifyQuestionTextDto {
+  @ApiProperty({
+    example: true,
+    description: 'Set verification status',
+    required: true
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  is_verified: boolean;
+}
+
+// Add a DTO for batch verification
+export class BatchVerifyQuestionTextDto {
+  @ApiProperty({
+    example: [1, 2, 3],
+    description: 'IDs of question texts to verify',
+    required: true,
+    type: [Number]
+  })
+  @IsInt({ each: true })
+  @IsNotEmpty()
+  @Type(() => Number)
+  ids: number[];
+
+  @ApiProperty({
+    example: true,
+    description: 'Set verification status',
+    required: true
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  is_verified: boolean;
+}
+
 export class CreateQuestionTextDto {
   @ApiProperty({
     example: 1,

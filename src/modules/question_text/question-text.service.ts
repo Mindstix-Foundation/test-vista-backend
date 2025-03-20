@@ -333,6 +333,51 @@ export class QuestionTextService {
     }
   }
 
+  async batchVerify(ids: number[], isVerified: boolean): Promise<{ count: number }> {
+    try {
+      // Check if all IDs exist
+      const existingTexts = await this.prisma.question_Text.findMany({
+        where: {
+          id: {
+            in: ids
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      const existingIds = existingTexts.map(text => text.id);
+      const notFoundIds = ids.filter(id => !existingIds.includes(id));
+
+      if (notFoundIds.length > 0) {
+        throw new NotFoundException(`Some question texts were not found: ${notFoundIds.join(', ')}`);
+      }
+
+      // Update all the specified question texts with the verification status
+      const result = await this.prisma.question_Text.updateMany({
+        where: {
+          id: {
+            in: ids
+          }
+        },
+        data: {
+          is_verified: isVerified
+        } as any // Use type assertion to bypass the type checking
+      });
+
+      this.logger.log(`Updated verification status to ${isVerified} for ${result.count} question texts`);
+
+      return { count: result.count };
+    } catch (error) {
+      this.logger.error(`Failed to batch verify question texts:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to batch verify question texts');
+    }
+  }
+
   async findAllWithoutPagination(filters: Omit<QuestionTextFilters, 'page' | 'page_size'>) {
     try {
       const { 
@@ -394,11 +439,17 @@ export class QuestionTextService {
         };
       }
       
+      // Validate the sort field to ensure it's a valid field in the Question_Text model
+      const validSortFields = Object.values(QuestionTextSortField);
+      const validatedSortBy = validSortFields.includes(sort_by as any) 
+        ? sort_by as QuestionTextSortField 
+        : QuestionTextSortField.CREATED_AT;
+
       // Get all question texts with sorting but without pagination
       const questionTexts = await this.prisma.question_Text.findMany({
         where,
         orderBy: {
-          [sort_by]: sort_order
+          [validatedSortBy]: sort_order
         },
         include: {
           question: {
@@ -420,7 +471,7 @@ export class QuestionTextService {
       return {
         data: questionTexts,
         meta: {
-          sort_by,
+          sort_by: validatedSortBy, // Return the validated sort field
           sort_order,
           search: search || undefined
         }
