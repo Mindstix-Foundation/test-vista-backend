@@ -131,10 +131,11 @@ export class QuestionTextController {
   @Delete(':id')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Delete a question text' })
-  @ApiResponse({ status: 200, description: 'Question text deleted successfully' })
+  @ApiResponse({ status: 200, description: 'Question text deleted successfully. Returns details about what was deleted' })
   @ApiResponse({ status: 404, description: 'Question text not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.questionTextService.remove(id);
+    const result = await this.questionTextService.remove(id);
+    return result;
   }
 
   @Get('untranslated/:mediumId')

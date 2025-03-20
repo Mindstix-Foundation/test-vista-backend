@@ -315,15 +315,54 @@ export class QuestionTextService {
     }
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: number): Promise<{ message: string; deleted: { question_text: boolean; question?: boolean } }> {
     try {
+      // First, find the question text to get its question ID
       const questionText = await this.findOne(id);
+      const questionId = questionText.question_id;
 
-      await this.prisma.question_Text.delete({
-        where: { id }
+      // Count how many question texts are associated with this question
+      const questionTextsCount = await this.prisma.question_Text.count({
+        where: { 
+          question_id: questionId 
+        }
       });
 
-      this.logger.log(`Successfully deleted question text ${id} and all related records through cascade delete`);
+      this.logger.log(`Question ${questionId} has ${questionTextsCount} question text(s)`);
+
+      // If this is the only question text for this question, delete the question as well
+      if (questionTextsCount === 1) {
+        this.logger.log(`Deleting question ${questionId} as this is its only question text`);
+        
+        // Delete the parent question (which will cascade delete the question text)
+        await this.prisma.question.delete({
+          where: { id: questionId }
+        });
+        
+        this.logger.log(`Successfully deleted question ${questionId} and its only question text ${id}`);
+        
+        return {
+          message: `Question text ${id} was the only text for question ${questionId}. Both have been deleted.`,
+          deleted: {
+            question_text: true,
+            question: true
+          }
+        };
+      } else {
+        // Delete only the question text
+        await this.prisma.question_Text.delete({
+          where: { id }
+        });
+        
+        this.logger.log(`Successfully deleted question text ${id}. Question ${questionId} still has other question texts.`);
+        
+        return {
+          message: `Question text ${id} deleted. Question ${questionId} still has ${questionTextsCount - 1} other question text(s).`,
+          deleted: {
+            question_text: true
+          }
+        };
+      }
     } catch (error) {
       this.logger.error(`Failed to delete question text ${id}:`, error);
       if (error instanceof NotFoundException) {
