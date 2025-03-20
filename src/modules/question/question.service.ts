@@ -651,17 +651,18 @@ export class QuestionService {
       
       // Build where clause
       const where: Prisma.QuestionWhereInput = {
-        // Questions that don't have any question_texts with the specified medium
-        // OR questions that don't have any question_texts at all
-        OR: [
-          {
-            question_texts: {
-              none: {
-                instruction_medium_id: mediumId
-              }
+        // The question must have at least one question_text entry (in any medium)
+        question_texts: {
+          some: {}
+        },
+        // AND the question must NOT have a question_text in the specified medium
+        NOT: {
+          question_texts: {
+            some: {
+              instruction_medium_id: mediumId
             }
           }
-        ]
+        }
       };
       
       // Add the other filters
@@ -697,14 +698,18 @@ export class QuestionService {
       
       // Add search capability if needed
       if (search) {
-        where.question_texts = {
-          some: {
-            question_text: {
-              contains: search,
-              mode: 'insensitive'
+        where.AND = [
+          {
+            question_texts: {
+              some: {
+                question_text: {
+                  contains: search,
+                  mode: 'insensitive'
+                }
+              }
             }
           }
-        };
+        ];
       }
       
       // Get total count for pagination metadata
