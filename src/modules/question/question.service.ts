@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField } from './dto/question.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
+import { AwsS3Service } from '../aws/aws-s3.service';
 
 interface QuestionFilters {
   question_type_id?: number;
@@ -22,7 +23,88 @@ interface QuestionFilters {
 export class QuestionService {
   private readonly logger = new Logger(QuestionService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly awsS3Service: AwsS3Service
+  ) {}
+
+  // Helper method to transform image data with presigned URLs
+  private async transformImageData(image) {
+    if (!image) return null;
+    
+    const { image_url, ...imageData } = image;
+    
+    try {
+      // Generate presigned URL with 1-hour expiration
+      const presignedUrl = await this.awsS3Service.generatePresignedUrl(image_url, 3600);
+      
+      return {
+        ...imageData,
+        presigned_url: presignedUrl
+      };
+    } catch (error) {
+      this.logger.error(`Failed to generate presigned URL for image ${image.id}:`, error);
+      // Return the image data without the presigned URL if generation fails
+      return imageData;
+    }
+  }
+
+  // Helper method to apply transformations to question results
+  private async transformQuestionResults(questions) {
+    if (Array.isArray(questions)) {
+      return Promise.all(questions.map(question => this.transformSingleQuestion(question)));
+    }
+    return this.transformSingleQuestion(questions);
+  }
+
+  // Transform a single question and all its nested images
+  private async transformSingleQuestion(question) {
+    if (!question) return null;
+    
+    // Clone the question to avoid mutating the original
+    const result = { ...question };
+    
+    // Process question texts and their images
+    if (result.question_texts) {
+      result.question_texts = await Promise.all(result.question_texts.map(async (text) => {
+        const textResult = { ...text };
+        
+        // Transform main image
+        if (textResult.image) {
+          textResult.image = await this.transformImageData(textResult.image);
+        }
+        
+        // Transform MCQ option images
+        if (textResult.mcq_options) {
+          textResult.mcq_options = await Promise.all(textResult.mcq_options.map(async (option) => {
+            const optionResult = { ...option };
+            if (optionResult.image) {
+              optionResult.image = await this.transformImageData(optionResult.image);
+            }
+            return optionResult;
+          }));
+        }
+        
+        // Transform match pair images
+        if (textResult.match_pairs) {
+          textResult.match_pairs = await Promise.all(textResult.match_pairs.map(async (pair) => {
+            const pairResult = { ...pair };
+            if (pairResult.left_image) {
+              pairResult.left_image = await this.transformImageData(pairResult.left_image);
+            }
+            if (pairResult.right_image) {
+              pairResult.right_image = await this.transformImageData(pairResult.right_image);
+            }
+            return pairResult;
+          }));
+        }
+        
+        return textResult;
+      }));
+    }
+    
+    return result;
+  }
 
   async create(createDto: CreateQuestionDto) {
     try {
@@ -35,7 +117,7 @@ export class QuestionService {
         throw new NotFoundException(`Question type with ID ${createDto.question_type_id} not found`);
       }
 
-      return await this.prisma.question.create({
+      const question = await this.prisma.question.create({
         data: createDto,
         include: {
           question_type: true,
@@ -62,6 +144,9 @@ export class QuestionService {
           }
         }
       });
+
+      // Transform question to include presigned URLs
+      return await this.transformSingleQuestion(question);
     } catch (error) {
       this.logger.error('Failed to create question:', error);
       if (error instanceof NotFoundException) {
@@ -195,11 +280,14 @@ export class QuestionService {
         }
       });
       
+      // Transform questions to include presigned URLs
+      const transformedQuestions = await this.transformQuestionResults(questions);
+      
       // Calculate total pages
       const total_pages = Math.ceil(total / page_size);
       
       return {
-        data: questions,
+        data: transformedQuestions,
         meta: {
           total,
           page,
@@ -221,8 +309,23 @@ export class QuestionService {
         where: { id },
         include: {
           question_type: true,
+          question_topics: {
+            include: {
+              topic: {
+                include: {
+                  chapter: {
+                    include: {
+                      subject: true,
+                      standard: true
+                    }
+                  }
+                }
+              }
+            }
+          },
           question_texts: {
             include: {
+              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -236,20 +339,16 @@ export class QuestionService {
                 }
               }
             }
-          },
-          question_topics: {
-            include: {
-              topic: true
-            }
           }
-        }
+        },
       });
 
       if (!question) {
         throw new NotFoundException(`Question with ID ${id} not found`);
       }
 
-      return question;
+      // Transform the question to include presigned URLs
+      return await this.transformSingleQuestion(question);
     } catch (error) {
       this.logger.error(`Failed to fetch question ${id}:`, error);
       if (error instanceof NotFoundException) {
@@ -273,13 +372,14 @@ export class QuestionService {
         }
       }
 
-      return await this.prisma.question.update({
+      const updatedQuestion = await this.prisma.question.update({
         where: { id },
         data: updateDto,
         include: {
           question_type: true,
           question_texts: {
             include: {
+              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -296,11 +396,18 @@ export class QuestionService {
           },
           question_topics: {
             include: {
-              topic: true
+              topic: {
+                include: {
+                  chapter: true
+                }
+              }
             }
           }
         }
       });
+      
+      // Transform question to include presigned URLs
+      return await this.transformSingleQuestion(updatedQuestion);
     } catch (error) {
       this.logger.error(`Failed to update question ${id}:`, error);
       if (error instanceof NotFoundException) {
@@ -483,7 +590,7 @@ export class QuestionService {
       }
       
       // Get data with sorting but without pagination
-      return await this.prisma.question.findMany({
+      const questions = await this.prisma.question.findMany({
         where,
         orderBy,
         include: {
@@ -516,6 +623,9 @@ export class QuestionService {
           }
         }
       });
+      
+      // Transform questions to include presigned URLs
+      return await this.transformQuestionResults(questions);
     } catch (error) {
       this.logger.error('Failed to fetch questions without pagination:', error);
       throw new InternalServerErrorException('Failed to fetch questions without pagination');
@@ -650,11 +760,14 @@ export class QuestionService {
         }
       });
       
+      // Transform questions to include presigned URLs
+      const transformedQuestions = await this.transformQuestionResults(questions);
+      
       // Calculate total pages
       const total_pages = Math.ceil(total / page_size);
       
       return {
-        data: questions,
+        data: transformedQuestions,
         meta: {
           total,
           page,
