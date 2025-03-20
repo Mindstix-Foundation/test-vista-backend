@@ -55,6 +55,12 @@ export class QuestionController {
       search
     } = filters;
 
+    // Ensure we have a valid sort_by value
+    const validSortFields = Object.values(QuestionSortField);
+    const validatedSortBy = validSortFields.includes(sort_by as any) 
+      ? sort_by as unknown as QuestionSortField 
+      : QuestionSortField.CREATED_AT;
+
     return await this.questionService.findAll({
       question_type_id,
       topic_id,
@@ -64,7 +70,7 @@ export class QuestionController {
       instruction_medium_id,
       page,
       page_size,
-      sort_by: sort_by as unknown as QuestionSortField,
+      sort_by: validatedSortBy,
       sort_order,
       search
     });
