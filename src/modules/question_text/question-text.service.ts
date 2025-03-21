@@ -133,7 +133,13 @@ export class QuestionTextService {
       }
       
       if (instruction_medium_id) {
-        where.instruction_medium_id = instruction_medium_id;
+        // Ensure instruction_medium_id is a number
+        const mediumId = typeof instruction_medium_id === 'string' 
+          ? parseInt(instruction_medium_id, 10) 
+          : instruction_medium_id;
+          
+        where.instruction_medium_id = mediumId;
+        this.logger.log(`Filtering question texts with instruction_medium_id: ${mediumId}`);
       }
       
       // Add is_verified filter if provided
@@ -462,7 +468,13 @@ export class QuestionTextService {
       }
       
       if (instruction_medium_id) {
-        where.instruction_medium_id = instruction_medium_id;
+        // Ensure instruction_medium_id is a number
+        const mediumId = typeof instruction_medium_id === 'string' 
+          ? parseInt(instruction_medium_id, 10) 
+          : instruction_medium_id;
+          
+        where.instruction_medium_id = mediumId;
+        this.logger.log(`Filtering question texts with instruction_medium_id: ${mediumId} (without pagination)`);
       }
       
       // Add is_verified filter if provided

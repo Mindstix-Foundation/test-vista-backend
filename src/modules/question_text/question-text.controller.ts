@@ -6,12 +6,15 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SortOrder } from '../../common/dto/pagination.dto';
+import { Logger } from '@nestjs/common';
 
 @ApiTags('question-texts')
 @Controller('question-texts')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class QuestionTextController {
+  private readonly logger = new Logger(QuestionTextController.name);
+
   constructor(private readonly questionTextService: QuestionTextService) {}
 
   @Post()
@@ -49,6 +52,13 @@ export class QuestionTextController {
       sort_order = SortOrder.DESC,
       search
     } = filters;
+    
+    // Add diagnostic logging
+    this.logger.log(`QuestionText findAll called with params:
+      - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
+      - is_verified: ${is_verified} (${typeof is_verified})
+      - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+    `);
     
     // If page and page_size are provided, use pagination
     if (page !== undefined && page_size !== undefined) {

@@ -249,13 +249,20 @@ export class QuestionService {
       
       // If instruction_medium_id is provided, filter questions that have text in that medium
       if (instruction_medium_id) {
+        // Ensure instruction_medium_id is a number
+        const mediumId = typeof instruction_medium_id === 'string' 
+          ? parseInt(instruction_medium_id, 10) 
+          : instruction_medium_id;
+          
         andConditions.push({
           question_texts: {
             some: {
-              instruction_medium_id: instruction_medium_id
+              instruction_medium_id: mediumId
             }
           }
         });
+        
+        this.logger.log(`Filtering questions with instruction_medium_id: ${mediumId}`);
       }
       
       // Add search capability if needed
@@ -621,13 +628,20 @@ export class QuestionService {
       
       // If instruction_medium_id is provided, filter questions that have text in that medium
       if (instruction_medium_id) {
+        // Ensure instruction_medium_id is a number
+        const mediumId = typeof instruction_medium_id === 'string' 
+          ? parseInt(instruction_medium_id, 10) 
+          : instruction_medium_id;
+          
         andConditions.push({
           question_texts: {
             some: {
-              instruction_medium_id: instruction_medium_id
+              instruction_medium_id: mediumId
             }
           }
         });
+        
+        this.logger.log(`Filtering questions with instruction_medium_id: ${mediumId}`);
       }
       
       // Add search capability if needed

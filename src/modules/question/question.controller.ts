@@ -55,6 +55,13 @@ export class QuestionController {
       search
     } = filters;
 
+    // Add diagnostic logging
+    this.logger.log(`Question findAll called with params:
+      - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
+      - is_verified: ${is_verified} (${typeof is_verified})
+      - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+    `);
+
     // Ensure we have a valid sort_by value
     const validSortFields = Object.values(QuestionSortField);
     const validatedSortBy = validSortFields.includes(sort_by as any) 
