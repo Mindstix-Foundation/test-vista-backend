@@ -321,6 +321,16 @@ export class QuestionService {
             }
           },
           question_texts: {
+            // If instruction_medium_id is provided, only include matching texts
+            // If is_verified is provided, only include texts with matching verification status
+            where: {
+              ...(instruction_medium_id ? {
+                instruction_medium_id: typeof instruction_medium_id === 'string' 
+                  ? parseInt(instruction_medium_id, 10) 
+                  : instruction_medium_id
+              } : {}),
+              ...(is_verified !== undefined ? { is_verified } : {})
+            },
             include: {
               instruction_medium: true,
               image: true,
@@ -343,16 +353,26 @@ export class QuestionService {
       // Transform questions to include presigned URLs
       const transformedQuestions = await this.transformQuestionResults(questions);
       
+      // Filter out questions with empty question_texts arrays when filters are applied
+      const filteredQuestions = transformedQuestions.filter(question => {
+        // Only filter out empty arrays if we're applying text-specific filters
+        if ((instruction_medium_id !== undefined || is_verified !== undefined) && 
+            (!question.question_texts || question.question_texts.length === 0)) {
+          return false;
+        }
+        return true;
+      });
+      
       // Calculate total pages
       const total_pages = Math.ceil(total / page_size);
       
       return {
-        data: transformedQuestions,
+        data: filteredQuestions,
         meta: {
-          total,
+          total: filteredQuestions.length,
           page,
           page_size,
-          total_pages,
+          total_pages: Math.ceil(filteredQuestions.length / page_size),
           sort_by,
           sort_order
         }
@@ -694,6 +714,16 @@ export class QuestionService {
             }
           },
           question_texts: {
+            // If instruction_medium_id is provided, only include matching texts
+            // If is_verified is provided, only include texts with matching verification status
+            where: {
+              ...(instruction_medium_id ? {
+                instruction_medium_id: typeof instruction_medium_id === 'string' 
+                  ? parseInt(instruction_medium_id, 10) 
+                  : instruction_medium_id
+              } : {}),
+              ...(is_verified !== undefined ? { is_verified } : {})
+            },
             include: {
               instruction_medium: true,
               image: true,
@@ -714,7 +744,19 @@ export class QuestionService {
       });
       
       // Transform questions to include presigned URLs
-      return await this.transformQuestionResults(questions);
+      const transformedQuestions = await this.transformQuestionResults(questions);
+      
+      // Filter out questions with empty question_texts arrays when filters are applied
+      const filteredQuestions = transformedQuestions.filter(question => {
+        // Only filter out empty arrays if we're applying text-specific filters
+        if ((instruction_medium_id !== undefined || is_verified !== undefined) && 
+            (!question.question_texts || question.question_texts.length === 0)) {
+          return false;
+        }
+        return true;
+      });
+      
+      return filteredQuestions;
     } catch (error) {
       this.logger.error('Failed to fetch questions without pagination:', error);
       throw new InternalServerErrorException('Failed to fetch questions without pagination');
@@ -856,6 +898,11 @@ export class QuestionService {
             }
           },
           question_texts: {
+            // We already filter OUT texts with the specified medium in the where clause
+            // But we might want to filter by other criteria like is_verified here
+            where: is_verified !== undefined ? {
+              is_verified: is_verified
+            } : undefined,
             include: {
               instruction_medium: true,
               image: true,
@@ -879,11 +926,21 @@ export class QuestionService {
       // Transform questions to include presigned URLs
       const transformedQuestions = await this.transformQuestionResults(questions);
       
+      // Filter out questions with empty question_texts arrays when filters are applied
+      const filteredQuestions = transformedQuestions.filter(question => {
+        // Only filter out empty arrays if we're applying text-specific filters
+        if (is_verified !== undefined && 
+            (!question.question_texts || question.question_texts.length === 0)) {
+          return false;
+        }
+        return true;
+      });
+      
       // Calculate total pages
       const total_pages = Math.ceil(total / page_size);
       
       return {
-        data: transformedQuestions,
+        data: filteredQuestions,
         meta: {
           total,
           page,
