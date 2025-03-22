@@ -34,6 +34,7 @@ import { QuestionTopicModule } from './modules/question_topic/question-topic.mod
 import { McqOptionModule } from './modules/mcq-option/mcq-option.module';
 import { MulterModule } from '@nestjs/platform-express';
 import { AwsModule } from './modules/aws/aws.module';
+import { QuestionTextTopicMediumModule } from './modules/question_text_topic_medium/question-text-topic-medium.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { AwsModule } from './modules/aws/aws.module';
     ImageModule,
     QuestionTopicModule,
     McqOptionModule,
+    QuestionTextTopicMediumModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB

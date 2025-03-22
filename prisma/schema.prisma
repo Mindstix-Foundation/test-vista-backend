@@ -14,47 +14,47 @@ datasource db {
 }
 
 model Country {
-  id      Int      @id @default(autoincrement())
-  name    String   @db.VarChar
-  states  State[]
+  id     Int     @id @default(autoincrement())
+  name   String  @db.VarChar
+  states State[]
 }
 
 model State {
-  id          Int      @id @default(autoincrement())
-  country     Country  @relation(fields: [country_id], references: [id], onDelete: Cascade)
-  country_id  Int
-  name        String   @db.VarChar
-  cities      City[]
+  id         Int     @id @default(autoincrement())
+  country    Country @relation(fields: [country_id], references: [id], onDelete: Cascade)
+  country_id Int
+  name       String  @db.VarChar
+  cities     City[]
 }
 
 model City {
-  id         Int        @id @default(autoincrement())
-  state      State      @relation(fields: [state_id], references: [id], onDelete: Cascade)
-  state_id   Int
-  name       String     @db.VarChar
-  addresses  Address[]
+  id        Int       @id @default(autoincrement())
+  state     State     @relation(fields: [state_id], references: [id], onDelete: Cascade)
+  state_id  Int
+  name      String    @db.VarChar
+  addresses Address[]
 }
 
 model Address {
-  id           Int       @id @default(autoincrement())
-  city         City      @relation(fields: [city_id], references: [id], onDelete: Cascade)
-  city_id      Int
-  postal_code  String    @db.VarChar
-  street       String    @db.VarChar
-  created_at   DateTime  @default(now()) @db.Timestamptz()
-  updated_at   DateTime  @updatedAt @db.Timestamptz()
-  board        Board?
-  school       School?
+  id          Int      @id @default(autoincrement())
+  city        City     @relation(fields: [city_id], references: [id], onDelete: Cascade)
+  city_id     Int
+  postal_code String   @db.VarChar
+  street      String   @db.VarChar
+  created_at  DateTime @default(now()) @db.Timestamptz()
+  updated_at  DateTime @updatedAt @db.Timestamptz()
+  board       Board?
+  school      School?
 }
 
 model Board {
-  id                   Int                   @id @default(autoincrement())
-  name                 String                @unique @db.VarChar
-  abbreviation         String                @unique @db.VarChar
-  address              Address               @relation(fields: [address_id], references: [id], onDelete: Cascade)
-  address_id           Int                   @unique
-  created_at           DateTime              @default(now()) @db.Timestamptz()
-  updated_at           DateTime              @updatedAt @db.Timestamptz()
+  id                  Int                  @id @default(autoincrement())
+  name                String               @unique @db.VarChar
+  abbreviation        String               @unique @db.VarChar
+  address             Address              @relation(fields: [address_id], references: [id], onDelete: Cascade)
+  address_id          Int                  @unique
+  created_at          DateTime             @default(now()) @db.Timestamptz()
+  updated_at          DateTime             @updatedAt @db.Timestamptz()
   standards           Standard[]
   subjects            Subject[]
   instruction_mediums Instruction_Medium[]
@@ -73,8 +73,8 @@ model Standard {
 
   school_standards         School_Standard[]
   medium_standard_subjects Medium_Standard_Subject[]
-  patterns                Pattern[]
-  chapters                Chapter[]
+  patterns                 Pattern[]
+  chapters                 Chapter[]
 
   @@unique([board_id, name])
   @@unique([board_id, sequence_number])
@@ -89,66 +89,66 @@ model Subject {
   updated_at DateTime @updatedAt @db.Timestamptz()
 
   medium_standard_subjects Medium_Standard_Subject[]
-  patterns                Pattern[]
-  chapters                Chapter[]
+  patterns                 Pattern[]
+  chapters                 Chapter[]
 
   @@unique([board_id, name])
 }
 
 model Instruction_Medium {
-  id                    Int      @id @default(autoincrement())
-  board                 Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
-  board_id              Int
-  instruction_medium    String   @db.VarChar
-  created_at            DateTime @default(now()) @db.Timestamptz()
-  updated_at            DateTime @updatedAt @db.Timestamptz()
+  id                 Int      @id @default(autoincrement())
+  board              Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  board_id           Int
+  instruction_medium String   @db.VarChar
+  created_at         DateTime @default(now()) @db.Timestamptz()
+  updated_at         DateTime @updatedAt @db.Timestamptz()
 
   school_instruction_mediums School_Instruction_Medium[]
   medium_standard_subjects   Medium_Standard_Subject[]
-  question_texts             Question_Text[]
+  question_text_topics       Question_Text_Topic_Medium[]
 
   @@unique([board_id, instruction_medium])
 }
 
 model School {
-  id                         Int      @id @default(autoincrement())
-  board                      Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
-  board_id                   Int
-  name                       String   @db.VarChar
-  address                    Address  @relation(fields: [address_id], references: [id], onDelete: Cascade)
-  address_id                 Int      @unique
-  principal_name             String   @db.VarChar
-  email                      String   @db.VarChar
-  contact_number             String   @db.VarChar
-  alternate_contact_number   String?  @db.VarChar
-  created_at                 DateTime @default(now()) @db.Timestamptz()
-  updated_at                 DateTime @updatedAt @db.Timestamptz()
+  id                       Int      @id @default(autoincrement())
+  board                    Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  board_id                 Int
+  name                     String   @db.VarChar
+  address                  Address  @relation(fields: [address_id], references: [id], onDelete: Cascade)
+  address_id               Int      @unique
+  principal_name           String   @db.VarChar
+  email                    String   @db.VarChar
+  contact_number           String   @db.VarChar
+  alternate_contact_number String?  @db.VarChar
+  created_at               DateTime @default(now()) @db.Timestamptz()
+  updated_at               DateTime @updatedAt @db.Timestamptz()
 
   school_instruction_mediums School_Instruction_Medium[]
   school_standards           School_Standard[]
-  user_schools              User_School[]
+  user_schools               User_School[]
 }
 
 model School_Instruction_Medium {
   id                    Int                @id @default(autoincrement())
   instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
   instruction_medium_id Int
-  school               School             @relation(fields: [school_id], references: [id], onDelete: Cascade)
-  school_id            Int
-  created_at           DateTime           @default(now()) @db.Timestamptz()
-  updated_at           DateTime           @updatedAt @db.Timestamptz()
+  school                School             @relation(fields: [school_id], references: [id], onDelete: Cascade)
+  school_id             Int
+  created_at            DateTime           @default(now()) @db.Timestamptz()
+  updated_at            DateTime           @updatedAt @db.Timestamptz()
 
   @@unique([school_id, instruction_medium_id])
 }
 
 model School_Standard {
-  id           Int      @id @default(autoincrement())
-  standard     Standard @relation(fields: [standard_id], references: [id], onDelete: Cascade)
-  standard_id  Int
-  school       School   @relation(fields: [school_id], references: [id], onDelete: Cascade)
-  school_id    Int
-  created_at   DateTime @default(now()) @db.Timestamptz()
-  updated_at   DateTime @updatedAt @db.Timestamptz()
+  id          Int      @id @default(autoincrement())
+  standard    Standard @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  standard_id Int
+  school      School   @relation(fields: [school_id], references: [id], onDelete: Cascade)
+  school_id   Int
+  created_at  DateTime @default(now()) @db.Timestamptz()
+  updated_at  DateTime @updatedAt @db.Timestamptz()
 
   teacher_subjects Teacher_Subject[]
 
@@ -156,21 +156,21 @@ model School_Standard {
 }
 
 model User {
-  id                       Int              @id @default(autoincrement())
-  email_id                String           @unique @db.VarChar
-  password                String           @db.VarChar
-  name                    String           @db.VarChar
-  contact_number          String           @db.VarChar
-  alternate_contact_number String?         @db.VarChar
-  highest_qualification   String?          @db.VarChar
-  status                  Boolean          @default(true)
-  created_at              DateTime         @default(now()) @db.Timestamptz()
-  updated_at              DateTime         @updatedAt @db.Timestamptz()
-  
-  user_roles             User_Role[]
-  user_schools           User_School[]
-  teacher_subjects       Teacher_Subject[]
-  password_resets        Password_Reset[]
+  id                       Int      @id @default(autoincrement())
+  email_id                 String   @unique @db.VarChar
+  password                 String   @db.VarChar
+  name                     String   @db.VarChar
+  contact_number           String   @db.VarChar
+  alternate_contact_number String?  @db.VarChar
+  highest_qualification    String?  @db.VarChar
+  status                   Boolean  @default(true)
+  created_at               DateTime @default(now()) @db.Timestamptz()
+  updated_at               DateTime @updatedAt @db.Timestamptz()
+
+  user_roles       User_Role[]
+  user_schools     User_School[]
+  teacher_subjects Teacher_Subject[]
+  password_resets  Password_Reset[]
 }
 
 model Role {
@@ -205,15 +205,15 @@ model Medium_Standard_Subject {
   id                    Int                @id @default(autoincrement())
   instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
   instruction_medium_id Int
-  standard             Standard           @relation(fields: [standard_id], references: [id], onDelete: Cascade)
-  standard_id          Int
-  subject              Subject            @relation(fields: [subject_id], references: [id], onDelete: Cascade)
-  subject_id           Int
-  created_at           DateTime           @default(now()) @db.Timestamptz()
-  updated_at           DateTime           @updatedAt @db.Timestamptz()
+  standard              Standard           @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  standard_id           Int
+  subject               Subject            @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  subject_id            Int
+  created_at            DateTime           @default(now()) @db.Timestamptz()
+  updated_at            DateTime           @updatedAt @db.Timestamptz()
 
-  teacher_subjects      Teacher_Subject[]
-  test_papers          Test_Paper[]
+  teacher_subjects Teacher_Subject[]
+  test_papers      Test_Paper[]
 
   @@unique([instruction_medium_id, standard_id, subject_id])
 }
@@ -242,73 +242,73 @@ model Chapter {
   name                      String   @db.VarChar
   created_at                DateTime @default(now()) @db.Timestamptz()
   updated_at                DateTime @updatedAt @db.Timestamptz()
-  
-  topics                    Topic[]
-  test_paper_chapters       Test_Paper_Chapter[]
+
+  topics              Topic[]
+  test_paper_chapters Test_Paper_Chapter[]
 
   @@unique([subject_id, standard_id, sequential_chapter_number])
 }
 
 model Topic {
-  id                     Int      @id @default(autoincrement())
-  chapter                Chapter  @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
-  chapter_id             Int
+  id                      Int      @id @default(autoincrement())
+  chapter                 Chapter  @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+  chapter_id              Int
   sequential_topic_number Int
-  name                   String   @db.VarChar
-  created_at             DateTime @default(now()) @db.Timestamptz()
-  updated_at             DateTime @updatedAt @db.Timestamptz()
+  name                    String   @db.VarChar
+  created_at              DateTime @default(now()) @db.Timestamptz()
+  updated_at              DateTime @updatedAt @db.Timestamptz()
 
   question_topics Question_Topic[]
 }
 
 model Question_Type {
-  id                          Int                          @id @default(autoincrement())
-  type_name                   String                       @db.VarChar
-  subsection_question_types   Subsection_Question_Type[]
-  questions                   Question[]
+  id                        Int                        @id @default(autoincrement())
+  type_name                 String                     @db.VarChar
+  subsection_question_types Subsection_Question_Type[]
+  questions                 Question[]
 }
 
 model Pattern {
-  id            Int       @id @default(autoincrement())
-  pattern_name  String    @db.VarChar
-  board         Board     @relation(fields: [board_id], references: [id], onDelete: Cascade)
-  board_id      Int
-  standard      Standard  @relation(fields: [standard_id], references: [id], onDelete: Cascade)
-  standard_id   Int
-  subject       Subject   @relation(fields: [subject_id], references: [id], onDelete: Cascade)
-  subject_id    Int
-  total_marks   Int
-  created_at    DateTime  @default(now()) @db.Timestamptz()
-  updated_at    DateTime  @updatedAt @db.Timestamptz()
-  
-  sections      Section[]
-  test_papers   Test_Paper[]
+  id           Int      @id @default(autoincrement())
+  pattern_name String   @db.VarChar
+  board        Board    @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  board_id     Int
+  standard     Standard @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  standard_id  Int
+  subject      Subject  @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  subject_id   Int
+  total_marks  Int
+  created_at   DateTime @default(now()) @db.Timestamptz()
+  updated_at   DateTime @updatedAt @db.Timestamptz()
+
+  sections    Section[]
+  test_papers Test_Paper[]
 }
 
 model Section {
-  id                          Int                          @id @default(autoincrement())
-  pattern                     Pattern                      @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
-  pattern_id                  Int
-  sequence_number             Int
-  section_number             Int
-  sub_section                String                       @db.VarChar
-  section_name               String                       @db.VarChar
-  total_questions            Int
-  mandotory_questions        Int
-  marks_per_question         Int
-  created_at                 DateTime                     @default(now()) @db.Timestamptz()
-  updated_at                 DateTime                     @updatedAt @db.Timestamptz()
-  
-  subsection_question_types  Subsection_Question_Type[]
-  test_paper_questions       Test_Paper_Question[]
+  id                  Int      @id @default(autoincrement())
+  pattern             Pattern  @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
+  pattern_id          Int
+  sequence_number     Int
+  section_number      Int
+  sub_section         String   @db.VarChar
+  section_name        String   @db.VarChar
+  total_questions     Int
+  mandotory_questions Int
+  marks_per_question  Int
+  created_at          DateTime @default(now()) @db.Timestamptz()
+  updated_at          DateTime @updatedAt @db.Timestamptz()
+
+  subsection_question_types Subsection_Question_Type[]
+  test_paper_questions      Test_Paper_Question[]
 
   @@unique([pattern_id, sequence_number])
 }
 
 model Subsection_Question_Type {
-  id                            Int           @id @default(autoincrement())
-  section                       Section       @relation(fields: [section_id], references: [id], onDelete: Cascade)
-  section_id                    Int
+  id                           Int           @id @default(autoincrement())
+  section                      Section       @relation(fields: [section_id], references: [id], onDelete: Cascade)
+  section_id                   Int
   seqencial_subquestion_number Int
   question_type                Question_Type @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
   question_type_id             Int
@@ -338,103 +338,117 @@ model Password_Reset {
 }
 
 model Image {
-  id                Int                    @id @default(autoincrement())
-  image_url         String                 @db.VarChar
-  original_filename String                 @db.VarChar
-  file_size         Int                    // Size in bytes
-  file_type         String                 @db.VarChar // MIME type (image/jpeg, image/png, etc.)
-  width             Int                    // Image width in pixels
-  height            Int                    // Image height in pixels
-  created_at        DateTime               @default(now()) @db.Timestamptz()
-  updated_at        DateTime               @updatedAt @db.Timestamptz()
+  id                Int             @id @default(autoincrement())
+  image_url         String          @db.VarChar
+  original_filename String          @db.VarChar
+  file_size         Int // Size in bytes
+  file_type         String          @db.VarChar // MIME type (image/jpeg, image/png, etc.)
+  width             Int // Image width in pixels
+  height            Int // Image height in pixels
+  created_at        DateTime        @default(now()) @db.Timestamptz()
+  updated_at        DateTime        @updatedAt @db.Timestamptz()
   question_texts    Question_Text[]
   mcq_options       Mcq_Option[]
-  match_pairs_left  Match_Pair[]          @relation("LeftImage")
-  match_pairs_right Match_Pair[]          @relation("RightImage")
+  match_pairs_left  Match_Pair[]    @relation("LeftImage")
+  match_pairs_right Match_Pair[]    @relation("RightImage")
 }
 
 model Question {
-  id                    Int                    @id @default(autoincrement())
-  question_type         Question_Type          @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
-  question_type_id      Int
-  board_question        Boolean
-  created_at            DateTime               @default(now()) @db.Timestamptz()
-  updated_at            DateTime               @updatedAt @db.Timestamptz()
-  question_texts        Question_Text[]
-  test_paper_questions  Test_Paper_Question[]
-  question_topics       Question_Topic[]
+  id                   Int                   @id @default(autoincrement())
+  question_type        Question_Type         @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
+  question_type_id     Int
+  board_question       Boolean
+  created_at           DateTime              @default(now()) @db.Timestamptz()
+  updated_at           DateTime              @updatedAt @db.Timestamptz()
+  question_texts       Question_Text[]
+  test_paper_questions Test_Paper_Question[]
+  question_topics      Question_Topic[]
 }
 
 model Question_Text {
+  id                   Int                          @id @default(autoincrement())
+  question             Question                     @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  question_id          Int
+  image                Image?                       @relation(fields: [image_id], references: [id], onDelete: SetNull)
+  image_id             Int?
+  question_text        String
+  created_at           DateTime                     @default(now()) @db.Timestamptz()
+  updated_at           DateTime                     @updatedAt @db.Timestamptz()
+  mcq_options          Mcq_Option[]
+  match_pairs          Match_Pair[]
+  question_text_topics Question_Text_Topic_Medium[]
+}
+
+model Question_Text_Topic_Medium {
   id                    Int                @id @default(autoincrement())
-  question              Question           @relation(fields: [question_id], references: [id], onDelete: Cascade)
-  question_id           Int
-  image                 Image?             @relation(fields: [image_id], references: [id], onDelete: SetNull)
-  image_id              Int?
+  question_text         Question_Text      @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  question_text_id      Int
+  question_topic        Question_Topic     @relation(fields: [question_topic_id], references: [id], onDelete: Cascade)
+  question_topic_id     Int
   instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
   instruction_medium_id Int
-  question_text         String
   is_verified           Boolean            @default(false)
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
-  mcq_options           Mcq_Option[]
-  match_pairs           Match_Pair[]
+
+  @@unique([question_text_id, question_topic_id, instruction_medium_id])
 }
 
 model Question_Topic {
-  id          Int      @id @default(autoincrement())
-  question    Question @relation(fields: [question_id], references: [id], onDelete: Cascade)
-  question_id Int
-  topic       Topic    @relation(fields: [topic_id], references: [id], onDelete: Cascade)
-  topic_id    Int
-  created_at  DateTime @default(now()) @db.Timestamptz()
-  updated_at  DateTime @updatedAt @db.Timestamptz()
+  id                   Int                          @id @default(autoincrement())
+  question             Question                     @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  question_id          Int
+  topic                Topic                        @relation(fields: [topic_id], references: [id], onDelete: Cascade)
+  topic_id             Int
+  created_at           DateTime                     @default(now()) @db.Timestamptz()
+  updated_at           DateTime                     @updatedAt @db.Timestamptz()
+  question_text_topics Question_Text_Topic_Medium[]
 
   @@unique([question_id, topic_id])
 }
 
 model Mcq_Option {
-  id               Int            @id @default(autoincrement())
-  question_text    Question_Text  @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  id               Int           @id @default(autoincrement())
+  question_text    Question_Text @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
   question_text_id Int
-  option_text      String?        @db.VarChar
-  image            Image?         @relation(fields: [image_id], references: [id], onDelete: SetNull)
+  option_text      String?       @db.VarChar
+  image            Image?        @relation(fields: [image_id], references: [id], onDelete: SetNull)
   image_id         Int?
   is_correct       Boolean
-  created_at       DateTime       @default(now()) @db.Timestamptz()
-  updated_at       DateTime       @updatedAt @db.Timestamptz()
+  created_at       DateTime      @default(now()) @db.Timestamptz()
+  updated_at       DateTime      @updatedAt @db.Timestamptz()
 }
 
 model Match_Pair {
-  id               Int            @id @default(autoincrement())
-  question_text    Question_Text  @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  id               Int           @id @default(autoincrement())
+  question_text    Question_Text @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
   question_text_id Int
-  left_text        String?        @db.VarChar
-  right_text       String?        @db.VarChar
-  left_image       Image?         @relation("LeftImage", fields: [left_image_id], references: [id], onDelete: SetNull)
+  left_text        String?       @db.VarChar
+  right_text       String?       @db.VarChar
+  left_image       Image?        @relation("LeftImage", fields: [left_image_id], references: [id], onDelete: SetNull)
   left_image_id    Int?
-  right_image      Image?         @relation("RightImage", fields: [right_image_id], references: [id], onDelete: SetNull)
+  right_image      Image?        @relation("RightImage", fields: [right_image_id], references: [id], onDelete: SetNull)
   right_image_id   Int?
-  created_at       DateTime       @default(now()) @db.Timestamptz()
-  updated_at       DateTime       @updatedAt @db.Timestamptz()
+  created_at       DateTime      @default(now()) @db.Timestamptz()
+  updated_at       DateTime      @updatedAt @db.Timestamptz()
 }
 
 model Test_Paper {
-  id                         Int                      @id @default(autoincrement())
-  name                       String                   @db.VarChar
-  exam_time                  DateTime                 @db.Time
+  id                         Int                     @id @default(autoincrement())
+  name                       String                  @db.VarChar
+  exam_time                  DateTime                @db.Time
   medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id], onDelete: Cascade)
   medium_standard_subject_id Int
   pattern                    Pattern                 @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
   pattern_id                 Int
-  test_paper_origin_id      Int
-  created_at                DateTime                 @default(now()) @db.Timestamptz()
-  test_paper_chapters       Test_Paper_Chapter[]
-  test_paper_questions      Test_Paper_Question[]
+  test_paper_origin_id       Int
+  created_at                 DateTime                @default(now()) @db.Timestamptz()
+  test_paper_chapters        Test_Paper_Chapter[]
+  test_paper_questions       Test_Paper_Question[]
 }
 
 model Test_Paper_Chapter {
-  id            Int         @id @default(autoincrement())
+  id            Int        @id @default(autoincrement())
   test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
   test_paper_id Int
   chapter       Chapter    @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
@@ -444,7 +458,7 @@ model Test_Paper_Chapter {
 }
 
 model Test_Paper_Question {
-  id            Int         @id @default(autoincrement())
+  id            Int        @id @default(autoincrement())
   test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
   test_paper_id Int
   section       Section    @relation(fields: [section_id], references: [id], onDelete: Cascade)

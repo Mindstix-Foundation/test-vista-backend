@@ -1,42 +1,99 @@
-import { IsString, IsInt, IsOptional, IsNotEmpty, IsBoolean } from 'class-validator';
+import { IsString, IsInt, IsOptional, IsNotEmpty, IsBoolean, IsArray, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
 import { Transform } from 'class-transformer';
 
-// Add a new DTO for verification
-export class VerifyQuestionTextDto {
+// DTO for creating MCQ options
+export class CreateMcqOptionDto {
   @ApiProperty({
+    description: 'Option text',
+    example: 'This is an MCQ option'
+  })
+  @IsString()
+  @IsNotEmpty()
+  option_text: string;
+
+  @ApiProperty({
+    description: 'Whether this option is correct',
     example: true,
-    description: 'Set verification status',
-    required: true
+    required: false
   })
   @IsBoolean()
-  @IsNotEmpty()
-  is_verified: boolean;
+  @IsOptional()
+  is_correct?: boolean = false;
+
+  @ApiProperty({
+    description: 'ID of the image to associate with the option',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  image_id?: number;
 }
 
-// Add a DTO for batch verification
-export class BatchVerifyQuestionTextDto {
+// DTO for updating MCQ options (including ID)
+export class UpdateMcqOptionDto extends CreateMcqOptionDto {
   @ApiProperty({
-    example: [1, 2, 3],
-    description: 'IDs of question texts to verify',
-    required: true,
-    type: [Number]
+    description: 'ID of the MCQ option',
+    example: 1,
+    required: false
   })
-  @IsInt({ each: true })
-  @IsNotEmpty()
-  @Type(() => Number)
-  ids: number[];
+  @IsInt()
+  @IsOptional()
+  id?: number;
+}
+
+// DTO for creating match pairs
+export class CreateMatchPairDto {
+  @ApiProperty({
+    description: 'Left side text of the match pair',
+    example: 'Left side text',
+    required: false
+  })
+  @IsString()
+  @IsOptional()
+  left_text?: string;
 
   @ApiProperty({
-    example: true,
-    description: 'Set verification status',
-    required: true
+    description: 'Right side text of the match pair',
+    example: 'Right side text',
+    required: false
   })
-  @IsBoolean()
-  @IsNotEmpty()
-  is_verified: boolean;
+  @IsString()
+  @IsOptional()
+  right_text?: string;
+
+  @ApiProperty({
+    description: 'ID of the left image to associate with the match pair',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  left_image_id?: number;
+
+  @ApiProperty({
+    description: 'ID of the right image to associate with the match pair',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  right_image_id?: number;
+}
+
+// DTO for updating match pairs (including ID)
+export class UpdateMatchPairDto extends CreateMatchPairDto {
+  @ApiProperty({
+    description: 'ID of the match pair',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  id?: number;
 }
 
 export class CreateQuestionTextDto {
@@ -47,14 +104,6 @@ export class CreateQuestionTextDto {
   @IsInt()
   @IsNotEmpty()
   question_id: number;
-
-  @ApiProperty({
-    example: 1,
-    description: 'ID of the instruction medium'
-  })
-  @IsInt()
-  @IsNotEmpty()
-  instruction_medium_id: number;
 
   @ApiProperty({
     example: 1,
@@ -72,31 +121,43 @@ export class CreateQuestionTextDto {
   @IsString()
   @IsNotEmpty()
   question_text: string;
-  
+
   @ApiProperty({
-    example: false,
-    description: 'Whether this question text is verified',
-    required: false,
-    default: false
+    description: 'Array of MCQ options for this question text',
+    type: [CreateMcqOptionDto],
+    required: false
   })
-  @IsBoolean()
+  @IsArray()
   @IsOptional()
-  is_verified?: boolean;
+  @ValidateNested({ each: true })
+  @Type(() => CreateMcqOptionDto)
+  mcq_options?: CreateMcqOptionDto[];
+
+  @ApiProperty({
+    description: 'Array of match pairs for this question text',
+    type: [CreateMatchPairDto],
+    required: false
+  })
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateMatchPairDto)
+  match_pairs?: CreateMatchPairDto[];
 }
 
 export class UpdateQuestionTextDto {
   @ApiProperty({
-    example: 1,
-    description: 'ID of the instruction medium',
+    description: 'Updated question text content',
+    example: 'What is the capital of France?',
     required: false
   })
-  @IsInt()
+  @IsString()
   @IsOptional()
-  instruction_medium_id?: number;
+  question_text?: string;
 
   @ApiProperty({
+    description: 'ID of the image to associate with the question text',
     example: 1,
-    description: 'ID of the image',
     required: false
   })
   @IsInt()
@@ -104,22 +165,26 @@ export class UpdateQuestionTextDto {
   image_id?: number;
 
   @ApiProperty({
-    example: 'What is the capital of France?',
-    description: 'The question text',
+    description: 'Array of MCQ options for this question text',
+    type: [UpdateMcqOptionDto],
     required: false
   })
-  @IsString()
+  @IsArray()
   @IsOptional()
-  question_text?: string;
-  
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMcqOptionDto)
+  mcq_options?: UpdateMcqOptionDto[];
+
   @ApiProperty({
-    example: true,
-    description: 'Whether this question text is verified',
+    description: 'Array of match pairs for this question text',
+    type: [UpdateMatchPairDto],
     required: false
   })
-  @IsBoolean()
+  @IsArray()
   @IsOptional()
-  is_verified?: boolean;
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMatchPairDto)
+  match_pairs?: UpdateMatchPairDto[];
 }
 
 export class QuestionTextFilterDto extends PaginationDto {
@@ -176,9 +241,18 @@ export class QuestionTextFilterDto extends PaginationDto {
   })
   @IsBoolean({ message: 'is_verified must be a boolean' })
   is_verified?: boolean;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by question ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'question_id must be an integer' })
+  question_id?: number;
 }
 
-// Update the enum for question text-specific sort fields
 export enum QuestionTextSortField {
   QUESTION_ID = 'question_id',
   QUESTION_TEXT = 'question_text',

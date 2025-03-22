@@ -1,6 +1,7 @@
 import { IsInt, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
 
 export class CreateQuestionTopicDto {
   @ApiProperty({
@@ -20,7 +21,18 @@ export class CreateQuestionTopicDto {
   topic_id: number;
 }
 
-export class QuestionTopicFilterDto {
+export class UpdateQuestionTopicDto {
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the topic',
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  topic_id?: number;
+}
+
+export class QuestionTopicFilterDto extends PaginationDto {
   @ApiProperty({
     required: false,
     example: 1,
@@ -30,7 +42,7 @@ export class QuestionTopicFilterDto {
   @Type(() => Number)
   @IsInt({ message: 'question_id must be an integer' })
   question_id?: number;
-
+  
   @ApiProperty({
     required: false,
     example: 1,

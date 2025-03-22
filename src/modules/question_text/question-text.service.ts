@@ -1,6 +1,13 @@
-import { Injectable, Logger, NotFoundException, InternalServerErrorException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, InternalServerErrorException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionTextDto, UpdateQuestionTextDto, QuestionTextFilterDto, QuestionTextSortField } from './dto/question-text.dto';
+import { 
+  CreateQuestionTextDto, 
+  UpdateQuestionTextDto, 
+  QuestionTextFilterDto, 
+  QuestionTextSortField,
+  UpdateMcqOptionDto,
+  UpdateMatchPairDto
+} from './dto/question-text.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
 
@@ -10,6 +17,7 @@ interface QuestionTextFilters {
   question_type_id?: number;
   instruction_medium_id?: number;
   is_verified?: boolean;
+  question_id?: number;
   page?: number;
   page_size?: number;
   sort_by?: QuestionTextSortField;
@@ -23,61 +31,160 @@ export class QuestionTextService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createDto: CreateQuestionTextDto) {
+  async create(createQuestionTextDto: CreateQuestionTextDto) {
     try {
-      // Verify question exists
+      const { 
+        question_id, 
+        question_text, 
+        mcq_options, 
+        match_pairs,
+        image_id
+      } = createQuestionTextDto;
+
+      // Check if the question exists
       const question = await this.prisma.question.findUnique({
-        where: { id: createDto.question_id }
+        where: { id: question_id },
+        include: {
+          question_topics: true
+        }
       });
 
       if (!question) {
-        throw new NotFoundException(`Question with ID ${createDto.question_id} not found`);
+        throw new NotFoundException(`Question with ID ${question_id} not found`);
       }
 
-      // Verify instruction medium exists
-      const instructionMedium = await this.prisma.instruction_Medium.findUnique({
-        where: { id: createDto.instruction_medium_id }
-      });
-
-      if (!instructionMedium) {
-        throw new NotFoundException(`Instruction medium with ID ${createDto.instruction_medium_id} not found`);
-      }
-
-      // Verify image exists if provided
-      if (createDto.image_id) {
+      // Check if image exists if image_id is provided
+      if (image_id !== undefined && image_id !== null) {
         const image = await this.prisma.image.findUnique({
-          where: { id: createDto.image_id }
+          where: { id: image_id }
         });
 
         if (!image) {
-          throw new NotFoundException(`Image with ID ${createDto.image_id} not found`);
+          throw new NotFoundException(`Image with ID ${image_id} not found`);
         }
       }
 
-      // Create question text with optional is_verified field
-      const questionText = await this.prisma.question_Text.create({
-        data: {
-          question_id: createDto.question_id,
-          instruction_medium_id: createDto.instruction_medium_id,
-          image_id: createDto.image_id,
-          question_text: createDto.question_text,
-          is_verified: createDto.is_verified !== undefined ? createDto.is_verified : false,
-        } as any,
-        include: {
-          question: {
-            include: {
-              question_type: true
-            }
-          },
-          instruction_medium: true,
-          image: true
-        }
-      });
+      // Create the question text and related items
+      return await this.prisma.$transaction(async (prisma) => {
+        // Create the question text with image_id only if it's provided
+        const newQuestionText = await prisma.question_Text.create({
+          data: {
+            question_id,
+            question_text,
+            ...(image_id !== undefined && image_id !== null ? { image_id } : {})
+          }
+        });
 
-      return questionText;
+        // Create MCQ options if provided
+        if (mcq_options && mcq_options.length > 0) {
+          await Promise.all(mcq_options.map(async (option) => {
+            // Check if option image exists if provided
+            if (option.image_id !== undefined && option.image_id !== null) {
+              const image = await this.prisma.image.findUnique({
+                where: { id: option.image_id }
+              });
+              
+              if (!image) {
+                throw new NotFoundException(`Image with ID ${option.image_id} for MCQ option not found`);
+              }
+            }
+            
+            return prisma.mcq_Option.create({
+              data: {
+                option_text: option.option_text,
+                is_correct: option.is_correct ?? false,
+                ...(option.image_id !== undefined && option.image_id !== null ? { image_id: option.image_id } : {}),
+                question_text_id: newQuestionText.id
+              }
+            });
+          }));
+        }
+
+        // Create match pairs if provided
+        if (match_pairs && match_pairs.length > 0) {
+          await Promise.all(match_pairs.map(async (pair) => {
+            // Check if left_image exists if provided
+            if (pair.left_image_id !== undefined && pair.left_image_id !== null) {
+              const leftImage = await this.prisma.image.findUnique({
+                where: { id: pair.left_image_id }
+              });
+              
+              if (!leftImage) {
+                throw new NotFoundException(`Left image with ID ${pair.left_image_id} for match pair not found`);
+              }
+            }
+            
+            // Check if right_image exists if provided
+            if (pair.right_image_id !== undefined && pair.right_image_id !== null) {
+              const rightImage = await this.prisma.image.findUnique({
+                where: { id: pair.right_image_id }
+              });
+              
+              if (!rightImage) {
+                throw new NotFoundException(`Right image with ID ${pair.right_image_id} for match pair not found`);
+              }
+            }
+            
+            return prisma.match_Pair.create({
+              data: {
+                ...(pair.left_text ? { left_text: pair.left_text } : {}),
+                ...(pair.right_text ? { right_text: pair.right_text } : {}),
+                ...(pair.left_image_id !== undefined && pair.left_image_id !== null ? { left_image_id: pair.left_image_id } : {}),
+                ...(pair.right_image_id !== undefined && pair.right_image_id !== null ? { right_image_id: pair.right_image_id } : {}),
+                question_text_id: newQuestionText.id
+              }
+            });
+          }));
+        }
+
+        // Fetch the created question text with relations
+        return await prisma.question_Text.findUnique({
+          where: { id: newQuestionText.id },
+          include: {
+            question: {
+              include: {
+                question_type: true,
+                question_topics: {
+                  include: {
+                    topic: {
+                      include: {
+                        chapter: true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            image: true,
+            mcq_options: {
+              include: {
+                image: true
+              }
+            },
+            match_pairs: {
+              include: {
+                left_image: true,
+                right_image: true
+              }
+            },
+            question_text_topics: {
+              include: {
+                instruction_medium: true,
+                question_topic: {
+                  include: {
+                    topic: true
+                  }
+                }
+              }
+            }
+          }
+        });
+      });
     } catch (error) {
       this.logger.error('Failed to create question text:', error);
-      if (error instanceof NotFoundException) {
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException ||
+          error instanceof ConflictException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to create question text');
@@ -103,48 +210,68 @@ export class QuestionTextService {
       
       // Build where clause
       let where: Prisma.Question_TextWhereInput = {};
-      const questionConditions: any = {};
+      const andConditions: Prisma.Question_TextWhereInput[] = [];
       
-      if (topic_id) {
-        questionConditions.question_topics = {
-          some: {
-            topic_id: topic_id
+      // Question-related filters
+      if (topic_id || chapter_id || question_type_id) {
+        const questionConditions: Prisma.QuestionWhereInput = {};
+        
+        if (question_type_id) {
+          questionConditions.question_type_id = question_type_id;
+        }
+        
+        if (topic_id || chapter_id) {
+          const topicConditions: Prisma.Question_TopicWhereInput = {};
+          
+          if (topic_id) {
+            topicConditions.topic_id = parseInt(String(topic_id), 10);
           }
-        };
-      }
-      
-      if (chapter_id) {
-        questionConditions.question_topics = {
-          some: {
-            topic: {
-              chapter_id: chapter_id
-            }
+          
+          if (chapter_id) {
+            topicConditions.topic = {
+              chapter_id: parseInt(String(chapter_id), 10)
+            };
           }
-        };
-      }
-      
-      if (question_type_id) {
-        questionConditions.question_type_id = question_type_id;
-      }
-      
-      // Apply question conditions if any were set
-      if (Object.keys(questionConditions).length > 0) {
+          
+          questionConditions.question_topics = {
+            some: topicConditions
+          };
+        }
+        
         where.question = questionConditions;
       }
       
+      // Handle instruction_medium_id filter using the junction table
       if (instruction_medium_id) {
         // Ensure instruction_medium_id is a number
         const mediumId = typeof instruction_medium_id === 'string' 
           ? parseInt(instruction_medium_id, 10) 
           : instruction_medium_id;
           
-        where.instruction_medium_id = mediumId;
         this.logger.log(`Filtering question texts with instruction_medium_id: ${mediumId}`);
+        
+        andConditions.push({
+          question_text_topics: {
+            some: {
+              instruction_medium: {
+                id: mediumId
+              }
+            }
+          }
+        });
       }
       
-      // Add is_verified filter if provided
+      // Handle is_verified filter using the junction table
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        this.logger.log(`Filtering question texts with is_verified: ${is_verified}`);
+        
+        andConditions.push({
+          question_text_topics: {
+            some: {
+              is_verified: is_verified
+            }
+          }
+        });
       }
       
       // Add search condition
@@ -153,6 +280,11 @@ export class QuestionTextService {
           contains: search,
           mode: 'insensitive'
         };
+      }
+      
+      // If we have AND conditions, add them to the where clause
+      if (andConditions.length > 0) {
+        where.AND = andConditions;
       }
       
       // Get total count for pagination metadata
@@ -186,10 +318,14 @@ export class QuestionTextService {
               }
             }
           },
-          instruction_medium: true,
           image: true,
           mcq_options: true,
-          match_pairs: true
+          match_pairs: true,
+          question_text_topics: {
+            include: {
+              instruction_medium: true
+            }
+          }
         }
       });
       
@@ -221,13 +357,31 @@ export class QuestionTextService {
         include: {
           question: {
             include: {
-              question_type: true
+              question_type: true,
+              question_topics: {
+                include: {
+                  topic: {
+                    include: {
+                      chapter: true
+                    }
+                  }
+                }
+              }
             }
           },
-          instruction_medium: true,
           image: true,
           mcq_options: true,
-          match_pairs: true
+          match_pairs: true,
+          question_text_topics: {
+            include: {
+              instruction_medium: true,
+              question_topic: {
+                include: {
+                  topic: true
+                }
+              }
+            }
+          }
         }
       });
 
@@ -237,84 +391,257 @@ export class QuestionTextService {
 
       return questionText;
     } catch (error) {
-      this.logger.error(`Failed to fetch question text ${id}:`, error);
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to fetch question text');
+      this.logger.error(`Failed to fetch question text with ID ${id}:`, error);
+      throw new InternalServerErrorException(`Failed to fetch question text with ID ${id}`);
     }
   }
 
-  async update(id: number, updateDto: UpdateQuestionTextDto) {
+  async update(id: number, updateQuestionTextDto: UpdateQuestionTextDto) {
     try {
-      const questionText = await this.findOne(id);
+      const { 
+        question_text, 
+        mcq_options, 
+        match_pairs,
+        image_id
+      } = updateQuestionTextDto;
 
-      // Verify instruction medium exists if provided
-      if (updateDto.instruction_medium_id) {
-        const instructionMedium = await this.prisma.instruction_Medium.findUnique({
-          where: { id: updateDto.instruction_medium_id }
-        });
-
-        if (!instructionMedium) {
-          throw new NotFoundException(`Instruction medium with ID ${updateDto.instruction_medium_id} not found`);
-        }
-      }
-
-      // Verify image exists if provided
-      if (updateDto.image_id) {
-        const image = await this.prisma.image.findUnique({
-          where: { id: updateDto.image_id }
-        });
-
-        if (!image) {
-          throw new NotFoundException(`Image with ID ${updateDto.image_id} not found`);
-        }
-      }
-
-      const data: any = {};
-      
-      if (updateDto.instruction_medium_id) {
-        data.instruction_medium = { connect: { id: updateDto.instruction_medium_id } };
-      }
-      
-      if (updateDto.image_id) {
-        data.image = { connect: { id: updateDto.image_id } };
-      } else if (updateDto.image_id === null) {
-        data.image = { disconnect: true };
-      }
-      
-      if (updateDto.question_text) {
-        data.question_text = updateDto.question_text;
-      }
-      
-      // Handle is_verified field if provided
-      if (updateDto.is_verified !== undefined) {
-        data.is_verified = updateDto.is_verified;
-      }
-
-      const updated = await this.prisma.question_Text.update({
+      // First check if the question text exists
+      const questionText = await this.prisma.question_Text.findUnique({
         where: { id },
-        data,
         include: {
-          question: {
-            include: {
-              question_type: true
-            }
-          },
-          instruction_medium: true,
-          image: true,
           mcq_options: true,
           match_pairs: true
         }
       });
 
-      // No longer need to set question as unverified when text is updated
-      // since verification status is now stored on the question_text
+      if (!questionText) {
+        throw new NotFoundException(`Question text with ID ${id} not found`);
+      }
 
-      return updated;
+      // Check if image exists if image_id is provided
+      if (image_id !== undefined && image_id !== null) {
+        const image = await this.prisma.image.findUnique({
+          where: { id: image_id }
+        });
+
+        if (!image) {
+          throw new NotFoundException(`Image with ID ${image_id} not found`);
+        }
+      }
+
+      // Process update in a transaction
+      return await this.prisma.$transaction(async (prisma) => {
+        // Update the question text
+        await prisma.question_Text.update({
+          where: { id },
+          data: {
+            question_text,
+            ...(image_id !== undefined ? { image_id } : {})
+          }
+        });
+
+        // Process MCQ options if provided
+        if (mcq_options) {
+          // Explicitly type mcq_options as UpdateMcqOptionDto[]
+          const typedMcqOptions: UpdateMcqOptionDto[] = mcq_options;
+          
+          // Get existing MCQ options
+          const existingOptions = await prisma.mcq_Option.findMany({
+            where: { question_text_id: id }
+          });
+          
+          // Create a map of existing options by ID for easy lookup
+          const existingOptionsMap = new Map(
+            existingOptions.map(option => [option.id, option])
+          );
+          
+          // Process each MCQ option
+          for (const option of typedMcqOptions) {
+            // Check if option image exists if provided
+            if (option.image_id !== undefined && option.image_id !== null) {
+              const image = await this.prisma.image.findUnique({
+                where: { id: option.image_id }
+              });
+              
+              if (!image) {
+                throw new NotFoundException(`Image with ID ${option.image_id} for MCQ option not found`);
+              }
+            }
+            
+            // If option has an ID, update it, otherwise create a new one
+            if (option.id) {
+              if (existingOptionsMap.has(option.id)) {
+                await prisma.mcq_Option.update({
+                  where: { id: option.id },
+                  data: {
+                    option_text: option.option_text,
+                    is_correct: option.is_correct,
+                    ...(option.image_id !== undefined ? { image_id: option.image_id } : {})
+                  }
+                });
+                
+                // Remove from map to track what's been processed
+                existingOptionsMap.delete(option.id);
+              } else {
+                throw new NotFoundException(`MCQ option with ID ${option.id} not found`);
+              }
+            } else {
+              // Create a new option
+              await prisma.mcq_Option.create({
+                data: {
+                  question_text_id: id,
+                  option_text: option.option_text,
+                  is_correct: option.is_correct ?? false,
+                  ...(option.image_id !== undefined && option.image_id !== null ? { image_id: option.image_id } : {})
+                }
+              });
+            }
+          }
+          
+          // Delete any remaining options that weren't updated
+          if (existingOptionsMap.size > 0) {
+            await prisma.mcq_Option.deleteMany({
+              where: {
+                id: {
+                  in: Array.from(existingOptionsMap.keys())
+                }
+              }
+            });
+          }
+        }
+
+        // Process match pairs if provided
+        if (match_pairs) {
+          // Explicitly type match_pairs as UpdateMatchPairDto[]
+          const typedMatchPairs: UpdateMatchPairDto[] = match_pairs;
+          
+          // Get existing match pairs
+          const existingPairs = await prisma.match_Pair.findMany({
+            where: { question_text_id: id }
+          });
+          
+          // Create a map of existing pairs by ID for easy lookup
+          const existingPairsMap = new Map(
+            existingPairs.map(pair => [pair.id, pair])
+          );
+          
+          // Process each match pair
+          for (const pair of typedMatchPairs) {
+            // Check if left image exists if provided
+            if (pair.left_image_id !== undefined && pair.left_image_id !== null) {
+              const leftImage = await this.prisma.image.findUnique({
+                where: { id: pair.left_image_id }
+              });
+              
+              if (!leftImage) {
+                throw new NotFoundException(`Left image with ID ${pair.left_image_id} for match pair not found`);
+              }
+            }
+            
+            // Check if right image exists if provided
+            if (pair.right_image_id !== undefined && pair.right_image_id !== null) {
+              const rightImage = await this.prisma.image.findUnique({
+                where: { id: pair.right_image_id }
+              });
+              
+              if (!rightImage) {
+                throw new NotFoundException(`Right image with ID ${pair.right_image_id} for match pair not found`);
+              }
+            }
+            
+            // If pair has an ID, update it, otherwise create a new one
+            if (pair.id) {
+              if (existingPairsMap.has(pair.id)) {
+                await prisma.match_Pair.update({
+                  where: { id: pair.id },
+                  data: {
+                    ...(pair.left_text ? { left_text: pair.left_text } : {}),
+                    ...(pair.right_text ? { right_text: pair.right_text } : {}),
+                    ...(pair.left_image_id !== undefined ? { left_image_id: pair.left_image_id } : {}),
+                    ...(pair.right_image_id !== undefined ? { right_image_id: pair.right_image_id } : {})
+                  }
+                });
+                
+                // Remove from map to track what's been processed
+                existingPairsMap.delete(pair.id);
+              } else {
+                throw new NotFoundException(`Match pair with ID ${pair.id} not found`);
+              }
+            } else {
+              // Create a new pair
+              await prisma.match_Pair.create({
+                data: {
+                  question_text_id: id,
+                  ...(pair.left_text ? { left_text: pair.left_text } : {}),
+                  ...(pair.right_text ? { right_text: pair.right_text } : {}),
+                  ...(pair.left_image_id !== undefined && pair.left_image_id !== null ? { left_image_id: pair.left_image_id } : {}),
+                  ...(pair.right_image_id !== undefined && pair.right_image_id !== null ? { right_image_id: pair.right_image_id } : {})
+                }
+              });
+            }
+          }
+          
+          // Delete any remaining pairs that weren't updated
+          if (existingPairsMap.size > 0) {
+            await prisma.match_Pair.deleteMany({
+              where: {
+                id: {
+                  in: Array.from(existingPairsMap.keys())
+                }
+              }
+            });
+          }
+        }
+
+        // Return the updated question text with relations
+        return await prisma.question_Text.findUnique({
+          where: { id },
+          include: {
+            question: {
+              include: {
+                question_type: true,
+                question_topics: {
+                  include: {
+                    topic: {
+                      include: {
+                        chapter: true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            image: true,
+            mcq_options: {
+              include: {
+                image: true
+              }
+            },
+            match_pairs: {
+              include: {
+                left_image: true,
+                right_image: true
+              }
+            },
+            question_text_topics: {
+              include: {
+                instruction_medium: true,
+                question_topic: {
+                  include: {
+                    topic: true
+                  }
+                }
+              }
+            }
+          }
+        });
+      });
     } catch (error) {
-      this.logger.error(`Failed to update question text ${id}:`, error);
-      if (error instanceof NotFoundException || error instanceof ConflictException) {
+      this.logger.error('Failed to update question text:', error);
+      if (error instanceof NotFoundException) {
         throw error;
       }
       throw new InternalServerErrorException('Failed to update question text');
@@ -323,103 +650,26 @@ export class QuestionTextService {
 
   async remove(id: number): Promise<{ message: string; deleted: { question_text: boolean; question?: boolean } }> {
     try {
-      // First, find the question text to get its question ID
+      // Check if the record exists
       const questionText = await this.findOne(id);
-      const questionId = questionText.question_id;
-
-      // Count how many question texts are associated with this question
-      const questionTextsCount = await this.prisma.question_Text.count({
-        where: { 
-          question_id: questionId 
-        }
+      
+      // Delete the question text (will cascade delete mcq_options, match_pairs, topic_medium associations)
+      await this.prisma.question_Text.delete({
+        where: { id }
       });
-
-      this.logger.log(`Question ${questionId} has ${questionTextsCount} question text(s)`);
-
-      // If this is the only question text for this question, delete the question as well
-      if (questionTextsCount === 1) {
-        this.logger.log(`Deleting question ${questionId} as this is its only question text`);
-        
-        // Delete the parent question (which will cascade delete the question text)
-        await this.prisma.question.delete({
-          where: { id: questionId }
-        });
-        
-        this.logger.log(`Successfully deleted question ${questionId} and its only question text ${id}`);
-        
-        return {
-          message: `Question text ${id} was the only text for question ${questionId}. Both have been deleted.`,
-          deleted: {
-            question_text: true,
-            question: true
-          }
-        };
-      } else {
-        // Delete only the question text
-        await this.prisma.question_Text.delete({
-          where: { id }
-        });
-        
-        this.logger.log(`Successfully deleted question text ${id}. Question ${questionId} still has other question texts.`);
-        
-        return {
-          message: `Question text ${id} deleted. Question ${questionId} still has ${questionTextsCount - 1} other question text(s).`,
-          deleted: {
-            question_text: true
-          }
-        };
-      }
+      
+      return {
+        message: 'Question text deleted successfully',
+        deleted: {
+          question_text: true
+        }
+      };
     } catch (error) {
       this.logger.error(`Failed to delete question text ${id}:`, error);
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to delete question text');
-    }
-  }
-
-  async batchVerify(ids: number[], isVerified: boolean): Promise<{ count: number }> {
-    try {
-      // Check if all IDs exist
-      const existingTexts = await this.prisma.question_Text.findMany({
-        where: {
-          id: {
-            in: ids
-          }
-        },
-        select: {
-          id: true
-        }
-      });
-
-      const existingIds = existingTexts.map(text => text.id);
-      const notFoundIds = ids.filter(id => !existingIds.includes(id));
-
-      if (notFoundIds.length > 0) {
-        throw new NotFoundException(`Some question texts were not found: ${notFoundIds.join(', ')}`);
-      }
-
-      // Update all the specified question texts with the verification status
-      const result = await this.prisma.question_Text.updateMany({
-        where: {
-          id: {
-            in: ids
-          }
-        },
-        data: {
-          is_verified: isVerified
-        } as any // Use type assertion to bypass the type checking
-      });
-
-      this.logger.log(`Updated verification status to ${isVerified} for ${result.count} question texts`);
-
-      return { count: result.count };
-    } catch (error) {
-      this.logger.error(`Failed to batch verify question texts:`, error);
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to batch verify question texts');
+      throw new InternalServerErrorException(`Failed to delete question text ${id}`);
     }
   }
 
@@ -438,48 +688,68 @@ export class QuestionTextService {
       
       // Build where clause
       let where: Prisma.Question_TextWhereInput = {};
-      const questionConditions: any = {};
+      const andConditions: Prisma.Question_TextWhereInput[] = [];
       
-      if (topic_id) {
-        questionConditions.question_topics = {
-          some: {
-            topic_id: topic_id
+      // Question-related filters
+      if (topic_id || chapter_id || question_type_id) {
+        const questionConditions: Prisma.QuestionWhereInput = {};
+        
+        if (question_type_id) {
+          questionConditions.question_type_id = question_type_id;
+        }
+        
+        if (topic_id || chapter_id) {
+          const topicConditions: Prisma.Question_TopicWhereInput = {};
+          
+          if (topic_id) {
+            topicConditions.topic_id = parseInt(String(topic_id), 10);
           }
-        };
-      }
-      
-      if (chapter_id) {
-        questionConditions.question_topics = {
-          some: {
-            topic: {
-              chapter_id: chapter_id
-            }
+          
+          if (chapter_id) {
+            topicConditions.topic = {
+              chapter_id: parseInt(String(chapter_id), 10)
+            };
           }
-        };
-      }
-      
-      if (question_type_id) {
-        questionConditions.question_type_id = question_type_id;
-      }
-      
-      // Apply question conditions if any were set
-      if (Object.keys(questionConditions).length > 0) {
+          
+          questionConditions.question_topics = {
+            some: topicConditions
+          };
+        }
+        
         where.question = questionConditions;
       }
       
+      // Handle instruction_medium_id filter using the junction table
       if (instruction_medium_id) {
         // Ensure instruction_medium_id is a number
         const mediumId = typeof instruction_medium_id === 'string' 
           ? parseInt(instruction_medium_id, 10) 
           : instruction_medium_id;
           
-        where.instruction_medium_id = mediumId;
         this.logger.log(`Filtering question texts with instruction_medium_id: ${mediumId} (without pagination)`);
+        
+        andConditions.push({
+          question_text_topics: {
+            some: {
+              instruction_medium: {
+                id: mediumId
+              }
+            }
+          }
+        });
       }
       
-      // Add is_verified filter if provided
+      // Handle is_verified filter using the junction table
       if (is_verified !== undefined) {
-        where.is_verified = is_verified;
+        this.logger.log(`Filtering question texts with is_verified: ${is_verified} (without pagination)`);
+        
+        andConditions.push({
+          question_text_topics: {
+            some: {
+              is_verified: is_verified
+            }
+          }
+        });
       }
       
       // Add search condition
@@ -490,7 +760,12 @@ export class QuestionTextService {
         };
       }
       
-      // Validate the sort field to ensure it's a valid field in the Question_Text model
+      // If we have AND conditions, add them to the where clause
+      if (andConditions.length > 0) {
+        where.AND = andConditions;
+      }
+      
+      // Make sure we're using valid sort fields
       const validSortFields = Object.values(QuestionTextSortField);
       const validatedSortBy = validSortFields.includes(sort_by as any) 
         ? sort_by as QuestionTextSortField 
@@ -515,7 +790,17 @@ export class QuestionTextService {
           },
           image: true,
           mcq_options: true,
-          match_pairs: true
+          match_pairs: true,
+          question_text_topics: {
+            include: {
+              instruction_medium: true,
+              question_topic: {
+                include: {
+                  topic: true
+                }
+              }
+            }
+          }
         }
       });
       
@@ -533,90 +818,54 @@ export class QuestionTextService {
     }
   }
 
-  async findUntranslatedTexts(mediumId: number, filters: QuestionTextFilters) {
+  // Find question texts that need translation
+  async findUntranslatedTexts(filters: QuestionTextFilters) {
     try {
-      const { 
-        topic_id, 
-        chapter_id, 
+      const {
+        topic_id,
+        chapter_id,
         question_type_id,
-        is_verified,
-        page = 1, 
-        page_size = 10, 
-        sort_by = QuestionTextSortField.CREATED_AT, 
+        page = 1,
+        page_size = 10,
+        sort_by = QuestionTextSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
+        instruction_medium_id,
         search
       } = filters;
-      
-      // First find questions that have texts in other mediums but not in the target medium
-      const questionsWithOtherTexts = await this.prisma.question.findMany({
-        where: {
-          question_texts: {
-            some: {} // Has some texts
-          },
-          NOT: {
-            question_texts: {
-              some: {
-                instruction_medium_id: mediumId
-              }
-            }
-          }
-        },
-        select: {
-          id: true
+
+      // Build where clause
+      let where: Prisma.Question_TextWhereInput = {};
+      const andConditions: Prisma.Question_TextWhereInput[] = [];
+
+      // Question-related filters
+      if (topic_id || chapter_id || question_type_id) {
+        const questionConditions: Prisma.QuestionWhereInput = {};
+        
+        if (question_type_id) {
+          questionConditions.question_type_id = question_type_id;
         }
-      });
-      
-      const questionIds = questionsWithOtherTexts.map(q => q.id);
-      
-      // Build where clause for question texts
-      let where: Prisma.Question_TextWhereInput = {
-        // Only include texts for questions that need translation
-        question_id: {
-          in: questionIds
-        },
-        // Exclude texts in the target medium (should be none anyway)
-        NOT: {
-          instruction_medium_id: mediumId
+        
+        if (topic_id || chapter_id) {
+          const topicConditions: Prisma.Question_TopicWhereInput = {};
+          
+          if (topic_id) {
+            topicConditions.topic_id = parseInt(String(topic_id), 10);
+          }
+          
+          if (chapter_id) {
+            topicConditions.topic = {
+              chapter_id: parseInt(String(chapter_id), 10)
+            };
+          }
+          
+          questionConditions.question_topics = {
+            some: topicConditions
+          };
         }
-      };
-      
-      const questionConditions: any = {};
-      
-      // Add topic filter if provided
-      if (topic_id) {
-        questionConditions.question_topics = {
-          some: {
-            topic_id: topic_id
-          }
-        };
-      }
-      
-      // Add chapter filter if provided
-      if (chapter_id) {
-        questionConditions.question_topics = {
-          some: {
-            topic: {
-              chapter_id: chapter_id
-            }
-          }
-        };
-      }
-      
-      // Add question type filter if provided
-      if (question_type_id) {
-        questionConditions.question_type_id = question_type_id;
-      }
-      
-      // Apply question conditions if any were set
-      if (Object.keys(questionConditions).length > 0) {
+        
         where.question = questionConditions;
       }
-      
-      // Add is_verified filter if provided
-      if (is_verified !== undefined) {
-        where.is_verified = is_verified;
-      }
-      
+
       // Add search condition
       if (search) {
         where.question_text = {
@@ -624,63 +873,110 @@ export class QuestionTextService {
           mode: 'insensitive'
         };
       }
-      
-      // Get total count for pagination metadata
-      const total = await this.prisma.question_Text.count({ where });
-      
-      // Build orderBy object based on sort parameters
-      const orderBy: any = {};
-      
-      // Make sure we're using a valid field for sorting
-      if (Object.values(QuestionTextSortField).includes(sort_by)) {
-        orderBy[sort_by] = sort_order;
-      } else {
-        // Default to created_at if an invalid sort field is provided
-        orderBy[QuestionTextSortField.CREATED_AT] = sort_order;
-      }
-      
-      // Get paginated data with sorting
-      const questionTexts = await this.prisma.question_Text.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * page_size,
-        take: page_size,
-        include: {
-          question: {
-            include: {
-              question_type: true,
-              question_topics: {
-                include: {
-                  topic: true
+
+      // Calculate pagination parameters
+      const skip = (page - 1) * page_size;
+
+      // Make sure we're using valid sort fields
+      const validSortFields = Object.values(QuestionTextSortField);
+      const validatedSortBy = validSortFields.includes(sort_by as any)
+        ? sort_by as QuestionTextSortField
+        : QuestionTextSortField.CREATED_AT;
+
+      // Find question texts that need translation for the specified medium
+      if (instruction_medium_id) {
+        // Ensure instruction_medium_id is a number
+        const mediumId = typeof instruction_medium_id === 'string'
+          ? parseInt(instruction_medium_id, 10)
+          : instruction_medium_id;
+
+        this.logger.log(`Finding untranslated texts for instruction_medium_id: ${mediumId}`);
+
+        // Add condition to find question texts that don't have a record in question_text_topics 
+        // with the specified instruction_medium_id
+        andConditions.push({
+          NOT: {
+            question_text_topics: {
+              some: {
+                instruction_medium: {
+                  id: mediumId
                 }
               }
             }
+          }
+        });
+
+        // If we have AND conditions, add them to the where clause
+        if (andConditions.length > 0) {
+          where.AND = andConditions;
+        }
+
+        // Get count of all matching question texts
+        const totalCount = await this.prisma.question_Text.count({ where });
+
+        // Calculate total pages
+        const totalPages = Math.ceil(totalCount / page_size);
+
+        // Get question texts with pagination
+        const questionTexts = await this.prisma.question_Text.findMany({
+          where,
+          skip,
+          take: page_size,
+          orderBy: {
+            [validatedSortBy]: sort_order
           },
-          instruction_medium: true,
-          image: true,
-          mcq_options: true,
-          match_pairs: true
-        }
-      });
-      
-      // Calculate total pages
-      const total_pages = Math.ceil(total / page_size);
-      
-      return {
-        data: questionTexts,
-        meta: {
-          total,
-          page,
-          page_size,
-          total_pages,
-          sort_by,
-          sort_order,
-          search: search || undefined
-        }
-      };
+          include: {
+            question: {
+              include: {
+                question_type: true,
+                question_topics: {
+                  include: {
+                    topic: {
+                      include: {
+                        chapter: true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            image: true,
+            mcq_options: true,
+            match_pairs: true,
+            question_text_topics: {
+              include: {
+                instruction_medium: true,
+                question_topic: {
+                  include: {
+                    topic: true
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        return {
+          data: questionTexts,
+          meta: {
+            current_page: page,
+            page_size,
+            total_items: totalCount,
+            total_pages: totalPages,
+            sort_by: validatedSortBy,
+            sort_order,
+            search: search || undefined
+          }
+        };
+      } else {
+        throw new BadRequestException('instruction_medium_id is required to find untranslated texts');
+      }
     } catch (error) {
-      this.logger.error('Failed to fetch question texts for translation:', error);
-      throw new InternalServerErrorException('Failed to fetch question texts for translation');
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error('Failed to fetch untranslated question texts:', error);
+      throw new InternalServerErrorException('Failed to fetch untranslated question texts');
     }
   }
 } 
