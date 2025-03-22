@@ -15,52 +15,64 @@ export class QuestionTextTopicMediumController {
 
   @Post()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Create a new question text topic medium association' })
-  @ApiResponse({ status: 201, description: 'Association created successfully' })
+  @ApiOperation({ summary: 'Create a new question text topic medium relation' })
+  @ApiResponse({ status: 201, description: 'Relation created successfully' })
   @ApiResponse({ status: 404, description: 'Question text, question topic, or instruction medium not found' })
   @ApiResponse({ status: 409, description: 'Association already exists' })
-  async create(@Body() createDto: CreateQuestionTextTopicMediumDto) {
-    return await this.questionTextTopicMediumService.create(createDto);
+  create(@Body() createQuestionTextTopicMediumDto: CreateQuestionTextTopicMediumDto) {
+    return this.questionTextTopicMediumService.create(createQuestionTextTopicMediumDto);
   }
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all question text topic medium associations' })
+  @ApiOperation({ summary: 'Find all question text topic medium relations' })
   @ApiQuery({ name: 'question_text_id', required: false, type: Number })
   @ApiQuery({ name: 'question_topic_id', required: false, type: Number })
   @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
   @ApiQuery({ name: 'is_verified', required: false, type: Boolean })
-  async findAll(@Query() filters: QuestionTextTopicMediumFilterDto) {
-    return await this.questionTextTopicMediumService.findAll(filters);
+  @ApiResponse({ status: 200, description: 'Returns all relations' })
+  findAll(@Query() filters: QuestionTextTopicMediumFilterDto) {
+    return this.questionTextTopicMediumService.findAll(filters);
   }
 
   @Get(':id')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get question text topic medium association by ID' })
-  @ApiResponse({ status: 200, description: 'Returns the association' })
+  @ApiOperation({ summary: 'Find one question text topic medium relation by ID' })
+  @ApiResponse({ status: 200, description: 'Returns the relation' })
   @ApiResponse({ status: 404, description: 'Association not found' })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
-    return await this.questionTextTopicMediumService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.questionTextTopicMediumService.findOne(id);
   }
 
   @Put(':id')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Update a question text topic medium association' })
-  @ApiResponse({ status: 200, description: 'Association updated successfully' })
+  @ApiOperation({ summary: 'Update a question text topic medium relation' })
+  @ApiResponse({ status: 200, description: 'Relation updated successfully' })
   @ApiResponse({ status: 404, description: 'Association not found' })
-  async update(
+  update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateDto: UpdateQuestionTextTopicMediumDto
+    @Body() updateQuestionTextTopicMediumDto: UpdateQuestionTextTopicMediumDto,
   ) {
-    return await this.questionTextTopicMediumService.update(id, updateDto);
+    return this.questionTextTopicMediumService.update(id, updateQuestionTextTopicMediumDto);
   }
 
   @Delete(':id')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Delete a question text topic medium association' })
-  @ApiResponse({ status: 200, description: 'Association deleted successfully' })
+  @ApiOperation({ summary: 'Delete a question text topic medium relation' })
+  @ApiResponse({ status: 200, description: 'Relation deleted successfully' })
   @ApiResponse({ status: 404, description: 'Association not found' })
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.questionTextTopicMediumService.remove(id);
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.questionTextTopicMediumService.remove(id);
+  }
+
+  @Put('batch/verify')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Batch verify/unverify questions' })
+  @ApiResponse({ status: 200, description: 'Updated verification status for multiple records' })
+  batchUpdateVerificationStatus(@Body() batchUpdateDto: { ids: number[], is_verified: boolean }) {
+    return this.questionTextTopicMediumService.batchUpdateVerificationStatus(
+      batchUpdateDto.ids,
+      batchUpdateDto.is_verified
+    );
   }
 } 

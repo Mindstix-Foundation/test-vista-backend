@@ -4,41 +4,6 @@ import { Type } from 'class-transformer';
 import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
 import { Transform } from 'class-transformer';
 
-// Add a new DTO for verification
-export class VerifyQuestionTextDto {
-  @ApiProperty({
-    example: true,
-    description: 'Set verification status',
-    required: true
-  })
-  @IsBoolean()
-  @IsNotEmpty()
-  is_verified: boolean;
-}
-
-// Add a DTO for batch verification
-export class BatchVerifyQuestionTextDto {
-  @ApiProperty({
-    example: [1, 2, 3],
-    description: 'IDs of question texts to verify',
-    required: true,
-    type: [Number]
-  })
-  @IsInt({ each: true })
-  @IsNotEmpty()
-  @Type(() => Number)
-  ids: number[];
-
-  @ApiProperty({
-    example: true,
-    description: 'Set verification status',
-    required: true
-  })
-  @IsBoolean()
-  @IsNotEmpty()
-  is_verified: boolean;
-}
-
 // DTO for creating MCQ options
 export class CreateMcqOptionDto {
   @ApiProperty({
@@ -57,25 +22,78 @@ export class CreateMcqOptionDto {
   @IsBoolean()
   @IsOptional()
   is_correct?: boolean = false;
+
+  @ApiProperty({
+    description: 'ID of the image to associate with the option',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  image_id?: number;
+}
+
+// DTO for updating MCQ options (including ID)
+export class UpdateMcqOptionDto extends CreateMcqOptionDto {
+  @ApiProperty({
+    description: 'ID of the MCQ option',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  id?: number;
 }
 
 // DTO for creating match pairs
 export class CreateMatchPairDto {
   @ApiProperty({
     description: 'Left side text of the match pair',
-    example: 'Left side text'
+    example: 'Left side text',
+    required: false
   })
   @IsString()
-  @IsNotEmpty()
-  left_text: string;
+  @IsOptional()
+  left_text?: string;
 
   @ApiProperty({
     description: 'Right side text of the match pair',
-    example: 'Right side text'
+    example: 'Right side text',
+    required: false
   })
   @IsString()
-  @IsNotEmpty()
-  right_text: string;
+  @IsOptional()
+  right_text?: string;
+
+  @ApiProperty({
+    description: 'ID of the left image to associate with the match pair',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  left_image_id?: number;
+
+  @ApiProperty({
+    description: 'ID of the right image to associate with the match pair',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  right_image_id?: number;
+}
+
+// DTO for updating match pairs (including ID)
+export class UpdateMatchPairDto extends CreateMatchPairDto {
+  @ApiProperty({
+    description: 'ID of the match pair',
+    example: 1,
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  id?: number;
 }
 
 export class CreateQuestionTextDto {
@@ -86,14 +104,6 @@ export class CreateQuestionTextDto {
   @IsInt()
   @IsNotEmpty()
   question_id: number;
-
-  @ApiProperty({
-    example: 1,
-    description: 'ID of the instruction medium'
-  })
-  @IsInt()
-  @IsOptional()
-  instruction_medium_id?: number;
 
   @ApiProperty({
     example: 1,
@@ -111,27 +121,23 @@ export class CreateQuestionTextDto {
   @IsString()
   @IsNotEmpty()
   question_text: string;
-  
+
   @ApiProperty({
-    example: false,
-    description: 'Whether this question text is verified',
-    required: false,
-    default: false
+    description: 'Array of MCQ options for this question text',
+    type: [CreateMcqOptionDto],
+    required: false
   })
-  @IsBoolean()
-  @IsOptional()
-  is_verified?: boolean;
-
-  @IsInt()
-  @IsOptional()
-  topic_id?: number;
-
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => CreateMcqOptionDto)
   mcq_options?: CreateMcqOptionDto[];
 
+  @ApiProperty({
+    description: 'Array of match pairs for this question text',
+    type: [CreateMatchPairDto],
+    required: false
+  })
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
@@ -159,53 +165,26 @@ export class UpdateQuestionTextDto {
   image_id?: number;
 
   @ApiProperty({
-    description: 'ID of the instruction medium',
-    example: 1,
-    required: false
-  })
-  @IsInt()
-  @IsOptional()
-  instruction_medium_id?: number;
-
-  @ApiProperty({
-    description: 'ID of the topic to associate with this question text',
-    example: 1,
-    required: false
-  })
-  @IsInt()
-  @IsOptional()
-  topic_id?: number;
-
-  @ApiProperty({
-    description: 'Whether the question text is verified',
-    example: true,
-    required: false
-  })
-  @IsBoolean()
-  @IsOptional()
-  is_verified?: boolean;
-
-  @ApiProperty({
     description: 'Array of MCQ options for this question text',
-    type: [CreateMcqOptionDto],
+    type: [UpdateMcqOptionDto],
     required: false
   })
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
-  @Type(() => CreateMcqOptionDto)
-  mcq_options?: CreateMcqOptionDto[];
+  @Type(() => UpdateMcqOptionDto)
+  mcq_options?: UpdateMcqOptionDto[];
 
   @ApiProperty({
     description: 'Array of match pairs for this question text',
-    type: [CreateMatchPairDto],
+    type: [UpdateMatchPairDto],
     required: false
   })
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })
-  @Type(() => CreateMatchPairDto)
-  match_pairs?: CreateMatchPairDto[];
+  @Type(() => UpdateMatchPairDto)
+  match_pairs?: UpdateMatchPairDto[];
 }
 
 export class QuestionTextFilterDto extends PaginationDto {
@@ -262,9 +241,18 @@ export class QuestionTextFilterDto extends PaginationDto {
   })
   @IsBoolean({ message: 'is_verified must be a boolean' })
   is_verified?: boolean;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by question ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'question_id must be an integer' })
+  question_id?: number;
 }
 
-// Update the enum for question text-specific sort fields
 export enum QuestionTextSortField {
   QUESTION_ID = 'question_id',
   QUESTION_TEXT = 'question_text',

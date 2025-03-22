@@ -1,6 +1,13 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionTextDto, UpdateQuestionTextDto, QuestionTextFilterDto, QuestionTextSortField } from './dto/question-text.dto';
+import { 
+  CreateQuestionTextDto, 
+  UpdateQuestionTextDto, 
+  QuestionTextFilterDto, 
+  QuestionTextSortField,
+  UpdateMcqOptionDto,
+  UpdateMatchPairDto
+} from './dto/question-text.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
 
@@ -10,6 +17,7 @@ interface QuestionTextFilters {
   question_type_id?: number;
   instruction_medium_id?: number;
   is_verified?: boolean;
+  question_id?: number;
   page?: number;
   page_size?: number;
   sort_by?: QuestionTextSortField;
@@ -30,10 +38,7 @@ export class QuestionTextService {
         question_text, 
         mcq_options, 
         match_pairs,
-        image_id,
-        instruction_medium_id,
-        topic_id,
-        is_verified = false 
+        image_id
       } = createQuestionTextDto;
 
       // Check if the question exists
@@ -48,84 +53,88 @@ export class QuestionTextService {
         throw new NotFoundException(`Question with ID ${question_id} not found`);
       }
 
-      // Check if the instruction medium exists
-      if (instruction_medium_id) {
-        const medium = await this.prisma.instruction_Medium.findUnique({
-          where: { id: instruction_medium_id }
+      // Check if image exists if image_id is provided
+      if (image_id !== undefined && image_id !== null) {
+        const image = await this.prisma.image.findUnique({
+          where: { id: image_id }
         });
 
-        if (!medium) {
-          throw new NotFoundException(`Instruction medium with ID ${instruction_medium_id} not found`);
+        if (!image) {
+          throw new NotFoundException(`Image with ID ${image_id} not found`);
         }
       }
 
-      // Get the topic if topic_id is provided, otherwise use the first topic of the question
-      let selectedTopicId = topic_id;
-      
-      if (!selectedTopicId && question.question_topics.length > 0) {
-        selectedTopicId = question.question_topics[0].id;
-      }
-      
-      if (!selectedTopicId) {
-        throw new BadRequestException('No topic_id provided and question has no topics');
-      }
-
-      // Check if the topic exists and is associated with the question
-      const questionTopic = await this.prisma.question_Topic.findFirst({
-        where: {
-          id: selectedTopicId,
-          question_id: question_id
-        }
-      });
-
-      if (!questionTopic) {
-        throw new NotFoundException(
-          `Topic with ID ${selectedTopicId} not found or not associated with question ${question_id}`
-        );
-      }
-
+      // Create the question text and related items
       return await this.prisma.$transaction(async (prisma) => {
-        // Create the question text
+        // Create the question text with image_id only if it's provided
         const newQuestionText = await prisma.question_Text.create({
           data: {
             question_id,
             question_text,
-            image_id
+            ...(image_id !== undefined && image_id !== null ? { image_id } : {})
           }
         });
 
-        // Create the question_text_topic_medium junction record
-        if (instruction_medium_id) {
-          await prisma.question_Text_Topic_Medium.create({
-            data: {
-              question_text_id: newQuestionText.id,
-              question_topic_id: selectedTopicId,
-              instruction_medium_id,
-              is_verified
-            }
-          });
-        }
-
         // Create MCQ options if provided
         if (mcq_options && mcq_options.length > 0) {
-          await prisma.mcq_Option.createMany({
-            data: mcq_options.map(option => ({
-              option_text: option.option_text,
-              is_correct: option.is_correct ?? false,
-              question_text_id: newQuestionText.id
-            }))
-          });
+          await Promise.all(mcq_options.map(async (option) => {
+            // Check if option image exists if provided
+            if (option.image_id !== undefined && option.image_id !== null) {
+              const image = await this.prisma.image.findUnique({
+                where: { id: option.image_id }
+              });
+              
+              if (!image) {
+                throw new NotFoundException(`Image with ID ${option.image_id} for MCQ option not found`);
+              }
+            }
+            
+            return prisma.mcq_Option.create({
+              data: {
+                option_text: option.option_text,
+                is_correct: option.is_correct ?? false,
+                ...(option.image_id !== undefined && option.image_id !== null ? { image_id: option.image_id } : {}),
+                question_text_id: newQuestionText.id
+              }
+            });
+          }));
         }
 
         // Create match pairs if provided
         if (match_pairs && match_pairs.length > 0) {
-          await prisma.match_Pair.createMany({
-            data: match_pairs.map(pair => ({
-              left_text: pair.left_text,
-              right_text: pair.right_text,
-              question_text_id: newQuestionText.id
-            }))
-          });
+          await Promise.all(match_pairs.map(async (pair) => {
+            // Check if left_image exists if provided
+            if (pair.left_image_id !== undefined && pair.left_image_id !== null) {
+              const leftImage = await this.prisma.image.findUnique({
+                where: { id: pair.left_image_id }
+              });
+              
+              if (!leftImage) {
+                throw new NotFoundException(`Left image with ID ${pair.left_image_id} for match pair not found`);
+              }
+            }
+            
+            // Check if right_image exists if provided
+            if (pair.right_image_id !== undefined && pair.right_image_id !== null) {
+              const rightImage = await this.prisma.image.findUnique({
+                where: { id: pair.right_image_id }
+              });
+              
+              if (!rightImage) {
+                throw new NotFoundException(`Right image with ID ${pair.right_image_id} for match pair not found`);
+              }
+            }
+            
+            return prisma.match_Pair.create({
+              data: {
+                ...(pair.left_text ? { left_text: pair.left_text } : {}),
+                ...(pair.right_text ? { right_text: pair.right_text } : {}),
+                ...(pair.left_image_id !== undefined && pair.left_image_id !== null ? { left_image_id: pair.left_image_id } : {}),
+                ...(pair.right_image_id !== undefined && pair.right_image_id !== null ? { right_image_id: pair.right_image_id } : {}),
+                question_text_id: newQuestionText.id
+              }
+            });
+          }));
         }
 
         // Fetch the created question text with relations
@@ -147,8 +156,17 @@ export class QuestionTextService {
               }
             },
             image: true,
-            mcq_options: true,
-            match_pairs: true,
+            mcq_options: {
+              include: {
+                image: true
+              }
+            },
+            match_pairs: {
+              include: {
+                left_image: true,
+                right_image: true
+              }
+            },
             question_text_topics: {
               include: {
                 instruction_medium: true,
@@ -163,10 +181,12 @@ export class QuestionTextService {
         });
       });
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      this.logger.error('Failed to create question text:', error);
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException ||
+          error instanceof ConflictException) {
         throw error;
       }
-      this.logger.error('Failed to create question text:', error);
       throw new InternalServerErrorException('Failed to create question text');
     }
   }
@@ -379,13 +399,21 @@ export class QuestionTextService {
     }
   }
 
-  async update(id: number, updateDto: UpdateQuestionTextDto) {
+  async update(id: number, updateQuestionTextDto: UpdateQuestionTextDto) {
     try {
+      const { 
+        question_text, 
+        mcq_options, 
+        match_pairs,
+        image_id
+      } = updateQuestionTextDto;
+
       // First check if the question text exists
       const questionText = await this.prisma.question_Text.findUnique({
         where: { id },
         include: {
-          question_text_topics: true
+          mcq_options: true,
+          match_pairs: true
         }
       });
 
@@ -393,114 +421,182 @@ export class QuestionTextService {
         throw new NotFoundException(`Question text with ID ${id} not found`);
       }
 
-      // Check if instruction medium exists if provided
-      if (updateDto.instruction_medium_id) {
-        const medium = await this.prisma.instruction_Medium.findUnique({
-          where: { id: updateDto.instruction_medium_id }
+      // Check if image exists if image_id is provided
+      if (image_id !== undefined && image_id !== null) {
+        const image = await this.prisma.image.findUnique({
+          where: { id: image_id }
         });
-        
-        if (!medium) {
-          throw new NotFoundException(`Instruction medium with ID ${updateDto.instruction_medium_id} not found`);
+
+        if (!image) {
+          throw new NotFoundException(`Image with ID ${image_id} not found`);
         }
       }
 
-      // Check if topic exists if provided
-      if (updateDto.topic_id) {
-        const questionTopic = await this.prisma.question_Topic.findFirst({
-          where: {
-            id: updateDto.topic_id,
-            question_id: questionText.question_id
-          }
-        });
-        
-        if (!questionTopic) {
-          throw new NotFoundException(
-            `Topic with ID ${updateDto.topic_id} not found or not associated with this question`
-          );
-        }
-      }
-
-      // Execute update in a transaction
+      // Process update in a transaction
       return await this.prisma.$transaction(async (prisma) => {
-        // Update the question text basic fields
-        const updatedQuestionText = await prisma.question_Text.update({
+        // Update the question text
+        await prisma.question_Text.update({
           where: { id },
           data: {
-            question_text: updateDto.question_text,
-            image_id: updateDto.image_id
+            question_text,
+            ...(image_id !== undefined ? { image_id } : {})
           }
         });
 
-        // Update or create the question_text_topic_medium junction record
-        if (updateDto.instruction_medium_id !== undefined || 
-            updateDto.is_verified !== undefined || 
-            updateDto.topic_id !== undefined) {
+        // Process MCQ options if provided
+        if (mcq_options) {
+          // Explicitly type mcq_options as UpdateMcqOptionDto[]
+          const typedMcqOptions: UpdateMcqOptionDto[] = mcq_options;
           
-          // Get current topic relationship
-          const currentRelation = questionText.question_text_topics[0];
-          
-          if (currentRelation) {
-            // Update existing relationship
-            await prisma.question_Text_Topic_Medium.update({
-              where: { id: currentRelation.id },
-              data: {
-                instruction_medium_id: updateDto.instruction_medium_id,
-                is_verified: updateDto.is_verified,
-                question_topic_id: updateDto.topic_id
-              }
-            });
-          } else if (updateDto.instruction_medium_id && updateDto.topic_id) {
-            // Create new relationship if none exists and we have the required IDs
-            await prisma.question_Text_Topic_Medium.create({
-              data: {
-                question_text_id: id,
-                question_topic_id: updateDto.topic_id,
-                instruction_medium_id: updateDto.instruction_medium_id,
-                is_verified: updateDto.is_verified || false
-              }
-            });
-          }
-        }
-
-        // Update MCQ options if provided
-        if (updateDto.mcq_options) {
-          // Delete existing options
-          await prisma.mcq_Option.deleteMany({
+          // Get existing MCQ options
+          const existingOptions = await prisma.mcq_Option.findMany({
             where: { question_text_id: id }
           });
           
-          // Create new options
-          if (updateDto.mcq_options.length > 0) {
-            await prisma.mcq_Option.createMany({
-              data: updateDto.mcq_options.map(option => ({
-                option_text: option.option_text,
-                is_correct: option.is_correct ?? false,
-                question_text_id: id
-              }))
+          // Create a map of existing options by ID for easy lookup
+          const existingOptionsMap = new Map(
+            existingOptions.map(option => [option.id, option])
+          );
+          
+          // Process each MCQ option
+          for (const option of typedMcqOptions) {
+            // Check if option image exists if provided
+            if (option.image_id !== undefined && option.image_id !== null) {
+              const image = await this.prisma.image.findUnique({
+                where: { id: option.image_id }
+              });
+              
+              if (!image) {
+                throw new NotFoundException(`Image with ID ${option.image_id} for MCQ option not found`);
+              }
+            }
+            
+            // If option has an ID, update it, otherwise create a new one
+            if (option.id) {
+              if (existingOptionsMap.has(option.id)) {
+                await prisma.mcq_Option.update({
+                  where: { id: option.id },
+                  data: {
+                    option_text: option.option_text,
+                    is_correct: option.is_correct,
+                    ...(option.image_id !== undefined ? { image_id: option.image_id } : {})
+                  }
+                });
+                
+                // Remove from map to track what's been processed
+                existingOptionsMap.delete(option.id);
+              } else {
+                throw new NotFoundException(`MCQ option with ID ${option.id} not found`);
+              }
+            } else {
+              // Create a new option
+              await prisma.mcq_Option.create({
+                data: {
+                  question_text_id: id,
+                  option_text: option.option_text,
+                  is_correct: option.is_correct ?? false,
+                  ...(option.image_id !== undefined && option.image_id !== null ? { image_id: option.image_id } : {})
+                }
+              });
+            }
+          }
+          
+          // Delete any remaining options that weren't updated
+          if (existingOptionsMap.size > 0) {
+            await prisma.mcq_Option.deleteMany({
+              where: {
+                id: {
+                  in: Array.from(existingOptionsMap.keys())
+                }
+              }
             });
           }
         }
 
-        // Update match pairs if provided
-        if (updateDto.match_pairs) {
-          // Delete existing pairs
-          await prisma.match_Pair.deleteMany({
+        // Process match pairs if provided
+        if (match_pairs) {
+          // Explicitly type match_pairs as UpdateMatchPairDto[]
+          const typedMatchPairs: UpdateMatchPairDto[] = match_pairs;
+          
+          // Get existing match pairs
+          const existingPairs = await prisma.match_Pair.findMany({
             where: { question_text_id: id }
           });
           
-          // Create new pairs
-          if (updateDto.match_pairs.length > 0) {
-            await prisma.match_Pair.createMany({
-              data: updateDto.match_pairs.map(pair => ({
-                left_text: pair.left_text,
-                right_text: pair.right_text,
-                question_text_id: id
-              }))
+          // Create a map of existing pairs by ID for easy lookup
+          const existingPairsMap = new Map(
+            existingPairs.map(pair => [pair.id, pair])
+          );
+          
+          // Process each match pair
+          for (const pair of typedMatchPairs) {
+            // Check if left image exists if provided
+            if (pair.left_image_id !== undefined && pair.left_image_id !== null) {
+              const leftImage = await this.prisma.image.findUnique({
+                where: { id: pair.left_image_id }
+              });
+              
+              if (!leftImage) {
+                throw new NotFoundException(`Left image with ID ${pair.left_image_id} for match pair not found`);
+              }
+            }
+            
+            // Check if right image exists if provided
+            if (pair.right_image_id !== undefined && pair.right_image_id !== null) {
+              const rightImage = await this.prisma.image.findUnique({
+                where: { id: pair.right_image_id }
+              });
+              
+              if (!rightImage) {
+                throw new NotFoundException(`Right image with ID ${pair.right_image_id} for match pair not found`);
+              }
+            }
+            
+            // If pair has an ID, update it, otherwise create a new one
+            if (pair.id) {
+              if (existingPairsMap.has(pair.id)) {
+                await prisma.match_Pair.update({
+                  where: { id: pair.id },
+                  data: {
+                    ...(pair.left_text ? { left_text: pair.left_text } : {}),
+                    ...(pair.right_text ? { right_text: pair.right_text } : {}),
+                    ...(pair.left_image_id !== undefined ? { left_image_id: pair.left_image_id } : {}),
+                    ...(pair.right_image_id !== undefined ? { right_image_id: pair.right_image_id } : {})
+                  }
+                });
+                
+                // Remove from map to track what's been processed
+                existingPairsMap.delete(pair.id);
+              } else {
+                throw new NotFoundException(`Match pair with ID ${pair.id} not found`);
+              }
+            } else {
+              // Create a new pair
+              await prisma.match_Pair.create({
+                data: {
+                  question_text_id: id,
+                  ...(pair.left_text ? { left_text: pair.left_text } : {}),
+                  ...(pair.right_text ? { right_text: pair.right_text } : {}),
+                  ...(pair.left_image_id !== undefined && pair.left_image_id !== null ? { left_image_id: pair.left_image_id } : {}),
+                  ...(pair.right_image_id !== undefined && pair.right_image_id !== null ? { right_image_id: pair.right_image_id } : {})
+                }
+              });
+            }
+          }
+          
+          // Delete any remaining pairs that weren't updated
+          if (existingPairsMap.size > 0) {
+            await prisma.match_Pair.deleteMany({
+              where: {
+                id: {
+                  in: Array.from(existingPairsMap.keys())
+                }
+              }
             });
           }
         }
 
-        // Return the updated question text with all relations
+        // Return the updated question text with relations
         return await prisma.question_Text.findUnique({
           where: { id },
           include: {
@@ -519,8 +615,17 @@ export class QuestionTextService {
               }
             },
             image: true,
-            mcq_options: true,
-            match_pairs: true,
+            mcq_options: {
+              include: {
+                image: true
+              }
+            },
+            match_pairs: {
+              include: {
+                left_image: true,
+                right_image: true
+              }
+            },
             question_text_topics: {
               include: {
                 instruction_medium: true,
@@ -535,113 +640,36 @@ export class QuestionTextService {
         });
       });
     } catch (error) {
+      this.logger.error('Failed to update question text:', error);
       if (error instanceof NotFoundException) {
         throw error;
       }
-      this.logger.error(`Failed to update question text with ID ${id}:`, error);
-      throw new InternalServerErrorException(`Failed to update question text with ID ${id}`);
+      throw new InternalServerErrorException('Failed to update question text');
     }
   }
 
   async remove(id: number): Promise<{ message: string; deleted: { question_text: boolean; question?: boolean } }> {
     try {
-      // First, find the question text to get its question ID
+      // Check if the record exists
       const questionText = await this.findOne(id);
-      const questionId = questionText.question_id;
-
-      // Count how many question texts are associated with this question
-      const questionTextsCount = await this.prisma.question_Text.count({
-        where: { 
-          question_id: questionId 
-        }
+      
+      // Delete the question text (will cascade delete mcq_options, match_pairs, topic_medium associations)
+      await this.prisma.question_Text.delete({
+        where: { id }
       });
-
-      this.logger.log(`Question ${questionId} has ${questionTextsCount} question text(s)`);
-
-      // If this is the only question text for this question, delete the question as well
-      if (questionTextsCount === 1) {
-        this.logger.log(`Deleting question ${questionId} as this is its only question text`);
-        
-        // Delete the parent question (which will cascade delete the question text)
-        await this.prisma.question.delete({
-          where: { id: questionId }
-        });
-        
-        this.logger.log(`Successfully deleted question ${questionId} and its only question text ${id}`);
-        
-        return {
-          message: `Question text ${id} was the only text for question ${questionId}. Both have been deleted.`,
-          deleted: {
-            question_text: true,
-            question: true
-          }
-        };
-      } else {
-        // Delete only the question text
-        await this.prisma.question_Text.delete({
-          where: { id }
-        });
-        
-        this.logger.log(`Successfully deleted question text ${id}. Question ${questionId} still has other question texts.`);
-        
-        return {
-          message: `Question text ${id} deleted. Question ${questionId} still has ${questionTextsCount - 1} other question text(s).`,
-          deleted: {
-            question_text: true
-          }
-        };
-      }
+      
+      return {
+        message: 'Question text deleted successfully',
+        deleted: {
+          question_text: true
+        }
+      };
     } catch (error) {
       this.logger.error(`Failed to delete question text ${id}:`, error);
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to delete question text');
-    }
-  }
-
-  async batchVerify(ids: number[], isVerified: boolean): Promise<{ count: number }> {
-    try {
-      // Check if all IDs exist
-      const existingTexts = await this.prisma.question_Text.findMany({
-        where: {
-          id: {
-            in: ids
-          }
-        },
-        select: {
-          id: true
-        }
-      });
-
-      const existingIds = existingTexts.map(text => text.id);
-      const notFoundIds = ids.filter(id => !existingIds.includes(id));
-
-      if (notFoundIds.length > 0) {
-        throw new NotFoundException(`Some question texts were not found: ${notFoundIds.join(', ')}`);
-      }
-
-      // Update all the specified question texts with the verification status
-      const result = await this.prisma.question_Text.updateMany({
-        where: {
-          id: {
-            in: ids
-          }
-        },
-        data: {
-          is_verified: isVerified
-        } as any // Use type assertion to bypass the type checking
-      });
-
-      this.logger.log(`Updated verification status to ${isVerified} for ${result.count} question texts`);
-
-      return { count: result.count };
-    } catch (error) {
-      this.logger.error(`Failed to batch verify question texts:`, error);
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Failed to batch verify question texts');
+      throw new InternalServerErrorException(`Failed to delete question text ${id}`);
     }
   }
 

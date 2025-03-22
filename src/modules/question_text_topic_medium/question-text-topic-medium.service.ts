@@ -181,25 +181,56 @@ export class QuestionTextTopicMediumService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the association exists
-      const existingAssociation = await this.prisma.question_Text_Topic_Medium.findUnique({
-        where: { id }
-      });
-
-      if (!existingAssociation) {
-        throw new NotFoundException(`Question text topic medium association with ID ${id} not found`);
-      }
-
-      // Delete the association
+      // Check if the record exists
+      const record = await this.findOne(id);
+      
+      // Delete the record
       await this.prisma.question_Text_Topic_Medium.delete({
         where: { id }
       });
     } catch (error) {
-      this.logger.error(`Failed to delete question text topic medium association with ID ${id}:`, error);
-      if (error instanceof NotFoundException) {
-        throw error;
+      this.logger.error(`Error removing question text topic medium association with ID ${id}:`, error);
+      throw error;
+    }
+  }
+
+  async batchUpdateVerificationStatus(ids: number[], is_verified: boolean) {
+    try {
+      // Validate if all IDs exist
+      const existingRecords = await this.prisma.question_Text_Topic_Medium.findMany({
+        where: {
+          id: {
+            in: ids
+          }
+        }
+      });
+
+      if (existingRecords.length !== ids.length) {
+        const existingIds = existingRecords.map(record => record.id);
+        const missingIds = ids.filter(id => !existingIds.includes(id));
+        throw new NotFoundException(`Some associations were not found: ${missingIds.join(', ')}`);
       }
-      throw new InternalServerErrorException('Failed to delete question text topic medium association');
+
+      // Batch update
+      const result = await this.prisma.question_Text_Topic_Medium.updateMany({
+        where: {
+          id: {
+            in: ids
+          }
+        },
+        data: {
+          is_verified,
+          updated_at: new Date()
+        }
+      });
+
+      return {
+        affected: result.count,
+        is_verified
+      };
+    } catch (error) {
+      this.logger.error('Error in batch update verification status:', error);
+      throw error;
     }
   }
 } 
