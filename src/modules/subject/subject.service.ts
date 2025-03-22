@@ -138,27 +138,11 @@ export class SubjectService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if subject exists with its relationships
+      // Check if subject exists with its board
       const subject = await this.prisma.subject.findUnique({
         where: { id },
         include: {
-          board: true,
-          medium_standard_subjects: {
-            include: {
-              instruction_medium: true,
-              standard: true,
-              chapters: {
-                include: {
-                  topics: true
-                }
-              },
-              teacher_subjects: {
-                include: {
-                  user: true
-                }
-              }
-            }
-          }
+          board: true
         }
       });
 
@@ -166,17 +150,34 @@ export class SubjectService {
         throw new NotFoundException(`Subject with ID ${id} not found`);
       }
 
+      // Get medium standard subjects
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
+        where: { subject_id: id },
+        include: {
+          teacher_subjects: {
+            include: {
+              user: true
+            }
+          }
+        }
+      });
+
+      // Get chapters directly related to this subject
+      const chapters = await this.prisma.chapter.findMany({
+        where: { subject_id: id },
+        include: {
+          topics: true
+        }
+      });
+
       // Get counts of related entities for informative message
       const relatedCounts = {
-        mediumStandards: subject.medium_standard_subjects.length,
-        teachers: new Set(subject.medium_standard_subjects.flatMap(mss => 
+        mediumStandards: mediumStandardSubjects.length,
+        teachers: new Set(mediumStandardSubjects.flatMap(mss => 
           mss.teacher_subjects.map(ts => ts.user_id)
         )).size,
-        chapters: subject.medium_standard_subjects.reduce((sum, mss) => 
-          sum + mss.chapters.length, 0),
-        topics: subject.medium_standard_subjects.reduce((sum, mss) => 
-          sum + mss.chapters.reduce((chapterSum, chapter) => 
-            chapterSum + chapter.topics.length, 0), 0)
+        chapters: chapters.length,
+        topics: chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
       };
 
       // Log what will be deleted

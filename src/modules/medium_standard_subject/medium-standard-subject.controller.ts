@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { MediumStandardSubjectService } from './medium-standard-subject.service';
 import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
+import { GetMediumsQueryDto, MediumsResponse } from './dto/get-mediums.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -45,6 +46,26 @@ export class MediumStandardSubjectController {
     );
   }
 
+  @Get('check-mediums')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Check if a standard and subject have multiple instruction mediums' })
+  @ApiQuery({ name: 'standard_id', required: true, type: Number, description: 'Standard ID' })
+  @ApiQuery({ name: 'subject_id', required: true, type: Number, description: 'Subject ID' })
+  @ApiQuery({ name: 'board_id', required: true, type: Number, description: 'Board ID' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns whether multiple instruction mediums exist and their details',
+    type: MediumsResponse
+  })
+  @ApiResponse({ status: 404, description: 'Standard or subject not found' })
+  async getMediumsForStandardSubject(@Query() query: GetMediumsQueryDto) {
+    return await this.mssService.getMediumsForStandardSubject(
+      query.standard_id, 
+      query.subject_id, 
+      query.board_id
+    );
+  }
+
   @Get('medium/:mediumId/standard/:standardId')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get subjects for medium and standard' })
@@ -59,6 +80,15 @@ export class MediumStandardSubjectController {
     return await this.mssService.findByMediumAndStandard(mediumId, standardId, boardId);
   }
 
+  @Get(':id')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get medium standard subject by ID' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Returns the medium standard subject' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium standard subject not found' })
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    return await this.mssService.findOne(id);
+  }
+
   @Delete(':id')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -68,14 +98,5 @@ export class MediumStandardSubjectController {
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Cannot delete due to existing relationships' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.mssService.remove(id);
-  }
-
-  @Get(':id')
-  @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get medium standard subject by ID' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns the medium standard subject' })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium standard subject not found' })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
-    return await this.mssService.findOne(id);
   }
 } 

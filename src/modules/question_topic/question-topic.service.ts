@@ -145,7 +145,8 @@ export class QuestionTopicService {
             include: {
               chapter: {
                 include: {
-                  medium_standard_subject: true
+                  subject: true,
+                  standard: true
                 }
               }
             }

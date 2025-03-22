@@ -184,26 +184,11 @@ export class StandardService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if standard exists with its relationships
+      // Check if standard exists with its board
       const standard = await this.prisma.standard.findUnique({
         where: { id },
         include: {
-          board: true,
-          school_standards: {
-            include: {
-              teacher_subjects: true,
-              school: true
-            }
-          },
-          medium_standard_subjects: {
-            include: {
-              chapters: {
-                include: {
-                  topics: true
-                }
-              }
-            }
-          }
+          board: true
         }
       });
 
@@ -211,18 +196,37 @@ export class StandardService {
         throw new NotFoundException(`Standard with ID ${id} not found`);
       }
 
+      // Get related school standards
+      const schoolStandards = await this.prisma.school_Standard.findMany({
+        where: { standard_id: id },
+        include: {
+          teacher_subjects: true,
+          school: true
+        }
+      });
+
+      // Get medium standard subjects
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
+        where: { standard_id: id }
+      });
+
+      // Get chapters directly related to this standard
+      const chapters = await this.prisma.chapter.findMany({
+        where: { standard_id: id },
+        include: {
+          topics: true
+        }
+      });
+
       // Get counts of related entities for informative message
       const relatedCounts = {
-        schools: standard.school_standards.length,
-        teachers: new Set(standard.school_standards.flatMap(ss => 
+        schools: schoolStandards.length,
+        teachers: new Set(schoolStandards.flatMap(ss => 
           ss.teacher_subjects.map(ts => ts.user_id)
         )).size,
-        mediumSubjects: standard.medium_standard_subjects.length,
-        chapters: standard.medium_standard_subjects.reduce((sum, mss) => 
-          sum + mss.chapters.length, 0),
-        topics: standard.medium_standard_subjects.reduce((sum, mss) => 
-          sum + mss.chapters.reduce((chapterSum, chapter) => 
-            chapterSum + chapter.topics.length, 0), 0)
+        mediumSubjects: mediumStandardSubjects.length,
+        chapters: chapters.length,
+        topics: chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
       };
 
       // Log what will be deleted

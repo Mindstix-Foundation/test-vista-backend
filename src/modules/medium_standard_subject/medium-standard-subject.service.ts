@@ -237,16 +237,11 @@ export class MediumStandardSubjectService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if medium standard subject exists with its relationships
+      // Check if medium standard subject exists
       const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
         where: { id },
         include: {
-          teacher_subjects: true,
-          chapters: {
-            include: {
-              topics: true
-            }
-          }
+          teacher_subjects: true
         }
       });
 
@@ -254,11 +249,22 @@ export class MediumStandardSubjectService {
         throw new NotFoundException(`Medium standard subject with ID ${id} not found`);
       }
 
+      // Get chapters related to this subject and standard combination
+      const chapters = await this.prisma.chapter.findMany({
+        where: {
+          subject_id: mediumStandardSubject.subject_id,
+          standard_id: mediumStandardSubject.standard_id
+        },
+        include: {
+          topics: true
+        }
+      });
+
       // Get counts of related entities for informative message
       const relatedCounts = {
         teacherSubjects: mediumStandardSubject.teacher_subjects.length,
-        chapters: mediumStandardSubject.chapters.length,
-        topics: mediumStandardSubject.chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
+        chapters: chapters.length,
+        topics: chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
       };
 
       // Log what will be deleted
@@ -301,6 +307,86 @@ export class MediumStandardSubjectService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to fetch medium standard subject');
+    }
+  }
+
+  async getMediumsForStandardSubject(standardId: number, subjectId: number, boardId: number) {
+    try {
+      // Check if the standard, subject, and board exist
+      const standard = await this.prisma.standard.findFirst({
+        where: { 
+          id: standardId,
+          board_id: boardId
+        }
+      });
+      
+      if (!standard) {
+        throw new NotFoundException(`Standard with ID ${standardId} not found in board ${boardId}`);
+      }
+      
+      const subject = await this.prisma.subject.findFirst({
+        where: { 
+          id: subjectId,
+          board_id: boardId
+        }
+      });
+      
+      if (!subject) {
+        throw new NotFoundException(`Subject with ID ${subjectId} not found in board ${boardId}`);
+      }
+
+      // Find medium standard subjects for this combination
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
+        where: {
+          standard_id: standardId,
+          subject_id: subjectId,
+          instruction_medium: {
+            board_id: boardId
+          }
+        },
+        include: {
+          instruction_medium: true
+        }
+      });
+
+      // If no medium standard subjects are found, find all available mediums for this board
+      let allBoardMediums;
+      
+      if (mediumStandardSubjects.length === 0) {
+        allBoardMediums = await this.prisma.instruction_Medium.findMany({
+          where: { board_id: boardId },
+          select: {
+            id: true,
+            instruction_medium: true
+          }
+        });
+      }
+
+      // Create the response
+      const hasMultipleMediums = mediumStandardSubjects.length > 1;
+      
+      // Map the mediums
+      const mediums = mediumStandardSubjects.length > 0 
+        ? mediumStandardSubjects.map(mss => ({
+            id: mss.instruction_medium.id,
+            instruction_medium: mss.instruction_medium.instruction_medium,
+            medium_standard_subject_id: mss.id
+          }))
+        : (allBoardMediums || []).map(medium => ({
+            id: medium.id,
+            instruction_medium: medium.instruction_medium
+          }));
+      
+      return {
+        has_multiple_mediums: hasMultipleMediums,
+        mediums: mediums
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get mediums for standard ${standardId}, subject ${subjectId}, board ${boardId}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to get mediums for standard and subject');
     }
   }
 } 

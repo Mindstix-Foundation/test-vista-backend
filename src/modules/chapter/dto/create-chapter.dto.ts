@@ -3,12 +3,20 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateChapterDto {
   @ApiProperty({
-    description: 'Medium Standard Subject ID',
+    description: 'Subject ID',
     example: 1
   })
   @IsInt()
   @IsNotEmpty()
-  medium_standard_subject_id: number;
+  subject_id: number;
+
+  @ApiProperty({
+    description: 'Standard ID',
+    example: 1
+  })
+  @IsInt()
+  @IsNotEmpty()
+  standard_id: number;
 
   @ApiProperty({
     description: 'Sequential number of the chapter',

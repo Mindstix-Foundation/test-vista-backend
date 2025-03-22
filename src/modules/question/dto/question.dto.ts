@@ -2,6 +2,7 @@ import { IsBoolean, IsInt, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
+import { Transform } from 'class-transformer';
 
 export class CreateQuestionDto {
   @ApiProperty({
@@ -19,14 +20,6 @@ export class CreateQuestionDto {
   @IsBoolean()
   @IsNotEmpty()
   board_question: boolean;
-  
-  @ApiProperty({
-    example: false,
-    description: 'Whether this question is verified'
-  })
-  @IsBoolean()
-  @IsOptional()
-  is_verified?: boolean;
 }
 
 export class UpdateQuestionDto {
@@ -45,14 +38,6 @@ export class UpdateQuestionDto {
   @IsBoolean()
   @IsOptional()
   board_question?: boolean;
-  
-  @ApiProperty({
-    example: true,
-    description: 'Whether this question is verified'
-  })
-  @IsBoolean()
-  @IsOptional()
-  is_verified?: boolean;
 }
 
 export class QuestionFilterDto extends PaginationDto {
@@ -65,15 +50,6 @@ export class QuestionFilterDto extends PaginationDto {
   @Type(() => Number)
   @IsInt({ message: 'question_type_id must be an integer' })
   question_type_id?: number;
-  
-  @ApiProperty({
-    required: false,
-    example: 'false',
-    description: 'Filter by verification status (true or false)',
-    enum: ['true', 'false']
-  })
-  @IsOptional()
-  is_verified?: string;
   
   @ApiProperty({
     required: false,
@@ -94,6 +70,44 @@ export class QuestionFilterDto extends PaginationDto {
   @Type(() => Number)
   @IsInt({ message: 'chapter_id must be an integer' })
   chapter_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: true,
+    description: 'Filter by board question flag'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'board_question must be a boolean' })
+  board_question?: boolean;
+  
+  @ApiProperty({
+    required: false,
+    example: true,
+    description: 'Filter by verification status (applies to question texts)'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'is_verified must be a boolean' })
+  is_verified?: boolean;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by instruction medium ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'instruction_medium_id must be an integer' })
+  instruction_medium_id?: number;
 }
 
 // Update the enum for question-specific sort fields

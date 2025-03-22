@@ -12,24 +12,36 @@ export class ChapterService {
 
   async create(createChapterDto: CreateChapterDto) {
     try {
-      const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
-        where: { id: createChapterDto.medium_standard_subject_id },
+      // Verify subject exists
+      const subject = await this.prisma.subject.findUnique({
+        where: { id: createChapterDto.subject_id },
       });
 
-      if (!mediumStandardSubject) {
-        throw new NotFoundException('Medium Standard Subject not found');
+      if (!subject) {
+        throw new NotFoundException('Subject not found');
       }
 
+      // Verify standard exists
+      const standard = await this.prisma.standard.findUnique({
+        where: { id: createChapterDto.standard_id },
+      });
+
+      if (!standard) {
+        throw new NotFoundException('Standard not found');
+      }
+
+      // Check for duplicate chapter sequence
       const existingChapter = await this.prisma.chapter.findFirst({
         where: {
-          medium_standard_subject_id: createChapterDto.medium_standard_subject_id,
+          subject_id: createChapterDto.subject_id,
+          standard_id: createChapterDto.standard_id,
           sequential_chapter_number: createChapterDto.sequential_chapter_number,
         },
       });
 
       if (existingChapter) {
         throw new ConflictException(
-          `Chapter with sequence number ${createChapterDto.sequential_chapter_number} already exists for this medium standard subject`,
+          `Chapter with sequence number ${createChapterDto.sequential_chapter_number} already exists for this subject and standard`,
         );
       }
 
@@ -41,7 +53,8 @@ export class ChapterService {
       return await this.prisma.chapter.create({
         data: chapterData,
         include: {
-          medium_standard_subject: true,
+          subject: true,
+          standard: true,
           topics: true,
         },
       });
@@ -54,16 +67,24 @@ export class ChapterService {
     }
   }
 
-  async findAll(mediumStandardSubjectId?: number) {
+  async findAll(subjectId?: number, standardId?: number) {
     try {
-      const where = mediumStandardSubjectId 
-        ? { medium_standard_subject_id: mediumStandardSubjectId }
-        : {};
+      // Build where clause based on provided filters
+      const where: any = {};
+      
+      if (subjectId) {
+        where.subject_id = subjectId;
+      }
+      
+      if (standardId) {
+        where.standard_id = standardId;
+      }
 
       return await this.prisma.chapter.findMany({
         where,
         include: {
-          medium_standard_subject: true,
+          subject: true,
+          standard: true,
           topics: {
             orderBy: {
               sequential_topic_number: 'asc'
@@ -85,7 +106,8 @@ export class ChapterService {
       const chapter = await this.prisma.chapter.findUnique({
         where: { id },
         include: {
-          medium_standard_subject: true,
+          subject: true,
+          standard: true,
           topics: true,
         },
       });
@@ -108,28 +130,49 @@ export class ChapterService {
     try {
       const existingChapter = await this.findOne(id);
 
-      if (updateChapterDto.medium_standard_subject_id) {
-        const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
-          where: { id: updateChapterDto.medium_standard_subject_id },
+      // Verify subject if provided
+      if (updateChapterDto.subject_id) {
+        const subject = await this.prisma.subject.findUnique({
+          where: { id: updateChapterDto.subject_id },
         });
 
-        if (!mediumStandardSubject) {
-          throw new NotFoundException('Medium Standard Subject not found');
+        if (!subject) {
+          throw new NotFoundException('Subject not found');
         }
       }
 
-      if (updateChapterDto.sequential_chapter_number) {
+      // Verify standard if provided
+      if (updateChapterDto.standard_id) {
+        const standard = await this.prisma.standard.findUnique({
+          where: { id: updateChapterDto.standard_id },
+        });
+
+        if (!standard) {
+          throw new NotFoundException('Standard not found');
+        }
+      }
+
+      // Check for duplicate sequence if changing subject, standard or sequence
+      if (updateChapterDto.sequential_chapter_number || 
+          updateChapterDto.subject_id || 
+          updateChapterDto.standard_id) {
+        
+        const subjectId = updateChapterDto.subject_id || existingChapter.subject_id;
+        const standardId = updateChapterDto.standard_id || existingChapter.standard_id;
+        const sequentialNumber = updateChapterDto.sequential_chapter_number || existingChapter.sequential_chapter_number;
+        
         const duplicateSequence = await this.prisma.chapter.findFirst({
           where: {
             id: { not: id },
-            medium_standard_subject_id: updateChapterDto.medium_standard_subject_id || existingChapter.medium_standard_subject_id,
-            sequential_chapter_number: updateChapterDto.sequential_chapter_number,
+            subject_id: subjectId,
+            standard_id: standardId,
+            sequential_chapter_number: sequentialNumber,
           },
         });
 
         if (duplicateSequence) {
           throw new ConflictException(
-            `Chapter with sequence number ${updateChapterDto.sequential_chapter_number} already exists for this medium standard subject`,
+            `Chapter with sequence number ${sequentialNumber} already exists for this subject and standard`,
           );
         }
       }
@@ -143,7 +186,8 @@ export class ChapterService {
         where: { id },
         data: chapterData,
         include: {
-          medium_standard_subject: true,
+          subject: true,
+          standard: true,
           topics: true,
         },
       });
@@ -160,6 +204,8 @@ export class ChapterService {
     try {
       const chapterToDelete = await this.findOne(id);
       const currentPosition = chapterToDelete.sequential_chapter_number;
+      const subjectId = chapterToDelete.subject_id;
+      const standardId = chapterToDelete.standard_id;
 
       await this.prisma.$transaction(async (tx) => {
         // First delete the chapter
@@ -167,10 +213,11 @@ export class ChapterService {
           where: { id }
         });
 
-        // Update sequence numbers for remaining chapters one by one
+        // Update sequence numbers for remaining chapters
         const chaptersToUpdate = await tx.chapter.findMany({
           where: {
-            medium_standard_subject_id: chapterToDelete.medium_standard_subject_id,
+            subject_id: subjectId,
+            standard_id: standardId,
             sequential_chapter_number: {
               gt: currentPosition
             }
@@ -200,7 +247,7 @@ export class ChapterService {
     }
   }
 
-  async reorderChapter(chapterId: number, newPosition: number, mediumStandardSubjectId?: number) {
+  async reorderChapter(chapterId: number, newPosition: number) {
     try {
       this.logger.log(`Starting reorder for chapter ${chapterId} to position ${newPosition}`);
       
@@ -209,7 +256,8 @@ export class ChapterService {
         where: { id: chapterId },
         select: {
           id: true,
-          medium_standard_subject_id: true,
+          subject_id: true,
+          standard_id: true,
           sequential_chapter_number: true
         }
       });
@@ -220,17 +268,15 @@ export class ChapterService {
 
       this.logger.log(`Found current chapter: ${JSON.stringify(currentChapter)}`);
 
-      // If mediumStandardSubjectId is provided, verify it matches
-      if (mediumStandardSubjectId && mediumStandardSubjectId !== currentChapter.medium_standard_subject_id) {
-        throw new ConflictException('Chapter does not belong to the specified medium standard subject');
-      }
-
       // Get total chapters count to validate newPosition
       const totalChapters = await this.prisma.chapter.count({
-        where: { medium_standard_subject_id: currentChapter.medium_standard_subject_id }
+        where: { 
+          subject_id: currentChapter.subject_id,
+          standard_id: currentChapter.standard_id
+        }
       });
 
-      this.logger.log(`Total chapters in subject: ${totalChapters}`);
+      this.logger.log(`Total chapters in subject/standard: ${totalChapters}`);
 
       // Validate newPosition
       if (newPosition < 1 || newPosition > totalChapters) {
@@ -258,7 +304,8 @@ export class ChapterService {
             for (let i = currentPosition + 1; i <= newPosition; i++) {
               await tx.chapter.updateMany({
                 where: {
-                  medium_standard_subject_id: currentChapter.medium_standard_subject_id,
+                  subject_id: currentChapter.subject_id,
+                  standard_id: currentChapter.standard_id,
                   sequential_chapter_number: i
                 },
                 data: {
@@ -271,7 +318,8 @@ export class ChapterService {
             for (let i = currentPosition - 1; i >= newPosition; i--) {
               await tx.chapter.updateMany({
                 where: {
-                  medium_standard_subject_id: currentChapter.medium_standard_subject_id,
+                  subject_id: currentChapter.subject_id,
+                  standard_id: currentChapter.standard_id,
                   sequential_chapter_number: i
                 },
                 data: {

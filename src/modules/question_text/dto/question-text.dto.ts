@@ -1,7 +1,43 @@
-import { IsString, IsInt, IsOptional, IsNotEmpty } from 'class-validator';
+import { IsString, IsInt, IsOptional, IsNotEmpty, IsBoolean } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
+import { Transform } from 'class-transformer';
+
+// Add a new DTO for verification
+export class VerifyQuestionTextDto {
+  @ApiProperty({
+    example: true,
+    description: 'Set verification status',
+    required: true
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  is_verified: boolean;
+}
+
+// Add a DTO for batch verification
+export class BatchVerifyQuestionTextDto {
+  @ApiProperty({
+    example: [1, 2, 3],
+    description: 'IDs of question texts to verify',
+    required: true,
+    type: [Number]
+  })
+  @IsInt({ each: true })
+  @IsNotEmpty()
+  @Type(() => Number)
+  ids: number[];
+
+  @ApiProperty({
+    example: true,
+    description: 'Set verification status',
+    required: true
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  is_verified: boolean;
+}
 
 export class CreateQuestionTextDto {
   @ApiProperty({
@@ -11,6 +47,14 @@ export class CreateQuestionTextDto {
   @IsInt()
   @IsNotEmpty()
   question_id: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the instruction medium'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  instruction_medium_id: number;
 
   @ApiProperty({
     example: 1,
@@ -28,9 +72,28 @@ export class CreateQuestionTextDto {
   @IsString()
   @IsNotEmpty()
   question_text: string;
+  
+  @ApiProperty({
+    example: false,
+    description: 'Whether this question text is verified',
+    required: false,
+    default: false
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_verified?: boolean;
 }
 
 export class UpdateQuestionTextDto {
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the instruction medium',
+    required: false
+  })
+  @IsInt()
+  @IsOptional()
+  instruction_medium_id?: number;
+
   @ApiProperty({
     example: 1,
     description: 'ID of the image',
@@ -48,6 +111,15 @@ export class UpdateQuestionTextDto {
   @IsString()
   @IsOptional()
   question_text?: string;
+  
+  @ApiProperty({
+    example: true,
+    description: 'Whether this question text is verified',
+    required: false
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_verified?: boolean;
 }
 
 export class QuestionTextFilterDto extends PaginationDto {
@@ -80,6 +152,30 @@ export class QuestionTextFilterDto extends PaginationDto {
   @Type(() => Number)
   @IsInt({ message: 'question_type_id must be an integer' })
   question_type_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by instruction medium ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'instruction_medium_id must be an integer' })
+  instruction_medium_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: true,
+    description: 'Filter by verification status'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'is_verified must be a boolean' })
+  is_verified?: boolean;
 }
 
 // Update the enum for question text-specific sort fields
