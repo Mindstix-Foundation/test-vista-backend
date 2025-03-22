@@ -183,10 +183,11 @@ export class QuestionTextController {
       ? sort_by as QuestionTextSortField 
       : QuestionTextSortField.CREATED_AT;
     
-    return await this.questionTextService.findUntranslatedTexts(mediumId, {
+    return await this.questionTextService.findUntranslatedTexts({
       topic_id,
       chapter_id,
       question_type_id,
+      instruction_medium_id: mediumId,
       is_verified,
       page,
       page_size,

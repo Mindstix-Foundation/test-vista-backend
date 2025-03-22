@@ -203,6 +203,12 @@ export class QuestionService {
         search
       } = filters;
       
+      this.logger.log(`Question findAll called with params:
+        - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
+        - is_verified: ${is_verified} (${typeof is_verified})
+        - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+      `);
+      
       const skip = (page - 1) * page_size;
       
       // Build where clause
@@ -235,46 +241,56 @@ export class QuestionService {
         where.board_question = board_question;
       }
       
-      // is_verified now applies to question_texts
-      if (is_verified !== undefined) {
-        // We need to ensure the question has at least one question_text with the specified is_verified status
+      // Handle filtering by instruction_medium_id using the junction table
+      if (instruction_medium_id) {
+        const mediumId = typeof instruction_medium_id === 'string' 
+          ? parseInt(instruction_medium_id, 10) 
+          : instruction_medium_id;
+          
+        this.logger.log(`Filtering questions by instruction_medium_id: ${mediumId}`);
+        
         andConditions.push({
-          question_texts: {
+          question_topics: {
             some: {
-              is_verified: is_verified
+              question_text_topics: {
+                some: {
+                  instruction_medium: {
+                    id: mediumId
+                  }
+                }
+              }
             }
           }
         });
       }
       
-      // If instruction_medium_id is provided, filter questions that have text in that medium
-      if (instruction_medium_id) {
-        // Ensure instruction_medium_id is a number
-        const mediumId = typeof instruction_medium_id === 'string' 
-          ? parseInt(instruction_medium_id, 10) 
-          : instruction_medium_id;
-          
+      // Handle filtering by is_verified using the junction table
+      if (is_verified !== undefined) {
+        this.logger.log(`Filtering questions by is_verified: ${is_verified}`);
+        
         andConditions.push({
-          question_texts: {
+          question_topics: {
             some: {
-              instruction_medium_id: mediumId
+              question_text_topics: {
+                some: {
+                  is_verified: is_verified
+                }
+              }
             }
           }
         });
-        
-        this.logger.log(`Filtering questions with instruction_medium_id: ${mediumId}`);
       }
       
       // Add search capability if needed
       if (search) {
         andConditions.push({
           question_texts: {
-          some: {
-            question_text: {
-              contains: search,
-              mode: 'insensitive'
+            some: {
+              question_text: {
+                contains: search,
+                mode: 'insensitive'
+              }
             }
-          }
           }
         });
       }
@@ -289,21 +305,14 @@ export class QuestionService {
       
       // Get total count for pagination metadata
       const total = await this.prisma.question.count({ where });
+      this.logger.log(`Found ${total} questions matching filters`);
       
       // Build orderBy object
-      const orderBy: any = {};
-      
-      // Make sure we're using a valid field for sorting
-      // Valid question sort fields are checked against the QuestionSortField enum
-      if (Object.values(QuestionSortField).includes(sort_by)) {
-        orderBy[sort_by] = sort_order;
-      } else {
-        // Default to created_at if an invalid sort field is provided
-        orderBy[QuestionSortField.CREATED_AT] = sort_order;
-        this.logger.warn(`Invalid sort field "${sort_by}" provided, defaulting to created_at`);
-      }
+      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
+      orderBy[sort_by as keyof Prisma.QuestionOrderByWithRelationInput] = sort_order;
       
       // Get paginated data with sorting
+      this.logger.log(`Fetching questions with pagination (page ${page}, size ${page_size})`);
       const questions = await this.prisma.question.findMany({
         where,
         orderBy,
@@ -317,22 +326,17 @@ export class QuestionService {
                 include: {
                   chapter: true
                 }
+              },
+              question_text_topics: {
+                include: {
+                  instruction_medium: true,
+                  question_text: true
+                }
               }
             }
           },
           question_texts: {
-            // If instruction_medium_id is provided, only include matching texts
-            // If is_verified is provided, only include texts with matching verification status
-            where: {
-              ...(instruction_medium_id ? {
-                instruction_medium_id: typeof instruction_medium_id === 'string' 
-                  ? parseInt(instruction_medium_id, 10) 
-                  : instruction_medium_id
-              } : {}),
-              ...(is_verified !== undefined ? { is_verified } : {})
-            },
             include: {
-              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -369,10 +373,10 @@ export class QuestionService {
       return {
         data: filteredQuestions,
         meta: {
-          total: filteredQuestions.length,
+          total,
           page,
           page_size,
-          total_pages: Math.ceil(filteredQuestions.length / page_size),
+          total_pages,
           sort_by,
           sort_order
         }
@@ -400,12 +404,17 @@ export class QuestionService {
                     }
                   }
                 }
+              },
+              question_text_topics: {
+                include: {
+                  instruction_medium: true,
+                  question_text: true
+                }
               }
             }
           },
           question_texts: {
             include: {
-              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -459,7 +468,6 @@ export class QuestionService {
           question_type: true,
           question_texts: {
             include: {
-              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -479,6 +487,12 @@ export class QuestionService {
               topic: {
                 include: {
                   chapter: true
+                }
+              },
+              question_text_topics: {
+                include: {
+                  instruction_medium: true,
+                  question_text: true
                 }
               }
             }
@@ -604,6 +618,12 @@ export class QuestionService {
         search
       } = filters;
       
+      this.logger.log(`Question findAllWithoutPagination called with params:
+        - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
+        - is_verified: ${is_verified} (${typeof is_verified})
+        - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+      `);
+      
       // Build where clause
       let where: Prisma.QuestionWhereInput = {};
       const andConditions: Array<Prisma.QuestionWhereInput> = [];
@@ -634,46 +654,56 @@ export class QuestionService {
         where.board_question = board_question;
       }
       
-      // is_verified now applies to question_texts
-      if (is_verified !== undefined) {
-        // We need to ensure the question has at least one question_text with the specified is_verified status
+      // Handle filtering by instruction_medium_id using the junction table
+      if (instruction_medium_id) {
+        const mediumId = typeof instruction_medium_id === 'string' 
+          ? parseInt(instruction_medium_id, 10) 
+          : instruction_medium_id;
+          
+        this.logger.log(`Filtering questions by instruction_medium_id: ${mediumId}`);
+        
         andConditions.push({
-          question_texts: {
+          question_topics: {
             some: {
-              is_verified: is_verified
+              question_text_topics: {
+                some: {
+                  instruction_medium: {
+                    id: mediumId
+                  }
+                }
+              }
             }
           }
         });
       }
       
-      // If instruction_medium_id is provided, filter questions that have text in that medium
-      if (instruction_medium_id) {
-        // Ensure instruction_medium_id is a number
-        const mediumId = typeof instruction_medium_id === 'string' 
-          ? parseInt(instruction_medium_id, 10) 
-          : instruction_medium_id;
-          
+      // Handle filtering by is_verified using the junction table
+      if (is_verified !== undefined) {
+        this.logger.log(`Filtering questions by is_verified: ${is_verified}`);
+        
         andConditions.push({
-          question_texts: {
+          question_topics: {
             some: {
-              instruction_medium_id: mediumId
+              question_text_topics: {
+                some: {
+                  is_verified: is_verified
+                }
+              }
             }
           }
         });
-        
-        this.logger.log(`Filtering questions with instruction_medium_id: ${mediumId}`);
       }
       
       // Add search capability if needed
       if (search) {
         andConditions.push({
           question_texts: {
-          some: {
-            question_text: {
-              contains: search,
-              mode: 'insensitive'
+            some: {
+              question_text: {
+                contains: search,
+                mode: 'insensitive'
+              }
             }
-          }
           }
         });
       }
@@ -687,18 +717,11 @@ export class QuestionService {
       }
       
       // Build orderBy object
-      const orderBy: any = {};
-      
-      // Make sure we're using a valid field for sorting
-      if (Object.values(QuestionSortField).includes(sort_by)) {
-        orderBy[sort_by] = sort_order;
-      } else {
-        // Default to created_at if an invalid sort field is provided
-        orderBy[QuestionSortField.CREATED_AT] = sort_order;
-        this.logger.warn(`Invalid sort field "${sort_by}" provided, defaulting to created_at`);
-      }
+      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
+      orderBy[sort_by as keyof Prisma.QuestionOrderByWithRelationInput] = sort_order;
       
       // Get data with sorting but without pagination
+      this.logger.log(`Fetching all questions without pagination`);
       const questions = await this.prisma.question.findMany({
         where,
         orderBy,
@@ -710,22 +733,17 @@ export class QuestionService {
                 include: {
                   chapter: true
                 }
+              },
+              question_text_topics: {
+                include: {
+                  instruction_medium: true,
+                  question_text: true
+                }
               }
             }
           },
           question_texts: {
-            // If instruction_medium_id is provided, only include matching texts
-            // If is_verified is provided, only include texts with matching verification status
-            where: {
-              ...(instruction_medium_id ? {
-                instruction_medium_id: typeof instruction_medium_id === 'string' 
-                  ? parseInt(instruction_medium_id, 10) 
-                  : instruction_medium_id
-              } : {}),
-              ...(is_verified !== undefined ? { is_verified } : {})
-            },
             include: {
-              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -763,86 +781,63 @@ export class QuestionService {
     }
   }
 
-  async findUntranslatedQuestions(mediumId: number, filters: QuestionFilters) {
+  async findUntranslatedQuestions(
+    instruction_medium_id_param: number,
+    filters: QuestionFilterDto,
+    sort_by = 'created_at',
+    sort_order: 'asc' | 'desc' = 'desc'
+  ) {
     try {
-      this.logger.log(`Finding untranslated questions for medium ID ${mediumId}`);
-      
       const {
-        question_type_id,
         topic_id,
         chapter_id,
-        board_question,
+        question_type_id,
         is_verified,
         page = 1,
         page_size = 10,
-        sort_by = QuestionSortField.CREATED_AT,
-        sort_order = SortOrder.DESC,
         search
       } = filters;
 
       const skip = (page - 1) * page_size;
+
+      // Convert to number if it's a string
+      const instruction_medium_id = typeof instruction_medium_id_param === 'string' 
+        ? parseInt(instruction_medium_id_param, 10) 
+        : instruction_medium_id_param;
+
+      this.logger.log(`Finding untranslated questions for medium: ${instruction_medium_id}`);
+
+      // Build the base where clause
+      const whereConditions = [];
       
-      // Build base where clause
-      let where: Prisma.QuestionWhereInput = {
-        // The question must have at least one question_text entry (in any medium)
-        question_texts: {
-          some: {}
-        },
-        // AND the question must NOT have a question_text in the specified medium
-        NOT: {
-          question_texts: {
-            some: {
-              instruction_medium_id: mediumId
-            }
-          }
-        }
-      };
-      
-      // Create an array to collect AND conditions
-      const andConditions: Prisma.QuestionWhereInput[] = [];
-      
-      // Add the other filters
-      if (question_type_id) {
-        where.question_type_id = question_type_id;
-      }
-      
+      // Add basic question filters
       if (topic_id) {
-        where.question_topics = {
-          some: {
-            topic_id: topic_id
-          }
-        };
+        whereConditions.push({ 
+          question_topics: { 
+            some: { topic_id: parseInt(String(topic_id), 10) } 
+          } 
+        });
       }
       
       if (chapter_id) {
-        where.question_topics = {
-          some: {
-            topic: {
-              chapter_id: chapter_id
-            }
-          }
-        };
+        whereConditions.push({ 
+          question_topics: { 
+            some: { 
+              topic: { chapter_id: parseInt(String(chapter_id), 10) } 
+            } 
+          } 
+        });
       }
       
-      if (board_question !== undefined) {
-        where.board_question = board_question;
-      }
-      
-      // is_verified now applies to question_texts
-      if (is_verified !== undefined) {
-        // We need to ensure the question has at least one question_text with the specified is_verified status
-        andConditions.push({
-          question_texts: {
-            some: {
-              is_verified: is_verified
-            }
-          }
+      if (question_type_id) {
+        whereConditions.push({ 
+          question_type_id: parseInt(String(question_type_id), 10) 
         });
       }
       
       // Add search capability if needed
       if (search) {
-        andConditions.push({
+        whereConditions.push({
           question_texts: {
             some: {
               question_text: {
@@ -854,31 +849,54 @@ export class QuestionService {
         });
       }
       
-      // If we have AND conditions, add them to the where clause
-      if (andConditions.length > 0) {
-        where = {
-          ...where,
-          AND: andConditions
-        };
-      }
+      // Ensure the question has at least one question_text entry
+      whereConditions.push({ question_texts: { some: {} } });
       
+      // But does NOT have a question_text in the specified medium
+      whereConditions.push({
+        NOT: {
+          question_topics: {
+            some: {
+              question_text_topics: {
+                some: {
+                  instruction_medium: {
+                    id: instruction_medium_id
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      // Add filter for verified question text topics if specified
+      if (is_verified !== undefined) {
+        whereConditions.push({
+          question_topics: {
+            some: {
+              question_text_topics: {
+                some: {
+                  is_verified: is_verified
+                }
+              }
+            }
+          }
+        });
+      }
+
+      // Define the final where clause
+      const where: Prisma.QuestionWhereInput = {
+        AND: whereConditions
+      };
+
       // Get total count for pagination metadata
       const total = await this.prisma.question.count({ where });
-      this.logger.log(`Found ${total} untranslated questions for medium ID ${mediumId}`);
-      
+      this.logger.log(`Found ${total} untranslated questions for medium ID ${instruction_medium_id}`);
+
       // Build orderBy object
-      const orderBy: any = {};
-      
-      // Make sure we're using a valid field for sorting
-      // Valid question sort fields are checked against the QuestionSortField enum
-      if (Object.values(QuestionSortField).includes(sort_by)) {
-        orderBy[sort_by] = sort_order;
-      } else {
-        // Default to created_at if an invalid sort field is provided
-        orderBy[QuestionSortField.CREATED_AT] = sort_order;
-        this.logger.warn(`Invalid sort field "${sort_by}" provided, defaulting to created_at`);
-      }
-      
+      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
+      orderBy[sort_by as keyof Prisma.QuestionOrderByWithRelationInput] = sort_order;
+
       // Get paginated data with sorting
       this.logger.log(`Fetching untranslated questions with pagination (page ${page}, size ${page_size})`);
       const questions = await this.prisma.question.findMany({
@@ -890,21 +908,17 @@ export class QuestionService {
           question_type: true,
           question_topics: {
             include: {
-              topic: {
+              topic: true,
+              question_text_topics: {
                 include: {
-                  chapter: true
+                  instruction_medium: true,
+                  question_text: true
                 }
               }
             }
           },
           question_texts: {
-            // We already filter OUT texts with the specified medium in the where clause
-            // But we might want to filter by other criteria like is_verified here
-            where: is_verified !== undefined ? {
-              is_verified: is_verified
-            } : undefined,
             include: {
-              instruction_medium: true,
               image: true,
               mcq_options: {
                 include: {
@@ -921,7 +935,7 @@ export class QuestionService {
           }
         }
       });
-      
+
       this.logger.log(`Transforming ${questions.length} untranslated questions to include presigned URLs`);
       // Transform questions to include presigned URLs
       const transformedQuestions = await this.transformQuestionResults(questions);

@@ -1,8 +1,18 @@
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsEnum } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
 import { Transform } from 'class-transformer';
+
+// Update the enum for question-specific sort fields
+export enum QuestionSortField {
+  QUESTION_TYPE = 'question_type_id',
+  IS_VERIFIED = 'is_verified',
+  BOARD_QUESTION = 'board_question',
+  QUESTION_TEXT = 'question_text',
+  CREATED_AT = SortField.CREATED_AT,
+  UPDATED_AT = SortField.UPDATED_AT
+}
 
 export class CreateQuestionDto {
   @ApiProperty({
@@ -108,14 +118,4 @@ export class QuestionFilterDto extends PaginationDto {
   @Type(() => Number)
   @IsInt({ message: 'instruction_medium_id must be an integer' })
   instruction_medium_id?: number;
-}
-
-// Update the enum for question-specific sort fields
-export enum QuestionSortField {
-  QUESTION_TYPE = 'question_type_id',
-  IS_VERIFIED = 'is_verified',
-  BOARD_QUESTION = 'board_question',
-  QUESTION_TEXT = 'question_text',
-  CREATED_AT = SortField.CREATED_AT,
-  UPDATED_AT = SortField.UPDATED_AT
 } 

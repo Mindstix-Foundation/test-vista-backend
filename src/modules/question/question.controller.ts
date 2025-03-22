@@ -7,6 +7,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Logger } from '@nestjs/common';
+import { SortField } from '../../common/dto/pagination.dto';
 
 @ApiTags('questions')
 @Controller('questions')
@@ -62,11 +63,25 @@ export class QuestionController {
       - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
     `);
 
-    // Ensure we have a valid sort_by value
-    const validSortFields = Object.values(QuestionSortField);
-    const validatedSortBy = validSortFields.includes(sort_by as any) 
-      ? sort_by as unknown as QuestionSortField 
-      : QuestionSortField.CREATED_AT;
+    // Map the standard SortField to QuestionSortField
+    let questionSortBy: QuestionSortField;
+    
+    if (sort_by === SortField.CREATED_AT) {
+      questionSortBy = QuestionSortField.CREATED_AT;
+    } else if (sort_by === SortField.UPDATED_AT) {
+      questionSortBy = QuestionSortField.UPDATED_AT;
+    } else if (sort_by === SortField.NAME) {
+      // Default to created_at if NAME is used (doesn't exist in Question)
+      questionSortBy = QuestionSortField.CREATED_AT;
+    } else {
+      // If it's not a standard field, check if it's a valid question sort field
+      const sortByString = typeof sort_by === 'string' ? sort_by : undefined;
+      if (sortByString && Object.values(QuestionSortField).includes(sortByString as any)) {
+        questionSortBy = sortByString as QuestionSortField;
+      } else {
+        questionSortBy = QuestionSortField.CREATED_AT;
+      }
+    }
 
     return await this.questionService.findAll({
       question_type_id,
@@ -77,7 +92,7 @@ export class QuestionController {
       instruction_medium_id,
       page,
       page_size,
-      sort_by: validatedSortBy,
+      sort_by: questionSortBy,
       sort_order,
       search
     });
@@ -144,23 +159,42 @@ export class QuestionController {
       search
     } = filters;
 
-    // Ensure we have a valid sort_by value
-    const validSortFields = Object.values(QuestionSortField);
-    const validatedSortBy = validSortFields.includes(sort_by as any) 
-      ? sort_by as unknown as QuestionSortField 
-      : QuestionSortField.CREATED_AT;
+    // Map the standard SortField to QuestionSortField
+    let questionSortBy: QuestionSortField;
+    
+    if (sort_by === SortField.CREATED_AT) {
+      questionSortBy = QuestionSortField.CREATED_AT;
+    } else if (sort_by === SortField.UPDATED_AT) {
+      questionSortBy = QuestionSortField.UPDATED_AT;
+    } else if (sort_by === SortField.NAME) {
+      // Default to created_at if NAME is used (doesn't exist in Question)
+      questionSortBy = QuestionSortField.CREATED_AT;
+    } else {
+      // If it's not a standard field, check if it's a valid question sort field
+      const sortByString = typeof sort_by === 'string' ? sort_by : undefined;
+      if (sortByString && Object.values(QuestionSortField).includes(sortByString as any)) {
+        questionSortBy = sortByString as QuestionSortField;
+      } else {
+        questionSortBy = QuestionSortField.CREATED_AT;
+      }
+    }
 
-    return await this.questionService.findUntranslatedQuestions(mediumId, {
-      question_type_id,
-      topic_id,
-      chapter_id,
-      board_question,
-      is_verified,
-      page,
-      page_size,
-      sort_by: validatedSortBy,
-      sort_order,
-      search
-    });
+    return await this.questionService.findUntranslatedQuestions(
+      mediumId,
+      {
+        question_type_id,
+        topic_id,
+        chapter_id,
+        board_question,
+        is_verified,
+        page,
+        page_size,
+        sort_by: sort_by, // Use the standard sort_by from filters
+        sort_order,
+        search
+      },
+      questionSortBy, // Pass the mapped sort field as a separate parameter
+      sort_order
+    );
   }
 }

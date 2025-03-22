@@ -57,10 +57,15 @@ export class ImageService {
             select: {
               id: true,
               question_text: true,
-              is_verified: true,
               question: {
                 select: {
                   id: true
+                }
+              },
+              question_text_topics: {
+                select: {
+                  is_verified: true,
+                  instruction_medium: true
                 }
               }
             }
@@ -72,10 +77,15 @@ export class ImageService {
               question_text: {
                 select: {
                   id: true,
-                  is_verified: true,
                   question: {
                     select: {
                       id: true
+                    }
+                  },
+                  question_text_topics: {
+                    select: {
+                      is_verified: true,
+                      instruction_medium: true
                     }
                   }
                 }
@@ -90,10 +100,15 @@ export class ImageService {
               question_text: {
                 select: {
                   id: true,
-                  is_verified: true,
                   question: {
                     select: {
                       id: true
+                    }
+                  },
+                  question_text_topics: {
+                    select: {
+                      is_verified: true,
+                      instruction_medium: true
                     }
                   }
                 }
@@ -108,10 +123,15 @@ export class ImageService {
               question_text: {
                 select: {
                   id: true,
-                  is_verified: true,
                   question: {
                     select: {
                       id: true
+                    }
+                  },
+                  question_text_topics: {
+                    select: {
+                      is_verified: true,
+                      instruction_medium: true
                     }
                   }
                 }
@@ -148,7 +168,8 @@ export class ImageService {
                 select: {
                   id: true
                 }
-              }
+              },
+              question_text_topics: true
             }
           },
           mcq_options: {
@@ -161,7 +182,8 @@ export class ImageService {
                     select: {
                       id: true
                     }
-                  }
+                  },
+                  question_text_topics: true
                 }
               }
             }
@@ -176,7 +198,8 @@ export class ImageService {
                     select: {
                       id: true
                     }
-                  }
+                  },
+                  question_text_topics: true
                 }
               }
             }
@@ -191,7 +214,8 @@ export class ImageService {
                     select: {
                       id: true
                     }
-                  }
+                  },
+                  question_text_topics: true
                 }
               }
             }
@@ -203,34 +227,42 @@ export class ImageService {
         throw new NotFoundException(`Image with ID ${id} not found`);
       }
 
-      // Get all affected question texts to mark them as unverified
-      const affectedQuestionTextIds = new Set<number>();
+      // Get all affected question text topic relationships to mark them as unverified
+      const affectedQuestionTextTopics = new Set<number>();
       
-      // Add question text IDs from question texts
+      // Add question text topic IDs from question texts
       image.question_texts.forEach(qt => {
-        if (qt.id) {
-          affectedQuestionTextIds.add(qt.id);
+        if (qt.question_text_topics) {
+          qt.question_text_topics.forEach(qtt => {
+            affectedQuestionTextTopics.add(qtt.id);
+          });
         }
       });
       
-      // Add question text IDs from MCQ options
+      // Add question text topic IDs from MCQ options
       image.mcq_options.forEach(opt => {
-        if (opt.question_text?.id) {
-          affectedQuestionTextIds.add(opt.question_text.id);
+        if (opt.question_text?.question_text_topics) {
+          opt.question_text.question_text_topics.forEach(qtt => {
+            affectedQuestionTextTopics.add(qtt.id);
+          });
         }
       });
       
-      // Add question text IDs from match pairs (left)
+      // Add question text topic IDs from match pairs (left)
       image.match_pairs_left.forEach(mp => {
-        if (mp.question_text?.id) {
-          affectedQuestionTextIds.add(mp.question_text.id);
+        if (mp.question_text?.question_text_topics) {
+          mp.question_text.question_text_topics.forEach(qtt => {
+            affectedQuestionTextTopics.add(qtt.id);
+          });
         }
       });
       
-      // Add question text IDs from match pairs (right)
+      // Add question text topic IDs from match pairs (right)
       image.match_pairs_right.forEach(mp => {
-        if (mp.question_text?.id) {
-          affectedQuestionTextIds.add(mp.question_text.id);
+        if (mp.question_text?.question_text_topics) {
+          mp.question_text.question_text_topics.forEach(qtt => {
+            affectedQuestionTextTopics.add(qtt.id);
+          });
         }
       });
 
@@ -240,7 +272,7 @@ export class ImageService {
         - ${image.mcq_options.length} MCQ options
         - ${image.match_pairs_left.length} match pairs (left side)
         - ${image.match_pairs_right.length} match pairs (right side)
-        - Affecting ${affectedQuestionTextIds.size} question texts
+        - Affecting ${affectedQuestionTextTopics.size} question text topic relationships
         All references will be set to null due to onDelete: SetNull`);
 
       // Delete the image from S3
@@ -251,20 +283,20 @@ export class ImageService {
         where: { id }
       });
       
-      // Mark all affected question texts as unverified
-      if (affectedQuestionTextIds.size > 0) {
-        await this.prisma.question_Text.updateMany({
+      // Mark all affected question text topics as unverified
+      if (affectedQuestionTextTopics.size > 0) {
+        await this.prisma.question_Text_Topic_Medium.updateMany({
           where: {
             id: {
-              in: Array.from(affectedQuestionTextIds)
+              in: Array.from(affectedQuestionTextTopics)
             }
           },
           data: {
             is_verified: false
-          } as any // Use type assertion to bypass the type checking
+          }
         });
         
-        this.logger.log(`Marked ${affectedQuestionTextIds.size} question texts as unverified due to image deletion`);
+        this.logger.log(`Marked ${affectedQuestionTextTopics.size} question text topic relationships as unverified due to image deletion`);
       }
 
       this.logger.log(`Successfully deleted image ${id}`);
