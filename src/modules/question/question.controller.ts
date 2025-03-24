@@ -32,12 +32,17 @@ export class QuestionController {
     summary: 'Create a complete question with all related data in a single transaction',
     description: `
       Creates a complete question with all related entities in a single transaction:
-      1. Creates a question record with question type and board status
-      2. Creates a question topic association
-      3. Creates a question text with the provided content
-      4. Creates MCQ options if provided
-      5. Creates match pairs if provided
-      6. Creates question text topic medium association if provided
+      1. Checks if the same question text already exists in the database to reduce redundancy
+      2. If the question exists, checks if it's already associated with the specified topic
+      3. If the topic association exists, checks if it's already associated with the specified medium
+      4. Creates new associations as needed or reuses existing question
+      5. Creates a completely new question only if no matching text is found
+      
+      This approach reduces data redundancy by allowing the same question to be reused across
+      different topics and mediums. The system will:
+      - Create a new question only if the text doesn't already exist
+      - Reuse an existing question by adding a new topic association if needed
+      - Reuse an existing question+topic by adding a new medium association if needed
       
       All IDs for referenced entities are validated before creation.
       The is_verified field in Question_Text_Topic_Medium is always set to false for new entries.
@@ -82,69 +87,108 @@ export class QuestionController {
   })
   @ApiResponse({ 
     status: 201, 
-    description: 'Question and all related data created successfully',
+    description: 'Question and all related data created or reused successfully',
     schema: {
-      example: {
-        id: 1,
-        question_type_id: 1,
-        board_question: true,
-        created_at: "2023-01-01T00:00:00.000Z",
-        updated_at: "2023-01-01T00:00:00.000Z",
-        question_type: {
-          id: 1,
-          name: "Multiple Choice",
-          description: "A question with multiple choices"
-        },
-        question_texts: [
-          {
+      oneOf: [
+        {
+          example: {
             id: 1,
-            question_id: 1,
-            question_text: "What is the capital of France?",
-            image_id: 1,
+            question_type_id: 1,
+            board_question: true,
             created_at: "2023-01-01T00:00:00.000Z",
             updated_at: "2023-01-01T00:00:00.000Z",
-            mcq_options: [
+            question_type: {
+              id: 1,
+              name: "Multiple Choice",
+              description: "A question with multiple choices"
+            },
+            question_texts: [
               {
                 id: 1,
-                question_text_id: 1,
-                option_text: "Paris",
-                is_correct: true,
-                image_id: 5
+                question_id: 1,
+                question_text: "What is the capital of France?",
+                image_id: 1,
+                created_at: "2023-01-01T00:00:00.000Z",
+                updated_at: "2023-01-01T00:00:00.000Z",
+                mcq_options: [
+                  {
+                    id: 1,
+                    question_text_id: 1,
+                    option_text: "Paris",
+                    is_correct: true,
+                    image_id: 5
+                  }
+                ],
+                match_pairs: [
+                  {
+                    id: 1,
+                    question_text_id: 1,
+                    left_text: "France",
+                    right_text: "Paris",
+                    left_image_id: 1,
+                    right_image_id: 2
+                  }
+                ],
+                question_text_topics: [
+                  {
+                    id: 1,
+                    question_text_id: 1,
+                    question_topic_id: 1,
+                    instruction_medium_id: 1,
+                    is_verified: false
+                  }
+                ]
               }
             ],
-            match_pairs: [
+            question_topics: [
               {
                 id: 1,
-                question_text_id: 1,
-                left_text: "France",
-                right_text: "Paris",
-                left_image_id: 1,
-                right_image_id: 2
-              }
-            ],
-            question_text_topics: [
-              {
-                id: 1,
-                question_text_id: 1,
-                question_topic_id: 1,
-                instruction_medium_id: 1,
-                is_verified: false
+                question_id: 1,
+                topic_id: 1,
+                topic: {
+                  id: 1,
+                  name: "Geography"
+                }
               }
             ]
-          }
-        ],
-        question_topics: [
-          {
+          },
+          description: "When a new question is created"
+        },
+        {
+          example: {
+            message: "Added new topic association to existing question",
             id: 1,
-            question_id: 1,
-            topic_id: 1,
-            topic: {
-              id: 1,
-              name: "Geography"
-            }
-          }
-        ]
-      }
+            question_type_id: 1,
+            board_question: true,
+            created_at: "2023-01-01T00:00:00.000Z",
+            updated_at: "2023-01-01T00:00:00.000Z",
+            reused_existing_question: true
+          },
+          description: "When an existing question is reused with a new topic association"
+        },
+        {
+          example: {
+            message: "Added new medium association to existing question",
+            id: 1,
+            question_type_id: 1,
+            board_question: true,
+            created_at: "2023-01-01T00:00:00.000Z",
+            updated_at: "2023-01-01T00:00:00.000Z",
+            reused_existing_question: true
+          },
+          description: "When an existing question is reused with a new medium association"
+        },
+        {
+          example: {
+            message: "Question with the same text already exists for topic \"Geography\" and medium \"English\"",
+            existing_question: {
+              id: 1
+            },
+            is_duplicate: true
+          },
+          description: "When a duplicate question is detected (same text, topic, and medium)"
+        }
+      ]
     }
   })
   @ApiResponse({ status: 400, description: 'Bad request - validation error' })
@@ -245,8 +289,26 @@ export class QuestionController {
 
   @Delete(':id')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Delete a question' })
-  @ApiResponse({ status: 200, description: 'Question deleted successfully' })
+  @ApiOperation({ 
+    summary: 'Delete a question', 
+    description: `
+      Completely deletes a question and all its associated data:
+      - Question texts
+      - MCQ options
+      - Match pairs
+      - Topic associations
+      - Medium associations
+      
+      Additionally, images associated exclusively with this question (not used anywhere else)
+      will be deleted from the S3 bucket to free up storage space.
+      
+      This is a permanent operation and cannot be undone.
+    `
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Question and its unique images deleted successfully' 
+  })
   @ApiResponse({ status: 404, description: 'Question not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.questionService.remove(id);
@@ -330,6 +392,12 @@ export class QuestionController {
       - After any edit, is_verified flag is set to false in Question_Text_Topic_Medium relations
       - Requires specifying which question_text to edit via question_text_id
       
+      The API implements data redundancy reduction:
+      - Before updating, it checks if another question with the same text content already exists 
+      - If a matching text is found, it may reuse that text instead of creating a duplicate
+      - All associations are migrated to the existing text to maintain functionality
+      - This reduces database size and improves consistency across questions
+      
       Example request body:
       \`\`\`
       {
@@ -371,67 +439,84 @@ export class QuestionController {
     status: 200, 
     description: 'Question and related data updated successfully',
     schema: {
-      example: {
-        id: 1,
-        question_type_id: 1,
-        board_question: true,
-        created_at: "2023-01-01T00:00:00.000Z",
-        updated_at: "2023-01-01T00:00:00.000Z",
-        question_type: {
-          id: 1,
-          name: "Multiple Choice",
-          description: "A question with multiple choices"
-        },
-        question_texts: [
-          {
+      oneOf: [
+        {
+          example: {
             id: 1,
-            question_id: 1,
-            question_text: "What is the capital of France?",
-            image_id: 1,
+            question_type_id: 1,
+            board_question: true,
             created_at: "2023-01-01T00:00:00.000Z",
             updated_at: "2023-01-01T00:00:00.000Z",
-            mcq_options: [
+            question_type: {
+              id: 1,
+              name: "Multiple Choice",
+              description: "A question with multiple choices"
+            },
+            question_texts: [
               {
                 id: 1,
-                question_text_id: 1,
-                option_text: "Paris",
-                is_correct: true,
-                image_id: 5
+                question_id: 1,
+                question_text: "What is the capital of France?",
+                image_id: 1,
+                created_at: "2023-01-01T00:00:00.000Z",
+                updated_at: "2023-01-01T00:00:00.000Z",
+                mcq_options: [
+                  {
+                    id: 1,
+                    question_text_id: 1,
+                    option_text: "Paris",
+                    is_correct: true,
+                    image_id: 5
+                  }
+                ],
+                match_pairs: [
+                  {
+                    id: 1,
+                    question_text_id: 1,
+                    left_text: "France",
+                    right_text: "Paris",
+                    left_image_id: 1,
+                    right_image_id: 2
+                  }
+                ],
+                question_text_topics: [
+                  {
+                    id: 1,
+                    question_text_id: 1,
+                    question_topic_id: 1,
+                    instruction_medium_id: 1,
+                    is_verified: false
+                  }
+                ]
               }
             ],
-            match_pairs: [
+            question_topics: [
               {
                 id: 1,
-                question_text_id: 1,
-                left_text: "France",
-                right_text: "Paris",
-                left_image_id: 1,
-                right_image_id: 2
-              }
-            ],
-            question_text_topics: [
-              {
-                id: 1,
-                question_text_id: 1,
-                question_topic_id: 1,
-                instruction_medium_id: 1,
-                is_verified: false
+                question_id: 1,
+                topic_id: 1,
+                topic: {
+                  id: 1,
+                  name: "Geography"
+                }
               }
             ]
-          }
-        ],
-        question_topics: [
-          {
+          },
+          description: "When a question is updated normally"
+        },
+        {
+          example: {
+            message: "Reused existing question text to reduce redundancy",
             id: 1,
-            question_id: 1,
-            topic_id: 1,
-            topic: {
-              id: 1,
-              name: "Geography"
-            }
-          }
-        ]
-      }
+            question_type_id: 1,
+            board_question: true,
+            created_at: "2023-01-01T00:00:00.000Z",
+            updated_at: "2023-01-01T00:00:00.000Z",
+            reused_existing_text: true
+          },
+          description: "When a matching question text was found and reused to reduce redundancy"
+        }
+      ]
     }
   })
   @ApiResponse({ status: 400, description: 'Bad request - validation error' })
@@ -453,6 +538,7 @@ export class QuestionController {
       1. Deleting question_text_topic_medium records related to the specified topic and medium
       2. Optionally deleting the question_topic association if all medium associations are removed
       3. If this was the last topic association, the entire question will be deleted
+      4. If the question is deleted, its associated images are deleted from S3 if not used elsewhere
       
       Example request body:
       \`\`\`
@@ -468,7 +554,8 @@ export class QuestionController {
       - Remove just one medium association by specifying both topic_id and instruction_medium_id
       - Remove all mediums for a topic by specifying only topic_id
       
-      If all associations are removed, the question will be deleted completely.
+      If all associations are removed, the question will be deleted completely, along with its
+      unique images that aren't used by other questions.
     `
   })
   @ApiResponse({ 
@@ -504,9 +591,10 @@ export class QuestionController {
             message: "Question ID 1 completely deleted as this was the last topic association",
             removed_from_chapter: true,
             question_deleted: true,
-            mediums_removed: ["1"]
+            mediums_removed: ["1"],
+            images_deleted: 3
           },
-          description: "When the last topic association is removed, causing the question to be deleted"
+          description: "When the last topic association is removed, causing the question and its unique images to be deleted"
         }
       ]
     }
