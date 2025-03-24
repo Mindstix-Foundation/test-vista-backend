@@ -130,6 +130,17 @@ export class CreateMcqOptionDto {
   is_correct?: boolean;
 }
 
+export class UpdateMcqOptionDto extends CreateMcqOptionDto {
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the MCQ option (required for updates, omit for new options)',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  id?: number;
+}
+
 export class CreateMatchPairDto {
   @ApiProperty({
     example: 'Left side text',
@@ -164,6 +175,17 @@ export class CreateMatchPairDto {
   @IsOptional()
   @IsInt()
   right_image_id?: number;
+}
+
+export class UpdateMatchPairDto extends CreateMatchPairDto {
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the match pair (required for updates, omit for new pairs)',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  id?: number;
 }
 
 export class CreateQuestionTextData {
@@ -203,6 +225,45 @@ export class CreateQuestionTextData {
   @ValidateNested({ each: true })
   @Type(() => CreateMatchPairDto)
   match_pairs?: CreateMatchPairDto[];
+}
+
+export class UpdateQuestionTextData {
+  @ApiProperty({
+    example: 'What is the capital of France?',
+    description: 'The text of the question'
+  })
+  @IsString()
+  @IsNotEmpty()
+  question_text: string;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Image ID for the question (optional)',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  image_id?: number;
+
+  @ApiProperty({
+    type: [UpdateMcqOptionDto],
+    description: 'MCQ options (for MCQ question types) - include ID for existing options',
+    required: false
+  })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMcqOptionDto)
+  mcq_options?: UpdateMcqOptionDto[];
+
+  @ApiProperty({
+    type: [UpdateMatchPairDto],
+    description: 'Match pairs (for matching question types) - include ID for existing pairs',
+    required: false
+  })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMatchPairDto)
+  match_pairs?: UpdateMatchPairDto[];
 }
 
 export class CreateQuestionTopicData {
@@ -345,4 +406,63 @@ export class ComplexCreateQuestionDto {
   })
   @IsOptional()
   question_text_topic_medium_data?: CreateQuestionTextTopicMediumData;
+}
+
+export class EditCompleteQuestionDto {
+  // Question properties that can be edited
+  @ApiProperty({
+    example: true,
+    description: 'Whether this is a board question'
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  board_question: boolean;
+
+  // Question text ID to specify which text to update
+  @ApiProperty({
+    example: 1,
+    description: 'ID of the specific question text to update'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  question_text_id: number;
+
+  // Question text data that can be edited
+  @ApiProperty({
+    type: UpdateQuestionTextData,
+    description: 'Question text details to update'
+  })
+  @IsNotEmpty()
+  @ValidateNested()
+  @Type(() => UpdateQuestionTextData)
+  question_text_data: UpdateQuestionTextData;
+
+  // Question topic data that can be edited
+  @ApiProperty({
+    type: CreateQuestionTopicData,
+    description: 'Question topic association to update'
+  })
+  @IsNotEmpty()
+  @ValidateNested()
+  @Type(() => CreateQuestionTopicData)
+  question_topic_data: CreateQuestionTopicData;
+}
+
+export class RemoveQuestionFromChapterDto {
+  @ApiProperty({
+    example: 1,
+    description: 'Topic ID to remove the question from'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  topic_id: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Instruction medium ID to remove the association with (optional). If not provided, all medium associations for this topic will be removed.',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  instruction_medium_id?: number;
 } 
