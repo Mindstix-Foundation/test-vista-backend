@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateQuestionTextTopicMediumDto, UpdateQuestionTextTopicMediumDto, QuestionTextTopicMediumFilterDto } from './dto/question-text-topic-medium.dto';
 
@@ -231,6 +231,111 @@ export class QuestionTextTopicMediumService {
     } catch (error) {
       this.logger.error('Error in batch update verification status:', error);
       throw error;
+    }
+  }
+
+  async setVerificationStatus(filters: {
+    question_id: number;
+    question_text_id: number;
+    topic_id: number;
+    instruction_medium_id: number;
+    is_verified: boolean;
+  }) {
+    try {
+      // Find the specific question_text_topic_medium entry based on all provided identifiers
+      const whereConditions = {
+        question_text_id: filters.question_text_id,
+        instruction_medium_id: filters.instruction_medium_id,
+        question_topic: {
+          question_id: filters.question_id,
+          topic_id: filters.topic_id
+        }
+      };
+      
+      // Log the query for debugging
+      this.logger.log(`Setting verification status to ${filters.is_verified} with specific identifiers: ${JSON.stringify(whereConditions)}`);
+      
+      // Find the specific entry
+      const existingRecord = await this.prisma.question_Text_Topic_Medium.findFirst({
+        where: whereConditions,
+        include: {
+          question_text: {
+            select: {
+              id: true,
+              question_text: true
+            }
+          },
+          question_topic: {
+            select: {
+              id: true,
+              question: {
+                select: {
+                  id: true
+                }
+              },
+              topic: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          },
+          instruction_medium: {
+            select: {
+              id: true,
+              instruction_medium: true
+            }
+          }
+        }
+      });
+      
+      if (!existingRecord) {
+        throw new NotFoundException(`No question found matching the specified criteria: 
+          Question ID: ${filters.question_id}, 
+          Question Text ID: ${filters.question_text_id}, 
+          Topic ID: ${filters.topic_id}, 
+          Medium ID: ${filters.instruction_medium_id}`);
+      }
+      
+      // Perform the update on the specific entry
+      const result = await this.prisma.question_Text_Topic_Medium.updateMany({
+        where: whereConditions,
+        data: {
+          is_verified: filters.is_verified,
+          updated_at: new Date()
+        }
+      });
+      
+      if (result.count === 0) {
+        throw new InternalServerErrorException('Failed to update verification status');
+      }
+      
+      // Get details for the response
+      const questionText = existingRecord.question_text.question_text;
+      const topicName = existingRecord.question_topic.topic.name;
+      const mediumName = existingRecord.instruction_medium.instruction_medium;
+      
+      return {
+        message: `Successfully ${filters.is_verified ? 'verified' : 'unverified'} the question`,
+        affected: result.count,
+        is_verified: filters.is_verified,
+        details: {
+          question_id: filters.question_id,
+          question_text_id: filters.question_text_id,
+          topic_id: filters.topic_id,
+          topic_name: topicName,
+          instruction_medium_id: filters.instruction_medium_id,
+          medium_name: mediumName,
+          question_text: questionText?.substring(0, 50) + (questionText?.length > 50 ? '...' : '')
+        }
+      };
+    } catch (error) {
+      this.logger.error('Error setting verification status:', error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to update verification status');
     }
   }
 } 

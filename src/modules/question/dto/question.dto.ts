@@ -102,6 +102,20 @@ export class QuestionFilterDto extends PaginationDto {
   @Type(() => Number)
   @IsInt({ message: 'instruction_medium_id must be an integer' })
   instruction_medium_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: true,
+    description: 'Filter by verification status'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'is_verified must be a boolean' })
+  is_verified?: boolean;
 }
 
 export class CreateMcqOptionDto {

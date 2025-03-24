@@ -16,6 +16,7 @@ interface QuestionFilters {
   search?: string;
   board_question?: boolean;
   instruction_medium_id?: number;
+  is_verified?: boolean;
 }
 
 @Injectable()
@@ -198,13 +199,14 @@ export class QuestionService {
         page_size = 10, 
         sort_by = QuestionSortField.CREATED_AT, 
         sort_order = SortOrder.DESC,
-        search
+        search,
+        is_verified
       } = filters;
       
       // Define where conditions for main query
       const whereConditions: any = {};
 
-      // Basic filters
+      // Basic filters directly on the Question model
       if (question_type_id !== undefined) {
         whereConditions.question_type_id = question_type_id;
       }
@@ -213,53 +215,79 @@ export class QuestionService {
         whereConditions.board_question = board_question;
       }
       
-      // Handle topic filter
-      if (topic_id !== undefined) {
+      // Handle topic-related filters - we need to properly combine topic_id and chapter_id
+      if (topic_id !== undefined || chapter_id !== undefined) {
         whereConditions.question_topics = {
-          some: {
-            topic_id
-          }
+          some: {}
         };
-      }
-
-      // Add chapter filter if specified
-      if (chapter_id !== undefined) {
-        whereConditions.question_topics = {
-          ...(whereConditions.question_topics || {}),
-          some: {
-            ...(whereConditions.question_topics?.some || {}),
-            topic: {
-              chapter_id
-            }
-          }
-        };
+        
+        // Add topic_id filter if specified
+        if (topic_id !== undefined) {
+          whereConditions.question_topics.some.topic_id = topic_id;
+        }
+        
+        // Add chapter_id filter if specified
+        if (chapter_id !== undefined) {
+          whereConditions.question_topics.some.topic = {
+            chapter_id
+          };
+        }
       }
       
-      // Instruction medium filter needs to go through question_texts and the junction table
+      // Handle question_texts filters - properly combine instruction_medium_id, search, and is_verified
+      const questionTextFilters = [];
+      
+      // Instruction medium filter
       if (instruction_medium_id !== undefined) {
-        whereConditions.question_texts = {
-            some: {
+        questionTextFilters.push({
               question_text_topics: {
                 some: {
-                instruction_medium_id
-              }
+              instruction_medium_id
             }
           }
-        };
+        });
       }
-
+      
+      // Verification status filter
+      if (is_verified !== undefined) {
+        questionTextFilters.push({
+              question_text_topics: {
+                some: {
+              is_verified
+            }
+          }
+        });
+      }
+      
       // Search filter
       if (search) {
-        whereConditions.question_texts = {
-          ...(whereConditions.question_texts || {}),
-            some: {
+        questionTextFilters.push({
               question_text: {
                 contains: search,
                 mode: 'insensitive'
-              }
-            }
-        };
+          }
+        });
       }
+      
+      // If we have any question_texts filters, add them to the where conditions
+      if (questionTextFilters.length > 0) {
+        // If we have multiple filters, we need to combine them with AND logic
+        if (questionTextFilters.length === 1) {
+          whereConditions.question_texts = {
+            some: questionTextFilters[0]
+          };
+        } else {
+          // For multiple filters, we construct an AND condition where EACH filter must be true for at least one question_text
+          whereConditions.question_texts = {
+            some: {
+              AND: questionTextFilters
+            }
+          };
+        }
+      }
+
+      // Log the constructed where conditions for debugging
+      this.logger.log(`Constructed where conditions: ${JSON.stringify(whereConditions)}`);
 
       // Handle sorting: map sort_by to actual DB field
       const orderBy: any = {};
@@ -1123,7 +1151,7 @@ export class QuestionService {
                   where: { id: existingQuestionText.question_id },
                   include: {
                     question_type: true,
-                    question_texts: {
+          question_texts: {
                       include: {
                         image: true,
                         mcq_options: {
@@ -1153,9 +1181,9 @@ export class QuestionService {
                       include: {
                         topic: true
                       }
-                    }
-                  }
-                });
+            }
+          }
+        });
                 
                 return {
                   message: `Added new medium association to existing question`,
@@ -1226,7 +1254,7 @@ export class QuestionService {
                       }
                     }
                   },
-                  question_topics: {
+          question_topics: {
                     include: {
                       topic: true
                     }
@@ -1344,7 +1372,7 @@ export class QuestionService {
                     right_image: true
                   }
                 },
-                question_text_topics: {
+              question_text_topics: {
                   include: {
                     instruction_medium: true,
                     question_topic: {
@@ -1359,10 +1387,10 @@ export class QuestionService {
             question_topics: {
               include: {
                 topic: true
-              }
             }
           }
-        });
+        }
+      });
 
         // Transform the result to include presigned URLs for images
         const resultWithUrls = await this.transformSingleQuestion(result);
@@ -1523,7 +1551,7 @@ export class QuestionService {
           question: {
             include: {
               question_type: true,
-              question_topics: {
+          question_topics: {
                 where: {
                   topic_id: question_topic_data.topic_id
                 },
@@ -1535,15 +1563,15 @@ export class QuestionService {
           },
           mcq_options: true,
           match_pairs: true,
-          question_text_topics: {
+              question_text_topics: {
             where: {
               question_topic: {
                 topic_id: question_topic_data.topic_id
+                }
               }
             }
           }
-        }
-      });
+        });
 
       if (existingQuestionText) {
         this.logger.log(`Found existing question text with ID ${existingQuestionText.id} containing the same content`);
@@ -1655,8 +1683,8 @@ export class QuestionService {
           // Return the question with the reused text
           const updatedQuestion = await prisma.question.findUnique({
             where: { id },
-            include: {
-              question_type: true,
+        include: {
+          question_type: true,
               question_texts: {
                 where: { id: existingQuestionText.id },
                 include: {
@@ -1684,8 +1712,8 @@ export class QuestionService {
                   }
                 }
               },
-              question_topics: {
-                include: {
+          question_topics: {
+            include: {
                   topic: true
                 }
               }
@@ -1999,7 +2027,7 @@ export class QuestionService {
                 await this.awsS3Service.deleteFile(imageUrl);
               }));
               this.logger.log(`Successfully deleted ${imagesToDelete.length} images from S3 for question ${id}`);
-            } catch (error) {
+    } catch (error) {
               this.logger.error(`Error deleting images from S3 for question ${id}:`, error);
               // We continue even if image deletion fails since the database records are already deleted
             }
@@ -2130,5 +2158,45 @@ export class QuestionService {
     
     this.logger.log(`Found ${safeToDelete.length} images that can be safely deleted for question ${question.id}`);
     return safeToDelete;
+  }
+
+  // Simplify questions for API response
+  private simplifyQuestionData(questions) {
+    if (!Array.isArray(questions)) {
+      return this.simplifyQuestionItem(questions);
+    }
+    
+    return questions.map(question => this.simplifyQuestionItem(question));
+  }
+  
+  // Simplify a question object to include only essential fields
+  private simplifyQuestionItem(question) {
+    if (!question) return null;
+    
+    // Simplified question object with only required fields
+    return {
+      id: question.id,
+      board_question: question.board_question,
+      question_type: question.question_type ? {
+        id: question.question_type.id,
+        type_name: question.question_type.type_name
+      } : null,
+      question_texts: (question.question_texts || []).map(text => ({
+        id: text.id,
+        question_id: text.question_id,
+        image_id: text.image_id,
+        question_text: text.question_text,
+        image: text.image,
+        mcq_options: text.mcq_options || [],
+        match_pairs: text.match_pairs || [],
+        topic: text.question_text_topics && text.question_text_topics.length > 0 
+          ? {
+              id: text.question_text_topics[0].question_topic?.topic?.id,
+              chapter_id: text.question_text_topics[0].question_topic?.topic?.chapter_id,
+              name: text.question_text_topics[0].question_topic?.topic?.name
+            }
+          : null
+      }))
+    };
   }
 } 

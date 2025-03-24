@@ -219,6 +219,7 @@ export class QuestionController {
   @ApiQuery({ name: 'chapter_id', required: false, type: Number })
   @ApiQuery({ name: 'board_question', required: false, type: Boolean })
   @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
+  @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'Filter by verification status' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'page_size', required: false, type: Number })
   @ApiQuery({ name: 'sort_by', required: false, enum: QuestionSortField })
@@ -236,12 +237,14 @@ export class QuestionController {
       page_size,
       sort_by,
       sort_order,
-      search
+      search,
+      is_verified
     } = filters;
 
     // Add diagnostic logging
     this.logger.log(`Question findAll called with params:
       - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
+      - is_verified: ${is_verified} (${typeof is_verified})
       - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
     `);
 
@@ -265,7 +268,8 @@ export class QuestionController {
       }
     }
 
-    return await this.questionService.findAll({
+    // Get the full response from the service
+    const fullResponse = await this.questionService.findAll({
       question_type_id,
       topic_id,
       chapter_id,
@@ -275,17 +279,115 @@ export class QuestionController {
       page_size,
       sort_by: questionSortBy,
       sort_order,
-      search
+      search,
+      is_verified
     });
+    
+    // Simplify the response to include only the needed fields
+    const simplifiedData = fullResponse.data.map(question => {
+      return {
+        id: question.id,
+        board_question: question.board_question,
+        question_type: {
+          id: question.question_type.id,
+          type_name: question.question_type.type_name
+        },
+        question_texts: question.question_texts.map(text => ({
+          id: text.id,
+          question_id: text.question_id,
+          image_id: text.image_id,
+          question_text: text.question_text,
+          image: text.image,
+          mcq_options: text.mcq_options || [],
+          match_pairs: text.match_pairs || [],
+          topic: question.question_topics && question.question_topics.length > 0 
+            ? {
+                id: question.question_topics[0].topic?.id,
+                chapter_id: question.question_topics[0].topic?.chapter_id,
+                name: question.question_topics[0].topic?.name
+              }
+            : null
+        }))
+      };
+    });
+    
+    return {
+      data: simplifiedData,
+      meta: fullResponse.meta
+    };
   }
 
   @Get(':id')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get question by ID' })
-  @ApiResponse({ status: 200, description: 'Returns the question' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns the question with simplified data structure',
+    schema: {
+      example: {
+        id: 15,
+        board_question: true,
+        question_type: {
+          id: 4,
+          type_name: "True or False"
+        },
+        question_texts: [
+          {
+            id: 19,
+            question_id: 15,
+            image_id: null,
+            question_text: ".... is first human\n",
+            image: {
+              id: 13,
+              original_filename: "join-us-banner.jpg",
+              file_type: "image/jpeg",
+              width: 1920,
+              height: 1068,
+              presigned_url: "https://test-vista-dev-image.s3.eu-north-1.amazonaws.com/images/1742808983126-join-us-banner.jpg"
+            },
+            mcq_options: [],
+            match_pairs: [],
+            topic: {
+              id: 19,
+              chapter_id: 7,
+              name: "First Human"
+            }
+          }
+        ]
+      }
+    }
+  })
   @ApiResponse({ status: 404, description: 'Question not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    return await this.questionService.findOne(id);
+    const question = await this.questionService.findOne(id);
+    
+    // Simplify the response to match the format of the main endpoint
+    const simplifiedQuestion = {
+      id: question.id,
+      board_question: question.board_question,
+      question_type: {
+        id: question.question_type.id,
+        type_name: question.question_type.type_name
+      },
+      question_texts: question.question_texts.map(text => ({
+        id: text.id,
+        question_id: text.question_id,
+        image_id: text.image_id,
+        question_text: text.question_text,
+        image: text.image,
+        mcq_options: text.mcq_options || [],
+        match_pairs: text.match_pairs || [],
+        topic: question.question_topics && question.question_topics.length > 0 
+          ? {
+              id: question.question_topics[0].topic?.id,
+              chapter_id: question.question_topics[0].topic?.chapter_id,
+              name: question.question_topics[0].topic?.name
+            }
+          : null
+      }))
+    };
+    
+    return simplifiedQuestion;
   }
 
   @Put(':id')
