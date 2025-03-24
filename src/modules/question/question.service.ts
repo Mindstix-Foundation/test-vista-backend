@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, ComplexCreateQuestionDto, CompleteQuestionDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, ComplexCreateQuestionDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto } from './dto/question.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
 import { AwsS3Service } from '../aws/aws-s3.service';
@@ -1113,5 +1113,430 @@ export class QuestionService {
       }
       throw new InternalServerErrorException('Failed to create complete question');
     }
+  }
+
+  async updateComplete(id: number, editDto: EditCompleteQuestionDto) {
+    const { board_question, question_text_id, question_text_data, question_topic_data } = editDto;
+
+    this.logger.log(`Updating complete question with ID ${id} and question text ID ${question_text_id}`);
+    
+    // We'll execute all operations in a transaction to ensure data consistency
+    return await this.prisma.$transaction(async (prisma) => {
+      // 1. Validate that the question exists
+      const question = await prisma.question.findUnique({
+        where: { id },
+        include: {
+          question_texts: true,
+          question_topics: true
+        }
+      });
+
+      if (!question) {
+        throw new NotFoundException(`Question with ID ${id} not found`);
+      }
+
+      // 1.1 Validate that the specified question text exists and belongs to this question
+      const questionText = await prisma.question_Text.findFirst({
+        where: { 
+          id: question_text_id,
+          question_id: id
+        }
+      });
+
+      if (!questionText) {
+        throw new NotFoundException(`Question text with ID ${question_text_id} not found for question ${id}`);
+      }
+
+      // 2. Check if the question type allows MCQ options or match pairs
+      const questionType = await prisma.question_Type.findUnique({
+        where: { id: question.question_type_id }
+      });
+
+      if (!questionType) {
+        throw new NotFoundException(`Question type with ID ${question.question_type_id} not found`);
+      }
+
+      // 2.1 Validate topic
+      const topic = await prisma.topic.findUnique({
+        where: { id: question_topic_data.topic_id }
+      });
+
+      if (!topic) {
+        throw new NotFoundException(`Topic with ID ${question_topic_data.topic_id} not found`);
+      }
+
+      // 2.2 Check image if provided for question text
+      if (question_text_data.image_id) {
+        const image = await prisma.image.findUnique({
+          where: { id: question_text_data.image_id }
+        });
+        if (!image) {
+          throw new NotFoundException(`Image with ID ${question_text_data.image_id} not found`);
+        }
+      }
+
+      // 2.3 Check images for MCQ options if provided
+      if (question_text_data.mcq_options) {
+        for (const option of question_text_data.mcq_options) {
+          if (option.image_id) {
+            const image = await prisma.image.findUnique({
+              where: { id: option.image_id }
+            });
+            if (!image) {
+              throw new NotFoundException(`Image with ID ${option.image_id} for MCQ option not found`);
+            }
+          }
+        }
+      }
+
+      // 2.4 Check images for match pairs if provided
+      if (question_text_data.match_pairs) {
+        for (const pair of question_text_data.match_pairs) {
+          if (pair.left_image_id) {
+            const leftImage = await prisma.image.findUnique({
+              where: { id: pair.left_image_id }
+            });
+            if (!leftImage) {
+              throw new NotFoundException(`Left image with ID ${pair.left_image_id} for match pair not found`);
+            }
+          }
+          if (pair.right_image_id) {
+            const rightImage = await prisma.image.findUnique({
+              where: { id: pair.right_image_id }
+            });
+            if (!rightImage) {
+              throw new NotFoundException(`Right image with ID ${pair.right_image_id} for match pair not found`);
+            }
+          }
+        }
+      }
+
+      // 3. Update the question board status
+      await prisma.question.update({
+        where: { id },
+        data: { board_question }
+      });
+
+      // 4. Update the topic association
+      // First, find the existing topic association
+      const existingTopic = await prisma.question_Topic.findFirst({
+        where: { question_id: id }
+      });
+
+      if (existingTopic) {
+        // Update existing topic association
+        await prisma.question_Topic.update({
+          where: { id: existingTopic.id },
+          data: { topic_id: question_topic_data.topic_id }
+        });
+      } else {
+        // Create new topic association if doesn't exist (shouldn't happen in normal flow)
+        await prisma.question_Topic.create({
+          data: {
+            question_id: id,
+            topic_id: question_topic_data.topic_id
+          }
+        });
+      }
+
+      // 5. Update the specified question text
+      await prisma.question_Text.update({
+        where: { id: question_text_id },
+        data: {
+          question_text: question_text_data.question_text,
+          image_id: question_text_data.image_id
+        }
+      });
+
+      // 6. Update MCQ options if provided
+      if (question_text_data.mcq_options) {
+        // Get existing MCQ options
+        const existingOptions = await prisma.mcq_Option.findMany({
+          where: { question_text_id: question_text_id }
+        });
+
+        // Create a map for easier lookup
+        const existingOptionsMap = new Map(existingOptions.map(opt => [opt.id, opt]));
+        
+        // Keep track of processed options to identify which ones to delete
+        const processedOptionIds = new Set();
+
+        // Process each MCQ option
+        for (const option of question_text_data.mcq_options) {
+          if (option.id) {
+            // Update existing option
+            if (existingOptionsMap.has(option.id)) {
+              await prisma.mcq_Option.update({
+                where: { id: option.id },
+                data: {
+                  option_text: option.option_text,
+                  is_correct: option.is_correct,
+                  image_id: option.image_id
+                }
+              });
+              processedOptionIds.add(option.id);
+            }
+          } else {
+            // Create new option
+            await prisma.mcq_Option.create({
+              data: {
+                question_text_id: question_text_id,
+                option_text: option.option_text,
+                is_correct: option.is_correct ?? false,
+                image_id: option.image_id
+              }
+            });
+          }
+        }
+
+        // Delete options that weren't included in the update
+        const optionsToDelete = existingOptions
+          .filter(opt => !processedOptionIds.has(opt.id))
+          .map(opt => opt.id);
+          
+        if (optionsToDelete.length > 0) {
+          await prisma.mcq_Option.deleteMany({
+            where: { id: { in: optionsToDelete } }
+          });
+        }
+      }
+
+      // 7. Update match pairs if provided
+      if (question_text_data.match_pairs) {
+        // Get existing match pairs
+        const existingPairs = await prisma.match_Pair.findMany({
+          where: { question_text_id: question_text_id }
+        });
+
+        // Create a map for easier lookup
+        const existingPairsMap = new Map(existingPairs.map(pair => [pair.id, pair]));
+        
+        // Keep track of processed pairs to identify which ones to delete
+        const processedPairIds = new Set();
+
+        // Process each match pair
+        for (const pair of question_text_data.match_pairs) {
+          if (pair.id) {
+            // Update existing pair
+            if (existingPairsMap.has(pair.id)) {
+              await prisma.match_Pair.update({
+                where: { id: pair.id },
+                data: {
+                  left_text: pair.left_text,
+                  right_text: pair.right_text,
+                  left_image_id: pair.left_image_id,
+                  right_image_id: pair.right_image_id
+                }
+              });
+              processedPairIds.add(pair.id);
+            }
+          } else {
+            // Create new pair
+            await prisma.match_Pair.create({
+              data: {
+                question_text_id: question_text_id,
+                left_text: pair.left_text,
+                right_text: pair.right_text,
+                left_image_id: pair.left_image_id,
+                right_image_id: pair.right_image_id
+              }
+            });
+          }
+        }
+
+        // Delete pairs that weren't included in the update
+        const pairsToDelete = existingPairs
+          .filter(pair => !processedPairIds.has(pair.id))
+          .map(pair => pair.id);
+          
+        if (pairsToDelete.length > 0) {
+          await prisma.match_Pair.deleteMany({
+            where: { id: { in: pairsToDelete } }
+          });
+        }
+      }
+
+      // 8. Update verification status to false in Question_Text_Topic_Medium
+      await prisma.question_Text_Topic_Medium.updateMany({
+        where: { question_text_id: question_text_id },
+        data: { is_verified: false }
+      });
+
+      // 9. Return the updated question with all related data
+      return await prisma.question.findUnique({
+        where: { id },
+        include: {
+          question_type: true,
+          question_texts: {
+            where: { id: question_text_id },
+            include: {
+              image: true,
+              mcq_options: {
+                include: {
+                  image: true
+                }
+              },
+              match_pairs: {
+                include: {
+                  left_image: true,
+                  right_image: true
+                }
+              },
+              question_text_topics: {
+                include: {
+                  instruction_medium: true,
+                  question_topic: {
+                    include: {
+                      topic: true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          question_topics: {
+            include: {
+              topic: true
+            }
+          }
+        }
+      });
+    });
+  }
+
+  async removeFromChapter(id: number, removeDto: RemoveQuestionFromChapterDto) {
+    const { topic_id, instruction_medium_id } = removeDto;
+
+    this.logger.log(`Removing question ID ${id} from topic ID ${topic_id}${instruction_medium_id ? ` with instruction medium ID ${instruction_medium_id}` : ' (all mediums)'}`);
+    
+    return await this.prisma.$transaction(async (prisma) => {
+      // 1. Validate that the question exists
+      const question = await prisma.question.findUnique({
+        where: { id },
+        include: {
+          question_topics: true
+        }
+      });
+
+      if (!question) {
+        throw new NotFoundException(`Question with ID ${id} not found`);
+      }
+
+      // 2. Find the specific question_topic record for this topic
+      const questionTopic = await prisma.question_Topic.findFirst({
+        where: {
+          question_id: id,
+          topic_id: topic_id
+        }
+      });
+
+      if (!questionTopic) {
+        throw new NotFoundException(`Question with ID ${id} is not associated with topic ID ${topic_id}`);
+      }
+
+      // 3. Find all question_text records for this question
+      const questionTexts = await prisma.question_Text.findMany({
+        where: { question_id: id }
+      });
+
+      if (!questionTexts || questionTexts.length === 0) {
+        throw new NotFoundException(`No question texts found for question ID ${id}`);
+      }
+
+      // 4. Find and delete all relevant question_text_topic_medium records
+      const deletedAssociations = [];
+      for (const questionText of questionTexts) {
+        // Create the where condition based on whether instruction_medium_id is provided
+        const whereCondition: Prisma.Question_Text_Topic_MediumWhereInput = {
+          question_text_id: questionText.id,
+          question_topic_id: questionTopic.id,
+        };
+        
+        // Only add instruction_medium_id to the condition if it's provided
+        if (instruction_medium_id !== undefined) {
+          whereCondition.instruction_medium_id = instruction_medium_id;
+        }
+        
+        // Get the associations before deletion for reporting
+        const associations = await prisma.question_Text_Topic_Medium.findMany({
+          where: whereCondition,
+          include: {
+            instruction_medium: true
+          }
+        });
+        
+        deletedAssociations.push(...associations.map(a => a.instruction_medium_id.toString()));
+        
+        // Delete the associations
+        await prisma.question_Text_Topic_Medium.deleteMany({
+          where: whereCondition
+        });
+      }
+
+      // 5. Check if there are any remaining question_text_topic_medium records for this question_topic
+      const remainingAssociations = await prisma.question_Text_Topic_Medium.count({
+        where: {
+          question_topic_id: questionTopic.id
+        }
+      });
+
+      // If no instruction_medium_id was specified or there are no remaining associations,
+      // we should delete the question_topic
+      const shouldDeleteQuestionTopic = instruction_medium_id === undefined || remainingAssociations === 0;
+
+      if (shouldDeleteQuestionTopic) {
+        // 6. Check if this is the last question_topic for this question
+        const remainingTopics = await prisma.question_Topic.count({
+          where: {
+            question_id: id,
+            NOT: {
+              id: questionTopic.id // Exclude the current topic
+            }
+          }
+        });
+
+        // 7. If it's the last topic, delete the entire question
+        if (remainingTopics === 0) {
+          this.logger.log(`This is the last topic for question ID ${id}. Deleting the entire question.`);
+          
+          // Delete the question (will cascade delete all related records)
+          await prisma.question.delete({
+            where: { id }
+          });
+
+          return {
+            message: `Question ID ${id} completely deleted as this was the last topic association`,
+            removed_from_chapter: true,
+            question_deleted: true,
+            mediums_removed: deletedAssociations
+          };
+        } else {
+          // 8. If it's not the last topic, just delete this question_topic
+          await prisma.question_Topic.delete({
+            where: { id: questionTopic.id }
+          });
+
+          return {
+            message: `Question ID ${id} completely removed from topic ID ${topic_id}`,
+            removed_from_chapter: true,
+            topic_association_deleted: true,
+            question_deleted: false,
+            remaining_topic_count: remainingTopics,
+            mediums_removed: deletedAssociations
+          };
+        }
+      } else {
+        // 9. If we only deleted specific medium associations but the topic still has others
+        return {
+          message: `Question ID ${id} partially removed from topic ID ${topic_id}`,
+          removed_from_chapter: true,
+          topic_association_deleted: false,
+          medium_associations_deleted: true,
+          question_deleted: false,
+          mediums_removed: deletedAssociations,
+          remaining_medium_associations: remainingAssociations
+        };
+      }
+    });
   }
 } 

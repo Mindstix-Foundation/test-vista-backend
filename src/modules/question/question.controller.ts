@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, CompleteQuestionDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto } from './dto/question.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -317,5 +317,206 @@ export class QuestionController {
       questionSortBy, // Pass the mapped sort field as a separate parameter
       sort_order
     );
+  }
+
+  @Put('edit/:id')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Edit a complete question with restricted fields in a single transaction',
+    description: `
+      Updates a question with selected fields in a single transaction:
+      - Only board_question, question_text, image_id, and topic_id can be edited
+      - MCQ options and match pairs can be updated if applicable
+      - After any edit, is_verified flag is set to false in Question_Text_Topic_Medium relations
+      - Requires specifying which question_text to edit via question_text_id
+      
+      Example request body:
+      \`\`\`
+      {
+        "board_question": true,
+        "question_text_id": 1,
+        "question_text_data": {
+          "question_text": "What is the capital of France?",
+          "image_id": 1,
+          "mcq_options": [
+            {
+              "id": 1,  // Include ID to update existing option, omit to create new
+              "option_text": "Paris",
+              "image_id": 5,
+              "is_correct": true
+            },
+            {
+              "option_text": "London",  // No ID, will create new option
+              "is_correct": false
+            }
+          ],
+          "match_pairs": [
+            {
+              "id": 1,  // Include ID to update existing pair, omit to create new
+              "left_text": "France",
+              "right_text": "Paris",
+              "left_image_id": 1,
+              "right_image_id": 2
+            }
+          ]
+        },
+        "question_topic_data": {
+          "topic_id": 1
+        }
+      }
+      \`\`\`
+    `
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Question and related data updated successfully',
+    schema: {
+      example: {
+        id: 1,
+        question_type_id: 1,
+        board_question: true,
+        created_at: "2023-01-01T00:00:00.000Z",
+        updated_at: "2023-01-01T00:00:00.000Z",
+        question_type: {
+          id: 1,
+          name: "Multiple Choice",
+          description: "A question with multiple choices"
+        },
+        question_texts: [
+          {
+            id: 1,
+            question_id: 1,
+            question_text: "What is the capital of France?",
+            image_id: 1,
+            created_at: "2023-01-01T00:00:00.000Z",
+            updated_at: "2023-01-01T00:00:00.000Z",
+            mcq_options: [
+              {
+                id: 1,
+                question_text_id: 1,
+                option_text: "Paris",
+                is_correct: true,
+                image_id: 5
+              }
+            ],
+            match_pairs: [
+              {
+                id: 1,
+                question_text_id: 1,
+                left_text: "France",
+                right_text: "Paris",
+                left_image_id: 1,
+                right_image_id: 2
+              }
+            ],
+            question_text_topics: [
+              {
+                id: 1,
+                question_text_id: 1,
+                question_topic_id: 1,
+                instruction_medium_id: 1,
+                is_verified: false
+              }
+            ]
+          }
+        ],
+        question_topics: [
+          {
+            id: 1,
+            question_id: 1,
+            topic_id: 1,
+            topic: {
+              id: 1,
+              name: "Geography"
+            }
+          }
+        ]
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Bad request - validation error' })
+  @ApiResponse({ status: 404, description: 'Question or referenced entity not found' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async updateComplete(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() editDto: EditCompleteQuestionDto
+  ) {
+    return await this.questionService.updateComplete(id, editDto);
+  }
+
+  @Delete(':id/remove-from-chapter')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Remove a question from a specific chapter/topic',
+    description: `
+      Removes a question from a specific chapter by:
+      1. Deleting question_text_topic_medium records related to the specified topic and medium
+      2. Optionally deleting the question_topic association if all medium associations are removed
+      3. If this was the last topic association, the entire question will be deleted
+      
+      Example request body:
+      \`\`\`
+      {
+        "topic_id": 1,
+        "instruction_medium_id": 1  // Optional. If omitted, all mediums for this topic will be removed
+      }
+      \`\`\`
+      
+      This operation differs from the delete endpoint as it selectively removes the question from a 
+      specific chapter rather than completely deleting it from all chapters. You can:
+      
+      - Remove just one medium association by specifying both topic_id and instruction_medium_id
+      - Remove all mediums for a topic by specifying only topic_id
+      
+      If all associations are removed, the question will be deleted completely.
+    `
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Question removed from chapter successfully',
+    schema: {
+      oneOf: [
+        {
+          example: {
+            message: "Question ID 1 partially removed from topic ID 1",
+            removed_from_chapter: true,
+            topic_association_deleted: false,
+            medium_associations_deleted: true,
+            question_deleted: false,
+            mediums_removed: ["1"],
+            remaining_medium_associations: 2
+          },
+          description: "When a specific medium is removed but other medium associations remain"
+        },
+        {
+          example: {
+            message: "Question ID 1 completely removed from topic ID 1",
+            removed_from_chapter: true,
+            topic_association_deleted: true,
+            question_deleted: false,
+            remaining_topic_count: 2,
+            mediums_removed: ["1", "2"]
+          },
+          description: "When all mediums for a topic are removed but other topics remain"
+        },
+        {
+          example: {
+            message: "Question ID 1 completely deleted as this was the last topic association",
+            removed_from_chapter: true,
+            question_deleted: true,
+            mediums_removed: ["1"]
+          },
+          description: "When the last topic association is removed, causing the question to be deleted"
+        }
+      ]
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Question, topic, or association not found' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async removeFromChapter(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() removeQuestionFromChapterDto: RemoveQuestionFromChapterDto,
+  ) {
+    return this.questionService.removeFromChapter(id, removeQuestionFromChapterDto);
   }
 }
