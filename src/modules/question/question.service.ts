@@ -188,19 +188,19 @@ export class QuestionService {
 
   async findAll(filters: QuestionFilters) {
     try {
-      const {
-        question_type_id,
-        topic_id,
-        chapter_id,
+      const { 
+        question_type_id, 
+        topic_id, 
+        chapter_id, 
         board_question,
         instruction_medium_id,
-        page = 1,
-        page_size = 10,
-        sort_by = QuestionSortField.CREATED_AT,
+        page = 1, 
+        page_size = 10, 
+        sort_by = QuestionSortField.CREATED_AT, 
         sort_order = SortOrder.DESC,
         search
       } = filters;
-
+      
       // Define where conditions for main query
       const whereConditions: any = {};
 
@@ -234,13 +234,13 @@ export class QuestionService {
           }
         };
       }
-
+      
       // Instruction medium filter needs to go through question_texts and the junction table
       if (instruction_medium_id !== undefined) {
         whereConditions.question_texts = {
-          some: {
-            question_text_topics: {
-              some: {
+            some: {
+              question_text_topics: {
+                some: {
                 instruction_medium_id
               }
             }
@@ -252,12 +252,12 @@ export class QuestionService {
       if (search) {
         whereConditions.question_texts = {
           ...(whereConditions.question_texts || {}),
-          some: {
-            question_text: {
-              contains: search,
-              mode: 'insensitive'
+            some: {
+              question_text: {
+                contains: search,
+                mode: 'insensitive'
+              }
             }
-          }
         };
       }
 
@@ -333,10 +333,10 @@ export class QuestionService {
           }
         }
       });
-
+      
       // Transform data for response
       const transformedQuestions = await this.transformQuestionResults(questions);
-
+      
       return {
         data: transformedQuestions,
         meta: {
@@ -917,7 +917,7 @@ export class QuestionService {
               }
             }
           },
-          question_topics: {
+          question_topics: { 
             include: {
               topic: {
                 include: {
@@ -1068,49 +1068,132 @@ export class QuestionService {
         if (existingQuestionText) {
           this.logger.log(`Found existing question text with ID ${existingQuestionText.id}`);
           
-          // Check if question is associated with the requested topic
-          const existingTopicAssociation = existingQuestionText.question.question_topics.length > 0;
-          
-          if (existingTopicAssociation) {
-            this.logger.log(`Question ID ${existingQuestionText.question_id} is already associated with topic ID ${question_topic_data.topic_id}`);
+          // Check if question types are different
+          if (existingQuestionText.question.question_type_id !== question_type_id) {
+            this.logger.log(`Question types are different (existing: ${existingQuestionText.question.question_type_id}, new: ${question_type_id}). Creating a new question.`);
+            // Skip to creating a new question as different question type means different question
+            // No early return here - continue to create a new question below
+          } else {
+            // Question types are the same, check if question is associated with the requested topic
+            const existingTopicAssociation = existingQuestionText.question.question_topics.length > 0;
             
-            // If medium is specified, check medium association
-            if (question_text_topic_medium_data) {
-              const existingMediumAssociation = existingQuestionText.question_text_topics.some(
-                textTopic => textTopic.instruction_medium_id === question_text_topic_medium_data.instruction_medium_id
-              );
+            if (existingTopicAssociation) {
+              this.logger.log(`Question ID ${existingQuestionText.question_id} is already associated with topic ID ${question_topic_data.topic_id}`);
               
-              if (existingMediumAssociation) {
-                // Question with same text already exists for this topic and medium
-                const mediumInfo = await prisma.instruction_Medium.findUnique({
-                  where: { id: question_text_topic_medium_data.instruction_medium_id },
-                  select: { instruction_medium: true }
+              // If medium is specified, check medium association
+              if (question_text_topic_medium_data) {
+                const existingMediumAssociation = existingQuestionText.question_text_topics.some(
+                  textTopic => textTopic.instruction_medium_id === question_text_topic_medium_data.instruction_medium_id
+                );
+                
+                if (existingMediumAssociation) {
+                  // Question with same text already exists for this topic and medium
+                  const mediumInfo = await prisma.instruction_Medium.findUnique({
+                    where: { id: question_text_topic_medium_data.instruction_medium_id },
+                    select: { instruction_medium: true }
+                  });
+                  
+                  const topicName = topic.name;
+                  
+                  return {
+                    message: `Question with the same text already exists for topic "${topicName}" and medium "${mediumInfo?.instruction_medium}"`,
+                    existing_question: await this.transformSingleQuestion(existingQuestionText.question),
+                    is_duplicate: true
+                  };
+                }
+                
+                // Question exists for this topic but not for this medium - add the medium association
+                this.logger.log(`Creating new medium association for existing question text ${existingQuestionText.id}`);
+                
+                // Find the question topic association
+                const questionTopic = existingQuestionText.question.question_topics[0];
+                
+                // Create the question text topic medium association
+                await prisma.question_Text_Topic_Medium.create({
+                  data: {
+                    question_text_id: existingQuestionText.id,
+                    question_topic_id: questionTopic.id,
+                    instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
+                    is_verified: false
+                  }
                 });
                 
-                const topicName = topic.name;
+                // Return the updated question
+                const result = await prisma.question.findUnique({
+                  where: { id: existingQuestionText.question_id },
+                  include: {
+                    question_type: true,
+                    question_texts: {
+                      include: {
+                        image: true,
+                        mcq_options: {
+                          include: {
+                            image: true
+                          }
+                        },
+                        match_pairs: {
+                          include: {
+                            left_image: true,
+                            right_image: true
+                          }
+                        },
+                        question_text_topics: {
+                          include: {
+                            instruction_medium: true,
+                            question_topic: {
+                              include: {
+                                topic: true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    question_topics: {
+                      include: {
+                        topic: true
+                      }
+                    }
+                  }
+                });
                 
                 return {
-                  message: `Question with the same text already exists for topic "${topicName}" and medium "${mediumInfo?.instruction_medium}"`,
+                  message: `Added new medium association to existing question`,
+                  ...await this.transformSingleQuestion(result),
+                  reused_existing_question: true
+                };
+              } else {
+                // No medium specified but question already exists for this topic
+                return {
+                  message: `Question with the same text already exists for topic "${topic.name}"`,
                   existing_question: await this.transformSingleQuestion(existingQuestionText.question),
                   is_duplicate: true
                 };
               }
+            } else {
+              // Question text exists but not for this topic - create the topic association
+              this.logger.log(`Creating new topic association for existing question ${existingQuestionText.question_id}`);
               
-              // Question exists for this topic but not for this medium - add the medium association
-              this.logger.log(`Creating new medium association for existing question text ${existingQuestionText.id}`);
-              
-              // Find the question topic association
-              const questionTopic = existingQuestionText.question.question_topics[0];
-              
-              // Create the question text topic medium association
-              await prisma.question_Text_Topic_Medium.create({
+              // Create question topic association
+              const questionTopic = await prisma.question_Topic.create({
                 data: {
-                  question_text_id: existingQuestionText.id,
-                  question_topic_id: questionTopic.id,
-                  instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
-                  is_verified: false
+                  question_id: existingQuestionText.question_id,
+                  topic_id: question_topic_data.topic_id
                 }
               });
+              
+              // Create medium association if specified
+              if (question_text_topic_medium_data) {
+                this.logger.log(`Creating medium association for existing question ${existingQuestionText.question_id}`);
+                await prisma.question_Text_Topic_Medium.create({
+                  data: {
+                    question_text_id: existingQuestionText.id,
+                    question_topic_id: questionTopic.id,
+                    instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
+                    is_verified: false
+                  }
+                });
+              }
               
               // Return the updated question
               const result = await prisma.question.findUnique({
@@ -1152,92 +1235,22 @@ export class QuestionService {
               });
               
               return {
-                message: `Added new medium association to existing question`,
+                message: `Added new topic association to existing question`,
                 ...await this.transformSingleQuestion(result),
                 reused_existing_question: true
               };
-            } else {
-              // No medium specified but question already exists for this topic
-              return {
-                message: `Question with the same text already exists for topic "${topic.name}"`,
-                existing_question: await this.transformSingleQuestion(existingQuestionText.question),
-                is_duplicate: true
-              };
-            }
-          } else {
-            // Question text exists but not for this topic - create the topic association
-            this.logger.log(`Creating new topic association for existing question ${existingQuestionText.question_id}`);
-            
-            // Create question topic association
-            const questionTopic = await prisma.question_Topic.create({
-              data: {
-                question_id: existingQuestionText.question_id,
-                topic_id: question_topic_data.topic_id
-              }
-            });
-            
-            // Create medium association if specified
-            if (question_text_topic_medium_data) {
-              this.logger.log(`Creating medium association for existing question ${existingQuestionText.question_id}`);
-              await prisma.question_Text_Topic_Medium.create({
-                data: {
-                  question_text_id: existingQuestionText.id,
-                  question_topic_id: questionTopic.id,
-                  instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
-                  is_verified: false
-                }
-              });
             }
             
-            // Return the updated question
-            const result = await prisma.question.findUnique({
-              where: { id: existingQuestionText.question_id },
-              include: {
-                question_type: true,
-                question_texts: {
-                  include: {
-                    image: true,
-                    mcq_options: {
-                      include: {
-                        image: true
-                      }
-                    },
-                    match_pairs: {
-                      include: {
-                        left_image: true,
-                        right_image: true
-                      }
-                    },
-                    question_text_topics: {
-                      include: {
-                        instruction_medium: true,
-                        question_topic: {
-                          include: {
-                            topic: true
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                question_topics: {
-                  include: {
-                    topic: true
-                  }
-                }
-              }
-            });
-            
-            return {
-              message: `Added new topic association to existing question`,
-              ...await this.transformSingleQuestion(result),
-              reused_existing_question: true
-            };
+            // If we reached here with the same question type, we'll reuse the question
+            // This should never happen due to the returns above, but adding as a safeguard
+            this.logger.log(`Unexpected control flow - falling through to create new question despite existing with same type`);
           }
         }
 
         // If no existing question text found, create a new question
-        this.logger.log('No existing question text found, creating new question');
+        this.logger.log(`${existingQuestionText && existingQuestionText.question.question_type_id !== question_type_id 
+          ? 'Creating new question because question types are different' 
+          : 'No existing question text found, creating new question'}`);
         
         // Step 2: Create the question
         this.logger.log('Creating question with type and board status');
@@ -1352,7 +1365,18 @@ export class QuestionService {
         });
 
         // Transform the result to include presigned URLs for images
-        return await this.transformSingleQuestion(result);
+        const resultWithUrls = await this.transformSingleQuestion(result);
+        
+        // Add message if this was created due to different question type
+        if (existingQuestionText && existingQuestionText.question.question_type_id !== question_type_id) {
+          return {
+            ...resultWithUrls,
+            message: `Created new question with same text but different question type (${questionType.type_name}) than existing question`,
+            different_question_type: true
+          };
+        }
+        
+        return resultWithUrls;
       });
     } catch (error) {
       this.logger.error('Failed to create complete question:', error);

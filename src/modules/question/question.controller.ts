@@ -33,14 +33,15 @@ export class QuestionController {
     description: `
       Creates a complete question with all related entities in a single transaction:
       1. Checks if the same question text already exists in the database to reduce redundancy
-      2. If the question exists, checks if it's already associated with the specified topic
-      3. If the topic association exists, checks if it's already associated with the specified medium
-      4. Creates new associations as needed or reuses existing question
-      5. Creates a completely new question only if no matching text is found
+      2. Verifies if the existing question has the same question type - if types differ, creates a new question
+      3. If the question exists with same type, checks if it's already associated with the specified topic
+      4. If the topic association exists, checks if it's already associated with the specified medium
+      5. Creates new associations as needed or reuses existing question
+      6. Creates a completely new question only if no matching text is found or question types differ
       
       This approach reduces data redundancy by allowing the same question to be reused across
       different topics and mediums. The system will:
-      - Create a new question only if the text doesn't already exist
+      - Create a new question if the text doesn't exist or if the question type is different
       - Reuse an existing question by adding a new topic association if needed
       - Reuse an existing question+topic by adding a new medium association if needed
       
@@ -99,7 +100,7 @@ export class QuestionController {
             updated_at: "2023-01-01T00:00:00.000Z",
             question_type: {
               id: 1,
-              name: "Multiple Choice",
+              type_name: "Multiple Choice",
               description: "A question with multiple choices"
             },
             question_texts: [
@@ -153,6 +154,18 @@ export class QuestionController {
             ]
           },
           description: "When a new question is created"
+        },
+        {
+          example: {
+            message: "Created new question with same text but different question type (Short Answer) than existing question",
+            id: 2,
+            question_type_id: 2,
+            board_question: true,
+            created_at: "2023-01-01T00:00:00.000Z",
+            updated_at: "2023-01-01T00:00:00.000Z",
+            different_question_type: true
+          },
+          description: "When a new question is created due to different question type"
         },
         {
           example: {
