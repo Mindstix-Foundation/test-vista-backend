@@ -904,15 +904,25 @@ export class QuestionService {
       const untranslatedQuestionIds = await this.prisma.$queryRaw<{ id: number }[]>`
         SELECT DISTINCT q.id
         FROM "Question" q
-        JOIN "Question_Text" qt ON qt.question_id = q.id
-        LEFT JOIN "Question_Text_Topic_Medium" qttm ON 
-          qttm.question_text_id = qt.id AND
-          qttm.instruction_medium_id = ${instruction_medium_id_param}
-        WHERE qttm.id IS NULL
+        WHERE EXISTS (
+          SELECT 1 FROM "Question_Text" qt 
+          WHERE qt.question_id = q.id
+          AND NOT EXISTS (
+            SELECT 1 FROM "Question_Text_Topic_Medium" qttm 
+            WHERE qttm.question_text_id = qt.id 
+            AND qttm.instruction_medium_id = ${instruction_medium_id_param}
+          )
+        )
       `;
 
       // Extract just the IDs
       const questionIds = untranslatedQuestionIds.map(q => q.id);
+      
+      // Add diagnostic logging
+      this.logger.log(`Found ${questionIds.length} questions with untranslated texts for medium ${instruction_medium_id_param}`);
+      if (questionIds.length === 0) {
+        this.logger.warn(`No untranslated questions found for medium ${instruction_medium_id_param} - check if the medium exists and has questions`);
+      }
 
       // Now add this condition to our where
       const finalWhereConditions = {
@@ -921,6 +931,9 @@ export class QuestionService {
           in: questionIds
         }
       };
+      
+      // Log the final where conditions for debugging
+      this.logger.log(`Final where conditions: ${JSON.stringify(finalWhereConditions)}`);
 
       // Count total matching the criteria
       const totalCount = await this.prisma.question.count({
