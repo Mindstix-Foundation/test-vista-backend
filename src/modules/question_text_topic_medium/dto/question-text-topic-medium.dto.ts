@@ -1,4 +1,4 @@
-import { IsInt, IsNotEmpty, IsOptional, IsBoolean } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsBoolean, IsArray } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -86,4 +86,65 @@ export class QuestionTextTopicMediumFilterDto {
   @Type(() => Boolean)
   @IsBoolean({ message: 'is_verified must be a boolean' })
   is_verified?: boolean;
+}
+
+export class VerifyQuestionsDto {
+  @ApiProperty({
+    example: [1, 2, 3],
+    description: 'Array of question text topic medium IDs to update'
+  })
+  @IsArray()
+  @IsInt({ each: true })
+  @IsNotEmpty()
+  ids: number[];
+
+  @ApiProperty({
+    example: true,
+    description: 'The verification status to set (true for verified, false for unverified)'
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  is_verified: boolean;
+}
+
+export class SimpleVerifyQuestionsDto {
+  @ApiProperty({
+    example: 1,
+    description: 'Question ID - required to identify the specific question'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  question_id: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Question text ID - required to identify the specific question text'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  question_text_id: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Topic ID - required to identify the specific topic'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  topic_id: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Instruction medium ID - required to identify the specific medium'
+  })
+  @IsInt()
+  @IsNotEmpty()
+  instruction_medium_id: number;
+  
+  @ApiProperty({
+    example: true,
+    description: 'The verification status to set (true for verified, false for unverified)'
+  })
+  @IsBoolean()
+  @IsNotEmpty()
+  is_verified: boolean;
 } 
