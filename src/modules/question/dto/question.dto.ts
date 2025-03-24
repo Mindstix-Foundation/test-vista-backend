@@ -1,15 +1,15 @@
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsEnum, IsString, ValidateNested } from 'class-validator';
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsEnum, IsString, ValidateNested, Min, Max } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
+import { SortField, SortOrder } from '../../../common/dto/pagination.dto';
 import { Transform } from 'class-transformer';
 
 // Update the enum for question-specific sort fields
 export enum QuestionSortField {
   QUESTION_TYPE = 'question_type_id',
-  BOARD_QUESTION = 'board_question',
-  CREATED_AT = SortField.CREATED_AT,
-  UPDATED_AT = SortField.UPDATED_AT
+  QUESTION_TEXT = 'question_text',
+  CREATED_AT = 'created_at',
+  UPDATED_AT = 'updated_at'
 }
 
 export class CreateQuestionDto {
@@ -48,7 +48,8 @@ export class UpdateQuestionDto {
   board_question?: boolean;
 }
 
-export class QuestionFilterDto extends PaginationDto {
+// Base filter DTO that doesn't extend PaginationDto to avoid property type conflicts
+export class QuestionFilterDto {
   @ApiProperty({
     required: false,
     example: 1,
@@ -116,6 +117,62 @@ export class QuestionFilterDto extends PaginationDto {
   })
   @IsBoolean({ message: 'is_verified must be a boolean' })
   is_verified?: boolean;
+  
+  // Add pagination fields
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Page must be an integer' })
+  @Min(1, { message: 'Page must be at least 1' })
+  page?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Page size must be an integer' })
+  @Min(1, { message: 'Page size must be at least 1' })
+  @Max(100)
+  page_size?: number;
+  
+  // Custom sort_by field that accepts QuestionSortField
+  @ApiProperty({
+    required: false,
+    enum: QuestionSortField,
+    default: QuestionSortField.CREATED_AT,
+    description: 'Sort by field: question_type_id, question_text, created_at, updated_at'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    // Handle string values from query parameters
+    if (typeof value === 'string') {
+      // Check if it's one of our enum values
+      if (Object.values(QuestionSortField).includes(value as any)) {
+        return value;
+      }
+      // Map common field names to enum values
+      if (value === 'question_type_id') return QuestionSortField.QUESTION_TYPE;
+      if (value === 'question_text') return QuestionSortField.QUESTION_TEXT;
+      if (value === 'created_at') return QuestionSortField.CREATED_AT;
+      if (value === 'updated_at') return QuestionSortField.UPDATED_AT;
+    }
+    return value;
+  })
+  sort_by?: QuestionSortField = QuestionSortField.CREATED_AT;
+  
+  @ApiProperty({ 
+    required: false, 
+    enum: SortOrder, 
+    default: SortOrder.ASC,
+    description: 'Sort order: asc or desc'
+  })
+  @IsOptional()
+  @IsEnum(SortOrder, { message: 'Sort order must be one of: asc, desc' })
+  sort_order?: SortOrder = SortOrder.ASC;
+  
+  @ApiProperty({ required: false, description: 'Search term to filter results' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class CreateMcqOptionDto {

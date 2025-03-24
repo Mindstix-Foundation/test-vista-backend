@@ -189,15 +189,15 @@ export class QuestionService {
 
   async findAll(filters: QuestionFilters) {
     try {
-      const { 
-        question_type_id, 
-        topic_id, 
-        chapter_id, 
+      const {
+        question_type_id,
+        topic_id,
+        chapter_id,
         board_question,
         instruction_medium_id,
-        page = 1, 
-        page_size = 10, 
-        sort_by = QuestionSortField.CREATED_AT, 
+        page = 1,
+        page_size = 10,
+        sort_by = QuestionSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
         search,
         is_verified
@@ -292,16 +292,27 @@ export class QuestionService {
       // Handle sorting: map sort_by to actual DB field
       const orderBy: any = {};
       
-      if (sort_by === QuestionSortField.CREATED_AT || sort_by === QuestionSortField.UPDATED_AT) {
-        orderBy[sort_by] = sort_order;
+      if (sort_by === QuestionSortField.CREATED_AT) {
+        // Sort by question_text's created_at field
+        orderBy.created_at = sort_order;
+      } else if (sort_by === QuestionSortField.UPDATED_AT) {
+        // Sort by question_text's updated_at field
+        orderBy.updated_at = sort_order;
       } else if (sort_by === QuestionSortField.QUESTION_TYPE) {
-        orderBy.question_type_id = sort_order;
-      } else if (sort_by === QuestionSortField.BOARD_QUESTION) {
-        orderBy.board_question = sort_order;
+        // Sort by question type - first by type name through the relation
+        orderBy.question_type = {
+          type_name: sort_order
+        };
+      } else if (sort_by === QuestionSortField.QUESTION_TEXT) {
+        // Sort by first question text in question_texts
+        orderBy.created_at = sort_order; // Fallback to sort by creation date
       } else {
-        // Default sort by creation date
+        // Default sort by creation date of question
         orderBy.created_at = SortOrder.DESC;
       }
+
+      // Log the order by clause for debugging
+      this.logger.log(`Sorting with: ${JSON.stringify(orderBy)}`);
 
       // Pagination
       const skip = (page - 1) * page_size;
@@ -732,9 +743,30 @@ export class QuestionService {
       }
       
       // Build orderBy object
-      const orderBy: Prisma.QuestionOrderByWithRelationInput = {};
-      orderBy[sort_by as keyof Prisma.QuestionOrderByWithRelationInput] = sort_order;
+      const orderBy: any = {};
       
+      if (sort_by === QuestionSortField.CREATED_AT) {
+        // Sort by question_text's created_at field
+        orderBy.created_at = sort_order;
+      } else if (sort_by === QuestionSortField.UPDATED_AT) {
+        // Sort by question_text's updated_at field
+        orderBy.updated_at = sort_order;
+      } else if (sort_by === QuestionSortField.QUESTION_TYPE) {
+        // Sort by question type - first by type name through the relation
+        orderBy.question_type = {
+          type_name: sort_order
+        };
+      } else if (sort_by === QuestionSortField.QUESTION_TEXT) {
+        // Sort by first question text in question_texts
+        orderBy.created_at = sort_order; // Fallback to sort by creation date
+      } else {
+        // Default sort by creation date of question
+        orderBy.created_at = SortOrder.DESC;
+      }
+      
+      // Log the order by clause for debugging
+      this.logger.log(`Sorting without pagination with: ${JSON.stringify(orderBy)}`);
+
       // Get data with sorting but without pagination
       this.logger.log(`Fetching all questions without pagination`);
       const questions = await this.prisma.question.findMany({
@@ -798,9 +830,7 @@ export class QuestionService {
 
   async findUntranslatedQuestions(
     instruction_medium_id_param: number,
-    filters: QuestionFilterDto,
-    sort_by = 'created_at',
-    sort_order: 'asc' | 'desc' = 'desc'
+    filters: QuestionFilterDto
   ) {
     try {
       const {
@@ -810,6 +840,8 @@ export class QuestionService {
         board_question,
         page = 1,
         page_size = 10,
+        sort_by = QuestionSortField.CREATED_AT,
+        sort_order = SortOrder.DESC,
         search
       } = filters;
 
@@ -897,16 +929,28 @@ export class QuestionService {
 
       // Get the actual data with all the includes we need
       const orderBy: any = {};
-      if (sort_by === 'created_at' || sort_by === 'updated_at') {
-        orderBy[sort_by] = sort_order;
-      } else if (sort_by === 'question_type_id') {
-        orderBy.question_type_id = sort_order;
-      } else if (sort_by === 'board_question') {
-        orderBy.board_question = sort_order;
+      
+      if (sort_by === QuestionSortField.CREATED_AT) {
+        // Sort by question_text's created_at field
+        orderBy.created_at = sort_order;
+      } else if (sort_by === QuestionSortField.UPDATED_AT) {
+        // Sort by question_text's updated_at field
+        orderBy.updated_at = sort_order;
+      } else if (sort_by === QuestionSortField.QUESTION_TYPE) {
+        // Sort by question type - first by type name through the relation
+        orderBy.question_type = {
+          type_name: sort_order
+        };
+      } else if (sort_by === QuestionSortField.QUESTION_TEXT) {
+        // Sort by first question text in question_texts
+        orderBy.created_at = sort_order; // Fallback to sort by creation date
       } else {
-        // Default sort
-        orderBy.created_at = 'desc';
+        // Default sort by creation date of question
+        orderBy.created_at = SortOrder.DESC;
       }
+      
+      // Log the order by clause for debugging
+      this.logger.log(`Sorting untranslated questions with: ${JSON.stringify(orderBy)}`);
 
       const questions = await this.prisma.question.findMany({
         where: finalWhereConditions,
@@ -1151,7 +1195,7 @@ export class QuestionService {
                   where: { id: existingQuestionText.question_id },
                   include: {
                     question_type: true,
-          question_texts: {
+                    question_texts: {
                       include: {
                         image: true,
                         mcq_options: {
@@ -1181,9 +1225,9 @@ export class QuestionService {
                       include: {
                         topic: true
                       }
-            }
-          }
-        });
+                    }
+                  }
+                });
                 
                 return {
                   message: `Added new medium association to existing question`,
@@ -1254,7 +1298,7 @@ export class QuestionService {
                       }
                     }
                   },
-          question_topics: {
+                  question_topics: {
                     include: {
                       topic: true
                     }
@@ -1372,7 +1416,7 @@ export class QuestionService {
                     right_image: true
                   }
                 },
-              question_text_topics: {
+                question_text_topics: {
                   include: {
                     instruction_medium: true,
                     question_topic: {
@@ -1387,10 +1431,10 @@ export class QuestionService {
             question_topics: {
               include: {
                 topic: true
+              }
             }
           }
-        }
-      });
+        });
 
         // Transform the result to include presigned URLs for images
         const resultWithUrls = await this.transformSingleQuestion(result);
@@ -1551,7 +1595,7 @@ export class QuestionService {
           question: {
             include: {
               question_type: true,
-          question_topics: {
+              question_topics: {
                 where: {
                   topic_id: question_topic_data.topic_id
                 },
@@ -1563,15 +1607,15 @@ export class QuestionService {
           },
           mcq_options: true,
           match_pairs: true,
-              question_text_topics: {
+          question_text_topics: {
             where: {
               question_topic: {
                 topic_id: question_topic_data.topic_id
-                }
               }
             }
           }
-        });
+        }
+      });
 
       if (existingQuestionText) {
         this.logger.log(`Found existing question text with ID ${existingQuestionText.id} containing the same content`);
@@ -1683,8 +1727,8 @@ export class QuestionService {
           // Return the question with the reused text
           const updatedQuestion = await prisma.question.findUnique({
             where: { id },
-        include: {
-          question_type: true,
+            include: {
+              question_type: true,
               question_texts: {
                 where: { id: existingQuestionText.id },
                 include: {
@@ -1712,8 +1756,8 @@ export class QuestionService {
                   }
                 }
               },
-          question_topics: {
-            include: {
+              question_topics: {
+                include: {
                   topic: true
                 }
               }
@@ -2027,7 +2071,7 @@ export class QuestionService {
                 await this.awsS3Service.deleteFile(imageUrl);
               }));
               this.logger.log(`Successfully deleted ${imagesToDelete.length} images from S3 for question ${id}`);
-    } catch (error) {
+            } catch (error) {
               this.logger.error(`Error deleting images from S3 for question ${id}:`, error);
               // We continue even if image deletion fails since the database records are already deleted
             }

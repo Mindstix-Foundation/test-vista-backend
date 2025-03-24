@@ -1,13 +1,11 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Patch, DefaultValuePipe, Logger } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto } from './dto/question.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, QuestionSortField, EditCompleteQuestionDto, RemoveQuestionFromChapterDto } from './dto/question.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SortOrder } from '../../common/dto/pagination.dto';
-import { Logger } from '@nestjs/common';
-import { SortField } from '../../common/dto/pagination.dto';
 
 @ApiTags('questions')
 @Controller('questions')
@@ -222,8 +220,13 @@ export class QuestionController {
   @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'Filter by verification status' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'page_size', required: false, type: Number })
-  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionSortField })
-  @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder })
+  @ApiQuery({ 
+    name: 'sort_by', 
+    required: false, 
+    enum: ['question_type_id', 'question_text', 'created_at', 'updated_at'],
+    description: 'Field to sort by: question_type_id, question_text, created_at (of the question text), updated_at (of the question text)' 
+  })
+  @ApiQuery({ name: 'sort_order', required: false, enum: ['asc', 'desc'] })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Returns paginated questions' })
   async findAll(@Query() filters: QuestionFilterDto) {
@@ -248,25 +251,8 @@ export class QuestionController {
       - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
     `);
 
-    // Map the standard SortField to QuestionSortField
-    let questionSortBy: QuestionSortField;
-    
-    if (sort_by === SortField.CREATED_AT) {
-      questionSortBy = QuestionSortField.CREATED_AT;
-    } else if (sort_by === SortField.UPDATED_AT) {
-      questionSortBy = QuestionSortField.UPDATED_AT;
-    } else if (sort_by === SortField.NAME) {
-      // Default to created_at if NAME is used (doesn't exist in Question)
-      questionSortBy = QuestionSortField.CREATED_AT;
-    } else {
-      // If it's not a standard field, check if it's a valid question sort field
-      const sortByString = typeof sort_by === 'string' ? sort_by : undefined;
-      if (sortByString && Object.values(QuestionSortField).includes(sortByString as any)) {
-        questionSortBy = sortByString as QuestionSortField;
-      } else {
-        questionSortBy = QuestionSortField.CREATED_AT;
-      }
-    }
+    // The sort_by now comes directly from the transformed DTO
+    // No need to map standard SortField to QuestionSortField anymore
 
     // Get the full response from the service
     const fullResponse = await this.questionService.findAll({
@@ -277,7 +263,7 @@ export class QuestionController {
       instruction_medium_id,
       page,
       page_size,
-      sort_by: questionSortBy,
+      sort_by,
       sort_order,
       search,
       is_verified
@@ -438,8 +424,13 @@ export class QuestionController {
   @ApiQuery({ name: 'board_question', required: false, type: Boolean })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'page_size', required: false, type: Number })
-  @ApiQuery({ name: 'sort_by', required: false, enum: QuestionSortField })
-  @ApiQuery({ name: 'sort_order', required: false, enum: SortOrder })
+  @ApiQuery({ 
+    name: 'sort_by', 
+    required: false, 
+    enum: ['question_type_id', 'question_text', 'created_at', 'updated_at'],
+    description: 'Field to sort by: question_type_id, question_text, created_at (of the question text), updated_at (of the question text)' 
+  })
+  @ApiQuery({ name: 'sort_order', required: false, enum: ['asc', 'desc'] })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Returns untranslated questions for the specified medium' })
   async findUntranslatedQuestions(
@@ -458,25 +449,16 @@ export class QuestionController {
       search
     } = filters;
 
-    // Map the standard SortField to QuestionSortField
-    let questionSortBy: QuestionSortField;
-    
-    if (sort_by === SortField.CREATED_AT) {
-      questionSortBy = QuestionSortField.CREATED_AT;
-    } else if (sort_by === SortField.UPDATED_AT) {
-      questionSortBy = QuestionSortField.UPDATED_AT;
-    } else if (sort_by === SortField.NAME) {
-      // Default to created_at if NAME is used (doesn't exist in Question)
-      questionSortBy = QuestionSortField.CREATED_AT;
-    } else {
-      // If it's not a standard field, check if it's a valid question sort field
-      const sortByString = typeof sort_by === 'string' ? sort_by : undefined;
-      if (sortByString && Object.values(QuestionSortField).includes(sortByString as any)) {
-        questionSortBy = sortByString as QuestionSortField;
-      } else {
-        questionSortBy = QuestionSortField.CREATED_AT;
-      }
-    }
+    // Add diagnostic logging
+    this.logger.log(`findUntranslatedQuestions called with params:
+      - medium_id: ${mediumId}
+      - filters: ${JSON.stringify(filters)}
+      - sort_by: ${sort_by} (${typeof sort_by})
+      - sort_order: ${sort_order} (${typeof sort_order})
+    `);
+
+    // The sort_by now comes directly from the transformed DTO
+    // No need to map standard SortField to QuestionSortField anymore
 
     return await this.questionService.findUntranslatedQuestions(
       mediumId,
@@ -487,12 +469,10 @@ export class QuestionController {
         board_question,
         page,
         page_size,
-        sort_by: sort_by, // Use the standard sort_by from filters
+        sort_by,
         sort_order,
         search
-      },
-      questionSortBy, // Pass the mapped sort field as a separate parameter
-      sort_order
+      }
     );
   }
 
