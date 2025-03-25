@@ -807,4 +807,106 @@ export class QuestionController {
   ) {
     return await this.questionService.addTranslation(id, translationDto);
   }
+
+  @Get(':id/topic/:topicId/verified-texts')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Get verified question texts for a specific question and topic',
+    description: `
+      Retrieves all verified question texts for a specific question and topic combination.
+      The response includes:
+      1. Basic question information (id, question_type, board_question)
+      2. Topic information
+      3. All verified question texts with their respective images
+      4. Medium information for each text
+      
+      The question texts are sorted alphabetically by medium name.
+      
+      This endpoint is useful for getting an overview of available translations for a question
+      in a specific topic context.
+    `
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Retrieved verified question texts successfully',
+    schema: {
+      example: {
+        id: 1,
+        question_type: {
+          id: 1,
+          type_name: "Multiple Choice"
+        },
+        board_question: true,
+        topic: {
+          id: 5,
+          name: "Geography",
+          chapter_id: 3
+        },
+        question_texts: [
+          {
+            id: 2,
+            question_text: "What is the capital of France?",
+            image_id: 1,
+            image: {
+              id: 1,
+              original_filename: "paris.jpg",
+              presigned_url: "https://example.com/images/paris.jpg"
+            },
+            medium: {
+              id: 1,
+              instruction_medium: "English"
+            },
+            mcq_options: [
+              {
+                id: 1,
+                option_text: "Paris",
+                is_correct: true
+              },
+              {
+                id: 2,
+                option_text: "London",
+                is_correct: false
+              }
+            ],
+            match_pairs: []
+          },
+          {
+            id: 3,
+            question_text: "¿Cuál es la capital de Francia?",
+            image_id: 2,
+            image: {
+              id: 2,
+              original_filename: "paris_es.jpg",
+              presigned_url: "https://example.com/images/paris_es.jpg"
+            },
+            medium: {
+              id: 2,
+              instruction_medium: "Spanish"
+            },
+            mcq_options: [
+              {
+                id: 3,
+                option_text: "París",
+                is_correct: true
+              },
+              {
+                id: 4,
+                option_text: "Londres",
+                is_correct: false
+              }
+            ],
+            match_pairs: []
+          }
+        ]
+      }
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Question or topic not found' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async getVerifiedQuestionTexts(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('topicId', ParseIntPipe) topicId: number
+  ) {
+    return await this.questionService.getVerifiedQuestionTexts(id, topicId);
+  }
 }

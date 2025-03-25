@@ -2545,4 +2545,121 @@ export class QuestionService {
 
     return result;
   }
+
+  /**
+   * Get verified question texts for a specific question and topic
+   * @param questionId The ID of the question
+   * @param topicId The ID of the topic
+   * @returns Question data with verified texts sorted by medium name
+   */
+  async getVerifiedQuestionTexts(questionId: number, topicId: number) {
+    // Check if the question exists
+    const question = await this.prisma.question.findUnique({
+      where: { id: questionId },
+      include: {
+        question_type: true
+      }
+    });
+
+    if (!question) {
+      throw new NotFoundException(`Question with ID ${questionId} not found`);
+    }
+
+    // Check if topic exists
+    const topic = await this.prisma.topic.findUnique({
+      where: { id: topicId }
+    });
+
+    if (!topic) {
+      throw new NotFoundException(`Topic with ID ${topicId} not found`);
+    }
+
+    // Check if the question is associated with the topic
+    const questionTopic = await this.prisma.question_Topic.findFirst({
+      where: {
+        question_id: questionId,
+        topic_id: topicId
+      }
+    });
+
+    if (!questionTopic) {
+      throw new NotFoundException(`Question with ID ${questionId} is not associated with topic ID ${topicId}`);
+    }
+
+    // Get all question texts with their respective mediums that are verified
+    const questionTexts = await this.prisma.question_Text.findMany({
+      where: { 
+        question_id: questionId
+      },
+      include: {
+        image: true,
+        mcq_options: true,
+        match_pairs: true,
+        question_text_topics: {
+          where: {
+            question_topic_id: questionTopic.id,
+            is_verified: true
+          },
+          include: {
+            instruction_medium: true
+          }
+        }
+      }
+    });
+
+    // Filter texts that have verified associations with the specified topic
+    const verifiedTexts = questionTexts.filter(text => 
+      text.question_text_topics && text.question_text_topics.length > 0
+    );
+
+    // Transform the data into the desired format
+    const formattedTexts = verifiedTexts.map(text => {
+      const medium = text.question_text_topics[0]?.instruction_medium;
+      
+      return {
+        id: text.id,
+        question_text: text.question_text,
+        image_id: text.image_id,
+        image: text.image ? {
+          id: text.image.id,
+          original_filename: text.image.original_filename,
+          file_type: text.image.file_type,
+          width: text.image.width,
+          height: text.image.height,
+          image_url: text.image.image_url
+        } : null,
+        medium: medium ? {
+          id: medium.id,
+          instruction_medium: medium.instruction_medium
+        } : null,
+        mcq_options: text.mcq_options || [],
+        match_pairs: text.match_pairs || []
+      };
+    });
+
+    // Sort the texts by medium name alphabetically
+    const sortedTexts = formattedTexts.sort((a, b) => {
+      const mediumA = a.medium?.instruction_medium || '';
+      const mediumB = b.medium?.instruction_medium || '';
+      return mediumA.localeCompare(mediumB);
+    });
+
+    // Construct the final response
+    const response = {
+      id: question.id,
+      question_type: {
+        id: question.question_type.id,
+        type_name: question.question_type.type_name
+      },
+      board_question: question.board_question,
+      topic: {
+        id: topic.id,
+        name: topic.name,
+        chapter_id: topic.chapter_id
+      },
+      question_texts: sortedTexts
+    };
+
+    return response;
+  }
 } 
