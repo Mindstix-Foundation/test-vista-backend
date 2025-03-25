@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, InternalServerErrorException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, ComplexCreateQuestionDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, ComplexCreateQuestionDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto } from './dto/question.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
 import { AwsS3Service } from '../aws/aws-s3.service';
@@ -23,6 +23,26 @@ interface QuestionFilters {
 export class QuestionService {
   private readonly logger = new Logger(QuestionService.name);
 
+  /**
+   * Question and Image Management Strategy
+   * 
+   * This service implements a file hash comparison approach for handling questions with images:
+   * 
+   * 1. Questions with the same text content but different images are treated as distinct questions
+   * 2. Image uniqueness is determined by comparing image_ids, which are guaranteed to be unique
+   * 3. The approach considers two scenarios for image differences:
+   *    - One question has an image while the other doesn't
+   *    - Both questions have images but with different image_ids
+   * 
+   * This strategy ensures that educational content with different visual representations
+   * is properly managed even when the text content is identical. This is crucial for
+   * subjects where the same concept may need different visual explanations.
+   * 
+   * The implementation is efficient as it:
+   * - Doesn't require computing cryptographic hashes of image files
+   * - Uses existing database constraints and relationships
+   * - Minimizes storage requirements while preserving content distinctions
+   */
   constructor(
     private readonly prisma: PrismaService,
     private readonly awsS3Service: AwsS3Service
@@ -904,15 +924,25 @@ export class QuestionService {
       const untranslatedQuestionIds = await this.prisma.$queryRaw<{ id: number }[]>`
         SELECT DISTINCT q.id
         FROM "Question" q
-        JOIN "Question_Text" qt ON qt.question_id = q.id
-        LEFT JOIN "Question_Text_Topic_Medium" qttm ON 
-          qttm.question_text_id = qt.id AND
-          qttm.instruction_medium_id = ${instruction_medium_id_param}
-        WHERE qttm.id IS NULL
+        WHERE EXISTS (
+          SELECT 1 FROM "Question_Text" qt 
+          WHERE qt.question_id = q.id
+          AND NOT EXISTS (
+            SELECT 1 FROM "Question_Text_Topic_Medium" qttm 
+            WHERE qttm.question_text_id = qt.id 
+            AND qttm.instruction_medium_id = ${instruction_medium_id_param}
+          )
+        )
       `;
 
       // Extract just the IDs
       const questionIds = untranslatedQuestionIds.map(q => q.id);
+      
+      // Add diagnostic logging
+      this.logger.log(`Found ${questionIds.length} questions with untranslated texts for medium ${instruction_medium_id_param}`);
+      if (questionIds.length === 0) {
+        this.logger.warn(`No untranslated questions found for medium ${instruction_medium_id_param} - check if the medium exists and has questions`);
+      }
 
       // Now add this condition to our where
       const finalWhereConditions = {
@@ -921,6 +951,9 @@ export class QuestionService {
           in: questionIds
         }
       };
+      
+      // Log the final where conditions for debugging
+      this.logger.log(`Final where conditions: ${JSON.stringify(finalWhereConditions)}`);
 
       // Count total matching the criteria
       const totalCount = await this.prisma.question.count({
@@ -1022,6 +1055,25 @@ export class QuestionService {
   // Create a complete question with all related data in a single transaction
   async createComplete(completeDto: CompleteQuestionDto) {
     try {
+      /**
+       * Image Comparison Strategy for Duplicate Question Detection:
+       * 
+       * We identify duplicate questions based on the following criteria:
+       * 1. Same question text
+       * 2. Same question type 
+       * 3. Same image situation
+       * 
+       * For image comparison (point #3), we use a simplified file hash approach:
+       * - If one question has an image and the other doesn't, they're treated as different questions
+       * - If both have images but with different image_ids, they're treated as different questions
+       * - If both have the same image_id or both have no images, the image situation is considered identical
+       * 
+       * This approach is efficient because:
+       * - It doesn't require calculating cryptographic hashes of image files
+       * - It leverages the existing uniqueness of image_ids in the database
+       * - It allows questions to be differentiated based on visual content
+       * - It supports the educational use case where the same text might need different visual explanations
+       */
       const {
         question_type_id,
         board_question,
@@ -1104,13 +1156,14 @@ export class QuestionService {
           }
         }
 
-        // NEW STEP: Check for existing question text to avoid duplication
+        // NEW STEP: Check if a question text with the same content already exists
         this.logger.log(`Checking if question text "${question_text_data.question_text.substring(0, 50)}..." already exists`);
         const existingQuestionText = await prisma.question_Text.findFirst({
           where: {
             question_text: question_text_data.question_text
           },
           include: {
+            image: true,
             question: {
               include: {
                 question_type: true,
@@ -1146,49 +1199,156 @@ export class QuestionService {
             // Skip to creating a new question as different question type means different question
             // No early return here - continue to create a new question below
           } else {
-            // Question types are the same, check if question is associated with the requested topic
-            const existingTopicAssociation = existingQuestionText.question.question_topics.length > 0;
+            // Check if images are different - if one has image and other doesn't, or they have different images
+            const existingHasImage = existingQuestionText.image_id !== null;
+            const newHasImage = question_text_data.image_id !== null;
             
-            if (existingTopicAssociation) {
-              this.logger.log(`Question ID ${existingQuestionText.question_id} is already associated with topic ID ${question_topic_data.topic_id}`);
+            let differentImageSituation = false;
+            
+            // Implementation of the file hash comparison approach (Option 3):
+            // 1. If one has an image and the other doesn't, they're considered different questions
+            // 2. If both have images but with different image_ids, they're considered different questions
+            // This approach is simpler and more efficient than generating and comparing actual file hashes
+            // since we're relying on unique image_ids which are already guaranteed to be unique
+            
+            // Case 1: Different image presence (one has image, other doesn't)
+            if (existingHasImage !== newHasImage) {
+              this.logger.log(`Image presence differs (existing: ${existingHasImage ? 'has image' : 'no image'}, new: ${newHasImage ? 'has image' : 'no image'}). Will create a new question.`);
+              differentImageSituation = true;
+            } 
+            // Case 2: Both have images but they're different
+            else if (existingHasImage && newHasImage && existingQuestionText.image_id !== question_text_data.image_id) {
+              this.logger.log(`Both have images but they are different (existing: ${existingQuestionText.image_id}, new: ${question_text_data.image_id}). Will create a new question.`);
+              differentImageSituation = true;
+            }
+            
+            // If we have different image situation, create a new question
+            if (differentImageSituation) {
+              this.logger.log('Creating new question due to different image situation');
+              // Continue to the creation logic below (no early return)
+            }
+            // Case 3: Identical text, question type, and image situation
+            else {
+              // Question types are the same, check if question is associated with the requested topic
+              const existingTopicAssociation = existingQuestionText.question.question_topics.length > 0;
               
-              // If medium is specified, check medium association
-              if (question_text_topic_medium_data) {
-                const existingMediumAssociation = existingQuestionText.question_text_topics.some(
-                  textTopic => textTopic.instruction_medium_id === question_text_topic_medium_data.instruction_medium_id
-                );
+              if (existingTopicAssociation) {
+                this.logger.log(`Question ID ${existingQuestionText.question_id} is already associated with topic ID ${question_topic_data.topic_id}`);
                 
-                if (existingMediumAssociation) {
-                  // Question with same text already exists for this topic and medium
-                  const mediumInfo = await prisma.instruction_Medium.findUnique({
-                    where: { id: question_text_topic_medium_data.instruction_medium_id },
-                    select: { instruction_medium: true }
+                // If medium is specified, check medium association
+                if (question_text_topic_medium_data) {
+                  const existingMediumAssociation = existingQuestionText.question_text_topics.some(
+                    textTopic => textTopic.instruction_medium_id === question_text_topic_medium_data.instruction_medium_id
+                  );
+                  
+                  if (existingMediumAssociation) {
+                    // Question with same text already exists for this topic and medium
+                    const mediumInfo = await prisma.instruction_Medium.findUnique({
+                      where: { id: question_text_topic_medium_data.instruction_medium_id },
+                      select: { instruction_medium: true }
+                    });
+                    
+                    const topicName = topic.name;
+                    
+                    return {
+                      message: `Question with the same text already exists for topic "${topicName}" and medium "${mediumInfo?.instruction_medium}"`,
+                      existing_question: await this.transformSingleQuestion(existingQuestionText.question),
+                      is_duplicate: true
+                    };
+                  }
+                  
+                  // Question exists for this topic but not for this medium - add the medium association
+                  this.logger.log(`Creating new medium association for existing question text ${existingQuestionText.id}`);
+                  
+                  // Find the question topic association
+                  const questionTopic = existingQuestionText.question.question_topics[0];
+                  
+                  // Create the question text topic medium association
+                  await prisma.question_Text_Topic_Medium.create({
+                    data: {
+                      question_text_id: existingQuestionText.id,
+                      question_topic_id: questionTopic.id,
+                      instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
+                      is_verified: false
+                    }
                   });
                   
-                  const topicName = topic.name;
+                  // Return the updated question
+                  const result = await prisma.question.findUnique({
+                    where: { id: existingQuestionText.question_id },
+                    include: {
+                      question_type: true,
+                      question_texts: {
+                        include: {
+                          image: true,
+                          mcq_options: {
+                            include: {
+                              image: true
+                            }
+                          },
+                          match_pairs: {
+                            include: {
+                              left_image: true,
+                              right_image: true
+                            }
+                          },
+                          question_text_topics: {
+                            include: {
+                              instruction_medium: true,
+                              question_topic: {
+                                include: {
+                                  topic: true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      question_topics: {
+                        include: {
+                          topic: true
+                        }
+                      }
+                    }
+                  });
                   
                   return {
-                    message: `Question with the same text already exists for topic "${topicName}" and medium "${mediumInfo?.instruction_medium}"`,
+                    message: `Added new medium association to existing question`,
+                    ...await this.transformSingleQuestion(result),
+                    reused_existing_question: true
+                  };
+                } else {
+                  // No medium specified but question already exists for this topic
+                  return {
+                    message: `Question with the same text already exists for topic "${topic.name}"`,
                     existing_question: await this.transformSingleQuestion(existingQuestionText.question),
                     is_duplicate: true
                   };
                 }
+              } else {
+                // Question text exists but not for this topic - create the topic association
+                this.logger.log(`Creating new topic association for existing question ${existingQuestionText.question_id}`);
                 
-                // Question exists for this topic but not for this medium - add the medium association
-                this.logger.log(`Creating new medium association for existing question text ${existingQuestionText.id}`);
-                
-                // Find the question topic association
-                const questionTopic = existingQuestionText.question.question_topics[0];
-                
-                // Create the question text topic medium association
-                await prisma.question_Text_Topic_Medium.create({
+                // Create question topic association
+                const questionTopic = await prisma.question_Topic.create({
                   data: {
-                    question_text_id: existingQuestionText.id,
-                    question_topic_id: questionTopic.id,
-                    instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
-                    is_verified: false
+                    question_id: existingQuestionText.question_id,
+                    topic_id: question_topic_data.topic_id
                   }
                 });
+                
+                // Create medium association if specified
+                if (question_text_topic_medium_data) {
+                  this.logger.log(`Creating medium association for existing question ${existingQuestionText.question_id}`);
+                  await prisma.question_Text_Topic_Medium.create({
+                    data: {
+                      question_text_id: existingQuestionText.id,
+                      question_topic_id: questionTopic.id,
+                      instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
+                      is_verified: false
+                    }
+                  });
+                }
                 
                 // Return the updated question
                 const result = await prisma.question.findUnique({
@@ -1230,92 +1390,12 @@ export class QuestionService {
                 });
                 
                 return {
-                  message: `Added new medium association to existing question`,
+                  message: `Added new topic association to existing question`,
                   ...await this.transformSingleQuestion(result),
                   reused_existing_question: true
                 };
-              } else {
-                // No medium specified but question already exists for this topic
-                return {
-                  message: `Question with the same text already exists for topic "${topic.name}"`,
-                  existing_question: await this.transformSingleQuestion(existingQuestionText.question),
-                  is_duplicate: true
-                };
               }
-            } else {
-              // Question text exists but not for this topic - create the topic association
-              this.logger.log(`Creating new topic association for existing question ${existingQuestionText.question_id}`);
-              
-              // Create question topic association
-              const questionTopic = await prisma.question_Topic.create({
-                data: {
-                  question_id: existingQuestionText.question_id,
-                  topic_id: question_topic_data.topic_id
-                }
-              });
-              
-              // Create medium association if specified
-              if (question_text_topic_medium_data) {
-                this.logger.log(`Creating medium association for existing question ${existingQuestionText.question_id}`);
-                await prisma.question_Text_Topic_Medium.create({
-                  data: {
-                    question_text_id: existingQuestionText.id,
-                    question_topic_id: questionTopic.id,
-                    instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
-                    is_verified: false
-                  }
-                });
-              }
-              
-              // Return the updated question
-              const result = await prisma.question.findUnique({
-                where: { id: existingQuestionText.question_id },
-                include: {
-                  question_type: true,
-                  question_texts: {
-                    include: {
-                      image: true,
-                      mcq_options: {
-                        include: {
-                          image: true
-                        }
-                      },
-                      match_pairs: {
-                        include: {
-                          left_image: true,
-                          right_image: true
-                        }
-                      },
-                      question_text_topics: {
-                        include: {
-                          instruction_medium: true,
-                          question_topic: {
-                            include: {
-                              topic: true
-                            }
-                          }
-                        }
-                      }
-                    }
-                  },
-                  question_topics: {
-                    include: {
-                      topic: true
-                    }
-                  }
-                }
-              });
-              
-              return {
-                message: `Added new topic association to existing question`,
-                ...await this.transformSingleQuestion(result),
-                reused_existing_question: true
-              };
             }
-            
-            // If we reached here with the same question type, we'll reuse the question
-            // This should never happen due to the returns above, but adding as a safeguard
-            this.logger.log(`Unexpected control flow - falling through to create new question despite existing with same type`);
           }
         }
 
@@ -1464,6 +1544,22 @@ export class QuestionService {
 
     this.logger.log(`Updating complete question with ID ${id} and question text ID ${question_text_id}`);
     
+    /**
+     * Image Comparison Strategy:
+     * 
+     * When updating questions, we need to check if a question with the same text already exists:
+     * - If yes, we may be able to reuse that text to reduce database redundancy
+     * - However, if the image situations differ (one has image vs. doesn't have, or different images),
+     *   we need to create a new question text entry instead of reusing the existing one
+     * 
+     * This ensures that questions with the same text but different visual content
+     * are treated as separate entities, which is important for educational purposes.
+     * 
+     * The comparison follows the same approach as in createComplete:
+     * - Comparing image presence (has image vs. doesn't have image)
+     * - Comparing image_ids when both questions have images
+     */
+    
     // We'll execute all operations in a transaction to ensure data consistency
     return await this.prisma.$transaction(async (prisma) => {
       // 1. Validate that the question exists
@@ -1592,6 +1688,7 @@ export class QuestionService {
           id: { not: question_text_id } // Exclude the current text being edited
         },
         include: {
+          image: true,
           question: {
             include: {
               question_type: true,
@@ -1623,6 +1720,41 @@ export class QuestionService {
         // Check if the existing question text is similar enough to reuse (same MCQ options and match pairs structure)
         let canReuseText = true;
         let reusableTextExplanation = "";
+        
+        // Implement the image comparison approach (similar to createComplete method)
+        // Check if the current image situation is different from the existing text
+        const currentText = await prisma.question_Text.findUnique({
+          where: { id: question_text_id },
+          select: { image_id: true }
+        });
+        
+        const existingHasImage = existingQuestionText.image_id !== null;
+        const currentHasImage = currentText.image_id !== null;
+        const newHasImage = question_text_data.image_id !== null;
+        
+        let differentImageSituation = false;
+        
+        // Implementation of the file hash comparison approach (Option 3):
+        // 1. If one has an image and the other doesn't, they're considered different questions
+        // 2. If both have images but with different image_ids, they're considered different questions
+        
+        // Case 1: Different image presence
+        if (existingHasImage !== newHasImage) {
+          this.logger.log(`Image presence differs (existing: ${existingHasImage ? 'has image' : 'no image'}, new: ${newHasImage ? 'has image' : 'no image'}). Cannot reuse text.`);
+          differentImageSituation = true;
+        } 
+        // Case 2: Both have images but they're different
+        else if (existingHasImage && newHasImage && existingQuestionText.image_id !== question_text_data.image_id) {
+          this.logger.log(`Both have images but they are different (existing: ${existingQuestionText.image_id}, new: ${question_text_data.image_id}). Cannot reuse text.`);
+          differentImageSituation = true;
+        }
+        
+        if (differentImageSituation) {
+          // If the images are different, don't reuse the text
+          this.logger.log(`Cannot reuse question text due to different image situation.`);
+          canReuseText = false;
+          reusableTextExplanation = "Image situation differs";
+        }
         
         // Compare MCQ options count if both have them
         if (
@@ -2242,5 +2374,175 @@ export class QuestionService {
           : null
       }))
     };
+  }
+
+  /**
+   * Add a translation for an existing question
+   * @param questionId The ID of the question to translate
+   * @param translationDto The translation data
+   * @returns The created translation details
+   */
+  async addTranslation(questionId: number, translationDto: AddTranslationDto) {
+    // Get the question to translate
+    const question = await this.prisma.question.findUnique({
+      where: { id: questionId },
+      include: {
+        question_type: true,
+        question_texts: {
+          include: {
+            image: true,
+            mcq_options: true,
+            match_pairs: true,
+            question_text_topics: {
+              include: {
+                question_topic: {
+                  include: {
+                    topic: true
+                  }
+                },
+                instruction_medium: true
+              }
+            }
+          }
+        },
+        question_topics: {
+          include: {
+            topic: true
+          }
+        }
+      }
+    });
+
+    if (!question) {
+      throw new NotFoundException(`Question with ID ${questionId} not found`);
+    }
+
+    // Verify if the question has at least one verified text in another medium
+    const hasVerifiedText = question.question_texts.some(text => 
+      text.question_text_topics && 
+      text.question_text_topics.some(qttm => qttm.is_verified)
+    );
+
+    if (!hasVerifiedText) {
+      throw new BadRequestException(`Question with ID ${questionId} does not have any verified text. Only verified questions can be translated.`);
+    }
+
+    // Check if an existing translation for this medium already exists
+    const existingTranslation = question.question_texts.some(text => 
+      text.question_text_topics && 
+      text.question_text_topics.some(
+        qttm => qttm.instruction_medium_id === translationDto.instruction_medium_id
+      )
+    );
+
+    if (existingTranslation) {
+      throw new ConflictException(`Translation for question ID ${questionId} in medium ID ${translationDto.instruction_medium_id} already exists`);
+    }
+
+    // Check for image consistency - enforcing that translation follows the same image pattern as source
+    const sourceHasImage = question.question_texts.some(text => text.image_id !== null);
+    const translationHasImage = translationDto.image_id !== undefined && translationDto.image_id !== null;
+
+    if (sourceHasImage && !translationHasImage) {
+      throw new BadRequestException('Original question has an image, but translation does not include an image_id. Please provide an image for consistency.');
+    }
+
+    if (!sourceHasImage && translationHasImage) {
+      throw new BadRequestException('Original question does not have an image, but translation includes an image_id. Please remove the image_id for consistency.');
+    }
+
+    // Get the question type
+    const questionType = question.question_type;
+
+    // For MCQ questions, ensure mcq_options are provided
+    if (questionType.type_name.toLowerCase().includes('multiple choice') && 
+        (!translationDto.mcq_options || translationDto.mcq_options.length === 0)) {
+      throw new BadRequestException('MCQ options must be provided for Multiple Choice question types');
+    }
+
+    // For matching questions, ensure match_pairs are provided
+    if (questionType.type_name.toLowerCase().includes('match') && 
+        (!translationDto.match_pairs || translationDto.match_pairs.length === 0)) {
+      throw new BadRequestException('Match pairs must be provided for Matching question types');
+    }
+
+    // Use transaction to ensure data consistency
+    const result = await this.prisma.$transaction(async (prisma) => {
+      // 1. Create a new question_text entry
+      const newQuestionText = await prisma.question_Text.create({
+        data: {
+          question_id: questionId,
+          question_text: translationDto.question_text,
+          image_id: translationDto.image_id || null
+        }
+      });
+
+      // 2. If it's an MCQ question, create the options
+      if (translationDto.mcq_options && translationDto.mcq_options.length > 0) {
+        await Promise.all(
+          translationDto.mcq_options.map(option => 
+            prisma.mcq_Option.create({
+              data: {
+                question_text_id: newQuestionText.id,
+                option_text: option.option_text,
+                is_correct: option.is_correct,
+                image_id: option.image_id || null
+              }
+            })
+          )
+        );
+      }
+
+      // 3. If it's a matching question, create the pairs
+      if (translationDto.match_pairs && translationDto.match_pairs.length > 0) {
+        await Promise.all(
+          translationDto.match_pairs.map(pair => 
+            prisma.match_Pair.create({
+              data: {
+                question_text_id: newQuestionText.id,
+                left_text: pair.left_text || null,
+                right_text: pair.right_text || null,
+                left_image_id: pair.left_image_id || null,
+                right_image_id: pair.right_image_id || null
+              }
+            })
+          )
+        );
+      }
+
+      // 4. For each question topic, create a question_text_topic_medium relation
+      // Find all topic IDs associated with this question
+      const questionTopics = await prisma.question_Topic.findMany({
+        where: { question_id: questionId }
+      });
+
+      // Create associations for each topic with the new medium
+      for (const questionTopic of questionTopics) {
+        await prisma.question_Text_Topic_Medium.create({
+          data: {
+            question_text_id: newQuestionText.id,
+            question_topic_id: questionTopic.id,
+            instruction_medium_id: translationDto.instruction_medium_id,
+            is_verified: false // Always set to false for new translations
+          }
+        });
+      }
+
+      // Get the medium name for the response
+      const medium = await prisma.instruction_Medium.findUnique({
+        where: { id: translationDto.instruction_medium_id }
+      });
+
+      return {
+        message: "Translation added successfully",
+        id: questionId,
+        question_text_id: newQuestionText.id,
+        question_text: translationDto.question_text,
+        instruction_medium_id: translationDto.instruction_medium_id,
+        medium_name: medium ? medium.instruction_medium : null
+      };
+    });
+
+    return result;
   }
 } 

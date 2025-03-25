@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Patch, DefaultValuePipe, Logger } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, QuestionSortField, EditCompleteQuestionDto, RemoveQuestionFromChapterDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, QuestionSortField, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto } from './dto/question.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -37,9 +37,16 @@ export class QuestionController {
       5. Creates new associations as needed or reuses existing question
       6. Creates a completely new question only if no matching text is found or question types differ
       
+      Important: This API implements an image comparison strategy for duplicate detection:
+      - Questions with the same text but different images are treated as distinct entities
+      - Image uniqueness is determined by comparing image_ids (simplified file hash)
+      - When a user submits a question with the same text and type but different image, a new question will be created
+      - This approach avoids duplicates while ensuring questions with different visual content are preserved
+      
       This approach reduces data redundancy by allowing the same question to be reused across
-      different topics and mediums. The system will:
-      - Create a new question if the text doesn't exist or if the question type is different
+      different topics and mediums while ensuring questions with different visual content are preserved.
+      The system will:
+      - Create a new question if the text doesn't exist, if the question type is different, or if the image differs
       - Reuse an existing question by adding a new topic association if needed
       - Reuse an existing question+topic by adding a new medium association if needed
       
@@ -617,6 +624,31 @@ export class QuestionController {
   @ApiResponse({ status: 400, description: 'Bad request - validation error' })
   @ApiResponse({ status: 404, description: 'Question or referenced entity not found' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
+  @ApiOperation({ 
+    summary: 'Update a complete question with all related data in a single transaction',
+    description: `
+      Updates a complete question with all related entities in a single transaction:
+      1. Updates the base question properties if provided
+      2. Updates the question text and manages any associated entities (MCQ options, match pairs)
+      3. If needed, creates new associations for topics or mediums
+      
+      Important: This API implements an image comparison strategy for question text management:
+      - When updating a question with a new image, the system evaluates whether to create a new question text entry
+      - Questions with the same text but different images are treated as distinct entities
+      - Image uniqueness is determined by comparing image_ids (simplified file hash)
+      - This preserves different visual representations of the same question text
+      
+      The update process follows these rules:
+      - If the question text changes, a new question text entry is always created
+      - If only the image changes (same text), a new question text entry is created
+      - If neither text nor image changes, the existing question text is reused
+      
+      This approach maintains data integrity by preserving questions with different visual content
+      while reducing redundancy where appropriate.
+      
+      All IDs for referenced entities are validated before updating.
+    `
+  })
   async updateComplete(
     @Param('id', ParseIntPipe) id: number,
     @Body() editDto: EditCompleteQuestionDto
@@ -701,5 +733,78 @@ export class QuestionController {
     @Body() removeQuestionFromChapterDto: RemoveQuestionFromChapterDto,
   ) {
     return this.questionService.removeFromChapter(id, removeQuestionFromChapterDto);
+  }
+
+  @Post(':id/translate')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Add a translation for an existing question',
+    description: `
+      Creates a translation for an existing verified question:
+      1. Uses the specified question ID and creates a new question text entry
+      2. Maintains the same question relationship (question_id) 
+      3. Creates a new entry in question_text_topic_medium table with:
+         - The new question text ID
+         - The specified instruction medium ID (target language)
+         - The existing question_topic ID
+         - Sets is_verified to false (as this is a new translation)
+      
+      Important notes about images:
+      - If the original question has an image, the translation MUST include an image_id
+      - If the original question has no image, the translation should NOT include an image_id
+      - This consistency is enforced to maintain educational content quality
+      
+      For MCQ and matching questions, translations for options/pairs must be provided.
+      
+      Example request body:
+      \`\`\`
+      {
+        "question_text": "Qual é a capital da França?", // Translated text
+        "image_id": 2,                                 // Image for translated version
+        "instruction_medium_id": 3,                    // Target language medium ID
+        "mcq_options": [                               // Translated options (for MCQ)
+          {
+            "option_text": "Paris",
+            "image_id": 5,
+            "is_correct": true
+          },
+          {
+            "option_text": "Londres",
+            "is_correct": false
+          }
+        ],
+        "match_pairs": [                               // Translated pairs (for matching)
+          {
+            "left_text": "França",
+            "right_text": "Paris"
+          }
+        ]
+      }
+      \`\`\`
+    `
+  })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Translation added successfully',
+    schema: {
+      example: {
+        message: "Translation added successfully",
+        id: 1,                      // Original question ID
+        question_text_id: 2,        // Newly created question text ID
+        question_text: "Qual é a capital da França?",
+        instruction_medium_id: 3,   // Target language ID
+        medium_name: "Portuguese"
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Bad request - validation error or image consistency issue' })
+  @ApiResponse({ status: 404, description: 'Question not found or not verified in source language' })
+  @ApiResponse({ status: 409, description: 'Translation already exists for this question and medium' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async addTranslation(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() translationDto: AddTranslationDto
+  ) {
+    return await this.questionService.addTranslation(id, translationDto);
   }
 }

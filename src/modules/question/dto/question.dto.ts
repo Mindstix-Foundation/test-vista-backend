@@ -536,4 +536,52 @@ export class RemoveQuestionFromChapterDto {
   @IsOptional()
   @IsInt()
   instruction_medium_id?: number;
+}
+
+export class AddTranslationDto {
+  @ApiProperty({
+    example: 'Translated question text',
+    description: 'The translated text of the question'
+  })
+  @IsString()
+  @IsNotEmpty()
+  question_text: string;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Image ID for the question (must be provided if original question has an image, and vice versa)',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  image_id?: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Instruction medium ID for the translation',
+    required: true
+  })
+  @IsInt()
+  @IsNotEmpty()
+  instruction_medium_id: number;
+
+  @ApiProperty({
+    type: [UpdateMcqOptionDto],
+    description: 'Translated MCQ options (required if the question type is MCQ)',
+    required: false
+  })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMcqOptionDto)
+  mcq_options?: UpdateMcqOptionDto[];
+
+  @ApiProperty({
+    type: [UpdateMatchPairDto],
+    description: 'Translated match pairs (required if the question type is matching)',
+    required: false
+  })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateMatchPairDto)
+  match_pairs?: UpdateMatchPairDto[];
 } 
