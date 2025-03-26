@@ -17,6 +17,7 @@ interface QuestionFilters {
   board_question?: boolean;
   instruction_medium_id?: number;
   is_verified?: boolean;
+  translation_status?: string;
 }
 
 @Injectable()
@@ -220,13 +221,15 @@ export class QuestionService {
         sort_by = QuestionSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
         search,
-        is_verified
+        is_verified,
+        translation_status
       } = filters;
       
       // Add detailed logging for debugging
       this.logger.log(`findAll called with filters:
         - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
         - is_verified: ${is_verified} (${typeof is_verified})
+        - translation_status: ${translation_status} (${typeof translation_status})
         - question_type_id: ${question_type_id} (${typeof question_type_id})
         - topic_id: ${topic_id} (${typeof topic_id})
         - chapter_id: ${chapter_id} (${typeof chapter_id})
@@ -290,7 +293,7 @@ export class QuestionService {
       
       // Handle medium and verification filters
       // Always use the same structure to combine these filters consistently
-      if (instruction_medium_id !== undefined || is_verified !== undefined) {
+      if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined) {
         const topicCondition = {
           question_text_topics: {
             some: {} as Record<string, any>
@@ -305,6 +308,11 @@ export class QuestionService {
         // Add verification status filter if specified
         if (is_verified !== undefined) {
           topicCondition.question_text_topics.some.is_verified = is_verified;
+        }
+        
+        // Add translation status filter if specified
+        if (translation_status !== undefined) {
+          topicCondition.question_text_topics.some.translation_status = translation_status;
         }
         
         // Add to existing question_texts condition or create a new one
@@ -772,20 +780,23 @@ export class QuestionService {
 
   async findAllWithoutPagination(filters: Omit<QuestionFilters, 'page' | 'page_size'>) {
     try {
-      const { 
-        question_type_id, 
-        topic_id, 
-        chapter_id, 
+      const {
+        question_type_id,
+        topic_id,
+        chapter_id,
         board_question,
         instruction_medium_id,
-        sort_by = QuestionSortField.CREATED_AT, 
+        sort_by = QuestionSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
-        search
+        search,
+        is_verified,
+        translation_status
       } = filters;
       
-      this.logger.log(`Question findAllWithoutPagination called with params:
-        - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
-        - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+      this.logger.log(`Question findAllWithoutPagination called with params: 
+        - instruction_medium_id: ${instruction_medium_id} 
+        - other filters: ${question_type_id}, ${topic_id}, ${chapter_id}
+        - translation_status: ${translation_status}
       `);
       
       // Build where clause
@@ -818,27 +829,31 @@ export class QuestionService {
         where.board_question = board_question;
       }
       
-      // Handle filtering by instruction_medium_id using the junction table
-      if (instruction_medium_id) {
-        const mediumId = typeof instruction_medium_id === 'string' 
-          ? parseInt(instruction_medium_id, 10) 
-          : instruction_medium_id;
-          
-        this.logger.log(`Filtering questions by instruction_medium_id: ${mediumId}`);
+      // Handle medium-related filters
+      if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined) {
+        // Build the filter for medium
+        let mediumFilter: any = {};
         
-        andConditions.push({
-          question_topics: {
-            some: {
-              question_text_topics: {
-                some: {
-                  instruction_medium: {
-                    id: mediumId
-                  }
-                }
-              }
+        if (instruction_medium_id !== undefined) {
+          mediumFilter.instruction_medium_id = instruction_medium_id;
+        }
+        
+        if (is_verified !== undefined) {
+          mediumFilter.is_verified = is_verified;
+        }
+        
+        if (translation_status !== undefined) {
+          mediumFilter.translation_status = translation_status;
+        }
+        
+        // Add to where conditions
+        where.question_texts = {
+          some: {
+            question_text_topics: {
+              some: mediumFilter
             }
           }
-        });
+        };
       }
       
       // Add search capability if needed
@@ -1639,7 +1654,8 @@ export class QuestionService {
               question_text_id: questionText.id,
               question_topic_id: questionTopic.id,
               instruction_medium_id: question_text_topic_medium_data.instruction_medium_id,
-              is_verified: false // Always set to false for new entries
+              is_verified: false, // Always set to false for new entries
+              translation_status: question_text_topic_medium_data.translation_status || 'original' // Default to 'original' for new entries
             }
           });
         }
@@ -2691,7 +2707,8 @@ export class QuestionService {
             question_text_id: newQuestionText.id,
             question_topic_id: questionTopic.id,
             instruction_medium_id: translationDto.instruction_medium_id,
-            is_verified: false // Always set to false for new translations
+            is_verified: false, // Always set to false for new translations
+            translation_status: 'translated' // Always set to "translated" for translations
           }
         });
       }
