@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
@@ -67,8 +67,14 @@ export class ChapterService {
     }
   }
 
-  async findAll(subjectId?: number, standardId?: number) {
+  async findAll(subjectId?: number, standardId?: number, mediumId?: number) {
     try {
+      // Handle medium only filter
+      if (mediumId && (!subjectId || !standardId)) {
+        this.logger.warn('Medium filter requires both subject and standard IDs');
+        throw new BadRequestException('Please provide both subject ID and standard ID when filtering by medium ID');
+      }
+      
       // Build where clause based on provided filters
       const where: any = {};
       
@@ -79,8 +85,25 @@ export class ChapterService {
       if (standardId) {
         where.standard_id = standardId;
       }
+      
+      // If medium is specified with subject and standard, validate the combination exists
+      if (mediumId && subjectId && standardId) {
+        // Check if the medium-standard-subject combination exists
+        const mssExists = await this.prisma.medium_Standard_Subject.findFirst({
+          where: {
+            instruction_medium_id: mediumId,
+            standard_id: standardId,
+            subject_id: subjectId
+          }
+        });
+        
+        if (!mssExists) {
+          this.logger.warn('No combination found for the specified medium, standard and subject');
+          throw new NotFoundException('The specified medium, standard, and subject combination does not exist');
+        }
+      }
 
-      return await this.prisma.chapter.findMany({
+      const chapters = await this.prisma.chapter.findMany({
         where,
         include: {
           subject: true,
@@ -95,8 +118,13 @@ export class ChapterService {
           sequential_chapter_number: 'asc'
         }
       });
+      
+      return chapters;
     } catch (error) {
       this.logger.error('Failed to fetch chapters:', error);
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error; // Re-throw validation errors with their original status codes
+      }
       throw new InternalServerErrorException('Failed to fetch chapters');
     }
   }
