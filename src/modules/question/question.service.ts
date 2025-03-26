@@ -223,6 +223,40 @@ export class QuestionService {
         is_verified
       } = filters;
       
+      // Add detailed logging for debugging
+      this.logger.log(`findAll called with filters:
+        - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
+        - is_verified: ${is_verified} (${typeof is_verified})
+        - question_type_id: ${question_type_id} (${typeof question_type_id})
+        - topic_id: ${topic_id} (${typeof topic_id})
+        - chapter_id: ${chapter_id} (${typeof chapter_id})
+        - board_question: ${board_question} (${typeof board_question})
+        - all filters: ${JSON.stringify(filters)}
+      `);
+      
+      /**
+       * Filtering Strategy:
+       * 
+       * The filtering approach combines multiple filter dimensions:
+       * 
+       * 1. Direct filters on Question properties:
+       *    - question_type_id: Filter by question type (MCQ, Match Pairs, etc.)
+       *    - board_question: Filter by board question status
+       * 
+       * 2. Related entity filters through question_topics:
+       *    - topic_id: Filter by topic
+       *    - chapter_id: Filter by chapter (through topic relation)
+       * 
+       * 3. Text and medium filters through question_texts and question_text_topics:
+       *    - instruction_medium_id: Filter by instruction medium
+       *    - is_verified: Filter by verification status
+       *    - search: Filter by question text content
+       * 
+       * The challenge is ensuring that medium and verification filters apply to
+       * the same question_text_topic record, while also applying search filters
+       * correctly to the resulting question_texts.
+       */
+      
       // Define where conditions for main query
       const whereConditions: any = {};
 
@@ -254,54 +288,72 @@ export class QuestionService {
         }
       }
       
-      // Handle question_texts filters - properly combine instruction_medium_id, search, and is_verified
-      const questionTextFilters = [];
-      
-      // Instruction medium filter
-      if (instruction_medium_id !== undefined) {
-        questionTextFilters.push({
-              question_text_topics: {
-                some: {
-              instruction_medium_id
-            }
+      // Handle medium and verification filters
+      // Always use the same structure to combine these filters consistently
+      if (instruction_medium_id !== undefined || is_verified !== undefined) {
+        const topicCondition = {
+          question_text_topics: {
+            some: {} as Record<string, any>
           }
-        });
-      }
-      
-      // Verification status filter
-      if (is_verified !== undefined) {
-        questionTextFilters.push({
-              question_text_topics: {
-                some: {
-              is_verified
-            }
-          }
-        });
-      }
-      
-      // Search filter
-      if (search) {
-        questionTextFilters.push({
-              question_text: {
-                contains: search,
-                mode: 'insensitive'
-          }
-        });
-      }
-      
-      // If we have any question_texts filters, add them to the where conditions
-      if (questionTextFilters.length > 0) {
-        // If we have multiple filters, we need to combine them with AND logic
-        if (questionTextFilters.length === 1) {
-          whereConditions.question_texts = {
-            some: questionTextFilters[0]
-          };
-        } else {
-          // For multiple filters, we construct an AND condition where EACH filter must be true for at least one question_text
+        };
+        
+        // Add medium filter if specified
+        if (instruction_medium_id !== undefined) {
+          topicCondition.question_text_topics.some.instruction_medium_id = instruction_medium_id;
+        }
+        
+        // Add verification status filter if specified
+        if (is_verified !== undefined) {
+          topicCondition.question_text_topics.some.is_verified = is_verified;
+        }
+        
+        // Add to existing question_texts condition or create a new one
+        if (whereConditions.question_texts) {
+          // If we already have a question_texts condition, we need to combine them
+          // This handles the case where we have search + medium/verification filters
           whereConditions.question_texts = {
             some: {
-              AND: questionTextFilters
+              AND: [
+                whereConditions.question_texts.some,
+                topicCondition
+              ]
             }
+          };
+        } else {
+          // Create new question_texts condition
+          whereConditions.question_texts = {
+            some: topicCondition
+          };
+        }
+      }
+      
+      // Search filter - add to existing question_texts condition or create a new one
+      if (search) {
+        const searchCondition = {
+          question_text: {
+            contains: search,
+            mode: 'insensitive' as const
+          }
+        };
+        
+        if (whereConditions.question_texts) {
+          // If we already have a question_texts condition, we need to combine them
+          if (whereConditions.question_texts.some.AND) {
+            // If we already have an AND condition, add to it
+            whereConditions.question_texts.some.AND.push(searchCondition);
+          } else {
+            // Otherwise, create a new AND condition
+            whereConditions.question_texts.some = {
+              AND: [
+                whereConditions.question_texts.some,
+                searchCondition
+              ]
+            };
+          }
+        } else {
+          // Create new question_texts condition for search
+          whereConditions.question_texts = {
+            some: searchCondition
           };
         }
       }
@@ -366,6 +418,11 @@ export class QuestionService {
                 }
               },
               question_text_topics: {
+                // Apply the same filtering on nested data to ensure consistency
+                where: {
+                  ...(instruction_medium_id !== undefined ? { instruction_medium_id } : {}),
+                  ...(is_verified !== undefined ? { is_verified } : {})
+                },
                 include: {
                   instruction_medium: true,
                   question_topic: {
@@ -393,16 +450,60 @@ export class QuestionService {
         }
       });
       
+      // Post-processing: Filter out question_texts that don't meet criteria
+      const filteredQuestions = questions.map(question => {
+        const questionCopy = { ...question };
+        
+        // Filter the question_texts to only include those with matching question_text_topics
+        if (instruction_medium_id !== undefined || is_verified !== undefined) {
+          questionCopy.question_texts = questionCopy.question_texts.filter(text => 
+            text.question_text_topics && text.question_text_topics.length > 0
+          );
+        }
+        
+        // If after filtering, there are no question_texts left, we set to empty array to avoid null problems
+        if (questionCopy.question_texts.length === 0) {
+          this.logger.warn(`Question ID ${questionCopy.id} has no matching texts after filtering`);
+        }
+        
+        return questionCopy;
+      });
+
+      // Filter out questions that have no question_texts after filtering
+      const validQuestions = filteredQuestions.filter(q => q.question_texts.length > 0);
+      
+      // Add diagnostic logging to see the filtered results
+      this.logger.log(`Found ${questions.length} questions initially, ${validQuestions.length} after filtering`);
+      if (validQuestions.length > 0) {
+        this.logger.log(`First question has ${validQuestions[0].question_texts.length} matching texts`);
+      }
+      
       // Transform data for response
-      const transformedQuestions = await this.transformQuestionResults(questions);
+      const transformedQuestions = await this.transformQuestionResults(validQuestions);
+      
+      // Save the actual total count after all filters applied for accurate pagination
+      const actualTotalCount = validQuestions.length;
+      
+      // If we had to apply post-processing filters, recalculate total count for all matching records
+      let totalFilteredCount = totalCount;
+      if (instruction_medium_id !== undefined || is_verified !== undefined) {
+        // If we're filtering by medium or verification status,
+        // the actual total count may be different from initial DB query
+        // For more accurate counts, we would need a separate count query
+        // with all the same filtering logic, but for performance reasons
+        // we estimate the total based on our current results
+        const filterRatio = actualTotalCount / questions.length || 0;
+        totalFilteredCount = Math.ceil(totalCount * filterRatio);
+        this.logger.log(`Estimated total count after all filters: ${totalFilteredCount}`);
+      }
       
       return {
         data: transformedQuestions,
         meta: {
-          total_count: totalCount,
+          total_count: totalFilteredCount,
           page,
           page_size,
-          total_pages: Math.ceil(totalCount / page_size)
+          total_pages: Math.ceil(totalFilteredCount / page_size)
         }
       };
     } catch (error) {
@@ -747,7 +848,7 @@ export class QuestionService {
             some: {
               question_text: {
                 contains: search,
-                mode: 'insensitive'
+                mode: 'insensitive' as const
               }
             }
           }
@@ -862,7 +963,8 @@ export class QuestionService {
         page_size = 10,
         sort_by = QuestionSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
-        search
+        search,
+        is_verified
       } = filters;
 
       const whereConditions: any = {};
@@ -905,7 +1007,7 @@ export class QuestionService {
           some: {
             question_text: {
               contains: search,
-              mode: 'insensitive'
+              mode: 'insensitive' as const
             }
           }
         };
@@ -913,33 +1015,50 @@ export class QuestionService {
 
       // NOT EXISTS condition for untranslated questions
       // This is a complex condition:
-      // We need questions where at least one question_text doesn't have a 
+      // We need questions where NONE of the question_texts have a 
       // matching entry in question_text_topic_medium for the specified medium
+      // regardless of verification status
       
-      // Get all questions where there's at least one text NOT associated with this medium
       const skip = (page - 1) * page_size;
       const take = page_size;
 
-      // First, get questions where at least one text doesn't have the specified medium
+      // First, get questions where NONE of texts have the specified medium
+      // This corrects the previous implementation which was only checking for verified texts
       const untranslatedQuestionIds = await this.prisma.$queryRaw<{ id: number }[]>`
         SELECT DISTINCT q.id
         FROM "Question" q
-        WHERE EXISTS (
-          SELECT 1 FROM "Question_Text" qt 
-          WHERE qt.question_id = q.id
-          AND NOT EXISTS (
-            SELECT 1 FROM "Question_Text_Topic_Medium" qttm 
-            WHERE qttm.question_text_id = qt.id 
-            AND qttm.instruction_medium_id = ${instruction_medium_id_param}
-          )
+        WHERE NOT EXISTS (
+          SELECT 1 
+          FROM "Question_Text" qt 
+          JOIN "Question_Text_Topic_Medium" qttm ON qt.id = qttm.question_text_id
+          WHERE qt.question_id = q.id 
+          AND qttm.instruction_medium_id = ${instruction_medium_id_param}
         )
+        ${chapter_id ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "Question_Topic" qt2
+            JOIN "Topic" t ON qt2.topic_id = t.id
+            WHERE qt2.question_id = q.id AND t.chapter_id = ${chapter_id}
+          )` : 
+          Prisma.sql``
+        }
+        ${is_verified === true ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 
+            FROM "Question_Text" qt3 
+            JOIN "Question_Text_Topic_Medium" qttm3 ON qt3.id = qttm3.question_text_id
+            WHERE qt3.question_id = q.id 
+            AND qttm3.is_verified = true
+          )` : 
+          Prisma.sql``
+        }
       `;
 
       // Extract just the IDs
       const questionIds = untranslatedQuestionIds.map(q => q.id);
       
       // Add diagnostic logging
-      this.logger.log(`Found ${questionIds.length} questions with untranslated texts for medium ${instruction_medium_id_param}`);
+      this.logger.log(`Found ${questionIds.length} questions with no translations at all for medium ${instruction_medium_id_param}`);
       if (questionIds.length === 0) {
         this.logger.warn(`No untranslated questions found for medium ${instruction_medium_id_param} - check if the medium exists and has questions`);
       }
@@ -991,7 +1110,12 @@ export class QuestionService {
         skip,
         take,
         include: {
-          question_type: true,
+          question_type: {
+            select: {
+              id: true,
+              type_name: true
+            }
+          },
           question_texts: {
             include: {
               image: true,
@@ -1007,13 +1131,21 @@ export class QuestionService {
                 }
               },
               question_text_topics: {
+                where: is_verified !== undefined ? { is_verified } : {},
                 include: {
-                  instruction_medium: true,
+                  instruction_medium: {
+                    select: {
+                      id: true,
+                      instruction_medium: true
+                    }
+                  },
                   question_topic: {
                     include: {
                       topic: {
-                        include: {
-                          chapter: true
+                        select: {
+                          id: true,
+                          name: true,
+                          chapter_id: true
                         }
                       }
                     }
@@ -1022,11 +1154,13 @@ export class QuestionService {
               }
             }
           },
-          question_topics: { 
+          question_topics: {
             include: {
               topic: {
-                include: {
-                  chapter: true
+                select: {
+                  id: true,
+                  name: true,
+                  chapter_id: true
                 }
               }
             }
@@ -1034,11 +1168,45 @@ export class QuestionService {
         }
       });
 
-      // Transform data for response
+      // Transform data to include presigned URLs for all images
       const transformedQuestions = await this.transformQuestionResults(questions);
 
+      // Simplify the response structure for client consumption
+      const simplifiedQuestions = transformedQuestions.map(question => {
+        return {
+          id: question.id,
+          question_type_id: question.question_type_id,
+          board_question: question.board_question,
+          question_type: question.question_type,
+          question_texts: question.question_texts.map(text => {
+            return {
+              id: text.id,
+              question_id: text.question_id,
+              image_id: text.image_id,
+              question_text: text.question_text,
+              image: text.image, // Already has presigned_url from transformQuestionResults
+              mcq_options: text.mcq_options || [], // Already have presigned_url from transformQuestionResults
+              match_pairs: text.match_pairs || [], // Already have presigned_url from transformQuestionResults
+              topic: question.question_topics[0]?.topic ? {
+                id: question.question_topics[0].topic.id,
+                name: question.question_topics[0].topic.name,
+                chapter_id: question.question_topics[0].topic.chapter_id
+              } : null
+            };
+          }),
+          question_topics: question.question_topics.map(qt => ({
+            id: qt.id,
+            topic: {
+              id: qt.topic.id,
+              name: qt.topic.name,
+              chapter_id: qt.topic.chapter_id
+            }
+          }))
+        };
+      });
+
       return {
-        data: transformedQuestions,
+        data: simplifiedQuestions,
         meta: {
           total_count: totalCount,
           page,
@@ -2553,113 +2721,161 @@ export class QuestionService {
    * @returns Question data with verified texts sorted by medium name
    */
   async getVerifiedQuestionTexts(questionId: number, topicId: number) {
-    // Check if the question exists
-    const question = await this.prisma.question.findUnique({
-      where: { id: questionId },
-      include: {
-        question_type: true
+    try {
+      // Check if the question exists
+      const question = await this.prisma.question.findUnique({
+        where: { id: questionId },
+        include: {
+          question_type: true
+        }
+      });
+
+      if (!question) {
+        throw new NotFoundException(`Question with ID ${questionId} not found`);
       }
-    });
 
-    if (!question) {
-      throw new NotFoundException(`Question with ID ${questionId} not found`);
-    }
+      // Check if topic exists
+      const topic = await this.prisma.topic.findUnique({
+        where: { id: topicId },
+        include: {
+          chapter: true
+        }
+      });
 
-    // Check if topic exists
-    const topic = await this.prisma.topic.findUnique({
-      where: { id: topicId }
-    });
-
-    if (!topic) {
-      throw new NotFoundException(`Topic with ID ${topicId} not found`);
-    }
-
-    // Check if the question is associated with the topic
-    const questionTopic = await this.prisma.question_Topic.findFirst({
-      where: {
-        question_id: questionId,
-        topic_id: topicId
+      if (!topic) {
+        throw new NotFoundException(`Topic with ID ${topicId} not found`);
       }
-    });
 
-    if (!questionTopic) {
-      throw new NotFoundException(`Question with ID ${questionId} is not associated with topic ID ${topicId}`);
-    }
+      // Check if the question is associated with the topic
+      const questionTopic = await this.prisma.question_Topic.findFirst({
+        where: {
+          question_id: questionId,
+          topic_id: topicId
+        }
+      });
 
-    // Get all question texts with their respective mediums that are verified
-    const questionTexts = await this.prisma.question_Text.findMany({
-      where: { 
-        question_id: questionId
-      },
-      include: {
-        image: true,
-        mcq_options: true,
-        match_pairs: true,
-        question_text_topics: {
-          where: {
-            question_topic_id: questionTopic.id,
-            is_verified: true
+      if (!questionTopic) {
+        throw new NotFoundException(`Question with ID ${questionId} is not associated with topic ID ${topicId}`);
+      }
+
+      // Get all question texts with their respective mediums that are verified
+      const questionTexts = await this.prisma.question_Text.findMany({
+        where: { 
+          question_id: questionId
+        },
+        include: {
+          image: true,
+          mcq_options: {
+            include: {
+              image: true
+            }
           },
-          include: {
-            instruction_medium: true
+          match_pairs: {
+            include: {
+              left_image: true,
+              right_image: true
+            }
+          },
+          question_text_topics: {
+            where: {
+              question_topic_id: questionTopic.id,
+              is_verified: true
+            },
+            include: {
+              instruction_medium: true
+            }
           }
         }
-      }
-    });
+      });
 
-    // Filter texts that have verified associations with the specified topic
-    const verifiedTexts = questionTexts.filter(text => 
-      text.question_text_topics && text.question_text_topics.length > 0
-    );
+      // Filter texts that have verified associations with the specified topic
+      const verifiedTexts = questionTexts.filter(text => 
+        text.question_text_topics && text.question_text_topics.length > 0
+      );
 
-    // Transform the data into the desired format
-    const formattedTexts = verifiedTexts.map(text => {
-      const medium = text.question_text_topics[0]?.instruction_medium;
-      
-      return {
-        id: text.id,
-        question_text: text.question_text,
-        image_id: text.image_id,
-        image: text.image ? {
-          id: text.image.id,
-          original_filename: text.image.original_filename,
-          file_type: text.image.file_type,
-          width: text.image.width,
-          height: text.image.height,
-          image_url: text.image.image_url
-        } : null,
-        medium: medium ? {
-          id: medium.id,
-          instruction_medium: medium.instruction_medium
-        } : null,
-        mcq_options: text.mcq_options || [],
-        match_pairs: text.match_pairs || []
+      // Transform all images to include presigned URLs using our standard method
+      const transformedTexts = await Promise.all(verifiedTexts.map(async (text) => {
+        // Create a fully transformed copy of the text with all images processed
+        const transformedText = { ...text };
+        
+        // Process main image
+        if (transformedText.image) {
+          transformedText.image = await this.transformImageData(transformedText.image);
+        }
+        
+        // Process MCQ option images
+        if (transformedText.mcq_options && transformedText.mcq_options.length > 0) {
+          transformedText.mcq_options = await Promise.all(transformedText.mcq_options.map(async (option) => {
+            const optionCopy = { ...option };
+            if (optionCopy.image) {
+              optionCopy.image = await this.transformImageData(optionCopy.image);
+            }
+            return optionCopy;
+          }));
+        }
+        
+        // Process match pair images
+        if (transformedText.match_pairs && transformedText.match_pairs.length > 0) {
+          transformedText.match_pairs = await Promise.all(transformedText.match_pairs.map(async (pair) => {
+            const pairCopy = { ...pair };
+            if (pairCopy.left_image) {
+              pairCopy.left_image = await this.transformImageData(pairCopy.left_image);
+            }
+            if (pairCopy.right_image) {
+              pairCopy.right_image = await this.transformImageData(pairCopy.right_image);
+            }
+            return pairCopy;
+          }));
+        }
+        
+        // Format the medium information
+        const medium = transformedText.question_text_topics[0]?.instruction_medium;
+        
+        // Return simplified structure with transformed images
+        return {
+          id: transformedText.id,
+          question_text: transformedText.question_text,
+          image_id: transformedText.image_id,
+          image: transformedText.image,
+          medium: medium ? {
+            id: medium.id,
+            instruction_medium: medium.instruction_medium
+          } : null,
+          mcq_options: transformedText.mcq_options || [],
+          match_pairs: transformedText.match_pairs || []
+        };
+      }));
+
+      // Sort the texts by medium name alphabetically
+      const sortedTexts = transformedTexts.sort((a, b) => {
+        const mediumA = a.medium?.instruction_medium || '';
+        const mediumB = b.medium?.instruction_medium || '';
+        return mediumA.localeCompare(mediumB);
+      });
+
+      // Construct the final response
+      const response = {
+        id: question.id,
+        question_type: {
+          id: question.question_type.id,
+          type_name: question.question_type.type_name
+        },
+        board_question: question.board_question,
+        topic: {
+          id: topic.id,
+          name: topic.name,
+          chapter_id: topic.chapter_id
+        },
+        question_texts: sortedTexts
       };
-    });
 
-    // Sort the texts by medium name alphabetically
-    const sortedTexts = formattedTexts.sort((a, b) => {
-      const mediumA = a.medium?.instruction_medium || '';
-      const mediumB = b.medium?.instruction_medium || '';
-      return mediumA.localeCompare(mediumB);
-    });
-
-    // Construct the final response
-    const response = {
-      id: question.id,
-      question_type: {
-        id: question.question_type.id,
-        type_name: question.question_type.type_name
-      },
-      board_question: question.board_question,
-      topic: {
-        id: topic.id,
-        name: topic.name,
-        chapter_id: topic.chapter_id
-      },
-      question_texts: sortedTexts
-    };
-
-    return response;
+      return response;
+    } catch (error) {
+      this.logger.error(`Failed to get verified question texts for question ${questionId} and topic ${topicId}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to get verified question texts');
+    }
   }
 } 

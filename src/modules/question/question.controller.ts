@@ -218,24 +218,80 @@ export class QuestionController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all questions with pagination' })
-  @ApiQuery({ name: 'question_type_id', required: false, type: Number })
-  @ApiQuery({ name: 'topic_id', required: false, type: Number })
-  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
-  @ApiQuery({ name: 'board_question', required: false, type: Boolean })
-  @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
-  @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'Filter by verification status' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'page_size', required: false, type: Number })
+  @ApiOperation({ 
+    summary: 'Get all questions with pagination',
+    description: 'Retrieves questions with comprehensive filtering capabilities. Supports filtering by question type, topic, chapter, verification status, medium, and search text. Results can be paginated and sorted by various fields.'
+  })
+  @ApiQuery({ 
+    name: 'question_type_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by specific question type ID (e.g., MCQ, Match Pairs, etc.)' 
+  })
+  @ApiQuery({ 
+    name: 'topic_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by specific topic ID' 
+  })
+  @ApiQuery({ 
+    name: 'chapter_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by chapter ID' 
+  })
+  @ApiQuery({ 
+    name: 'board_question', 
+    required: false, 
+    type: Boolean,
+    description: 'Filter questions by board question status (true/false)' 
+  })
+  @ApiQuery({ 
+    name: 'instruction_medium_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by instruction medium ID (e.g., English, Hindi, etc.)' 
+  })
+  @ApiQuery({ 
+    name: 'is_verified', 
+    required: false, 
+    type: Boolean, 
+    description: 'Filter by verification status of questions (true/false)' 
+  })
+  @ApiQuery({ 
+    name: 'page', 
+    required: false, 
+    type: Number,
+    description: 'Page number for pagination (default: 1)' 
+  })
+  @ApiQuery({ 
+    name: 'page_size', 
+    required: false, 
+    type: Number,
+    description: 'Number of items per page (default: 10)' 
+  })
   @ApiQuery({ 
     name: 'sort_by', 
     required: false, 
     enum: ['question_type_id', 'question_text', 'created_at', 'updated_at'],
     description: 'Field to sort by: question_type_id, question_text, created_at (of the question text), updated_at (of the question text)' 
   })
-  @ApiQuery({ name: 'sort_order', required: false, enum: ['asc', 'desc'] })
-  @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiResponse({ status: 200, description: 'Returns paginated questions' })
+  @ApiQuery({ 
+    name: 'sort_order', 
+    required: false, 
+    enum: ['asc', 'desc'],
+    description: 'Sort order: ascending (asc) or descending (desc)' 
+  })
+  @ApiQuery({ 
+    name: 'search', 
+    required: false, 
+    type: String,
+    description: 'Search term to filter questions by text content (case-insensitive)' 
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns paginated questions with filtered results based on provided criteria' 
+  })
   async findAll(@Query() filters: QuestionFilterDto) {
     const {
       question_type_id,
@@ -251,11 +307,12 @@ export class QuestionController {
       is_verified
     } = filters;
 
-    // Add diagnostic logging
+    // Add detailed diagnostic logging
     this.logger.log(`Question findAll called with params:
       - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
       - is_verified: ${is_verified} (${typeof is_verified})
       - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+      - all filters: ${JSON.stringify(filters)}
     `);
 
     // The sort_by now comes directly from the transformed DTO
@@ -280,26 +337,82 @@ export class QuestionController {
     const simplifiedData = fullResponse.data.map(question => {
       return {
         id: question.id,
+        question_type_id: question.question_type.id,
         board_question: question.board_question,
         question_type: {
           id: question.question_type.id,
           type_name: question.question_type.type_name
         },
-        question_texts: question.question_texts.map(text => ({
-          id: text.id,
-          question_id: text.question_id,
-          image_id: text.image_id,
-          question_text: text.question_text,
-          image: text.image,
-          mcq_options: text.mcq_options || [],
-          match_pairs: text.match_pairs || [],
-          topic: question.question_topics && question.question_topics.length > 0 
-            ? {
-                id: question.question_topics[0].topic?.id,
-                chapter_id: question.question_topics[0].topic?.chapter_id,
-                name: question.question_topics[0].topic?.name
-              }
-            : null
+        question_texts: question.question_texts.map(text => {
+          // Include only essential properties
+          const simplifiedText = {
+            id: text.id,
+            question_id: text.question_id,
+            image_id: text.image_id,
+            question_text: text.question_text,
+            // Only include necessary image fields
+            image: text.image ? {
+              id: text.image.id,
+              original_filename: text.image.original_filename,
+              file_type: text.image.file_type,
+              width: text.image.width,
+              height: text.image.height,
+              presigned_url: text.image.presigned_url
+            } : null,
+            // Process MCQ options to only include essential fields
+            mcq_options: (text.mcq_options || []).map(option => ({
+              id: option.id,
+              question_text_id: option.question_text_id,
+              option_text: option.option_text,
+              is_correct: option.is_correct,
+              image_id: option.image_id,
+              image: option.image ? {
+                id: option.image.id,
+                original_filename: option.image.original_filename,
+                file_type: option.image.file_type,
+                presigned_url: option.image.presigned_url
+              } : null
+            })),
+            // Process match pairs to only include essential fields
+            match_pairs: (text.match_pairs || []).map(pair => ({
+              id: pair.id,
+              question_text_id: pair.question_text_id,
+              left_text: pair.left_text,
+              right_text: pair.right_text,
+              left_image_id: pair.left_image_id,
+              right_image_id: pair.right_image_id,
+              left_image: pair.left_image ? {
+                id: pair.left_image.id,
+                original_filename: pair.left_image.original_filename,
+                file_type: pair.left_image.file_type,
+                presigned_url: pair.left_image.presigned_url
+              } : null,
+              right_image: pair.right_image ? {
+                id: pair.right_image.id,
+                original_filename: pair.right_image.original_filename,
+                file_type: pair.right_image.file_type,
+                presigned_url: pair.right_image.presigned_url
+              } : null
+            })),
+            // Include simplified topic information
+            topic: question.question_topics && question.question_topics.length > 0 
+              ? {
+                  id: question.question_topics[0].topic?.id,
+                  name: question.question_topics[0].topic?.name,
+                  chapter_id: question.question_topics[0].topic?.chapter_id
+                }
+              : null
+          };
+          
+          return simplifiedText;
+        }),
+        question_topics: question.question_topics.map(qt => ({
+          id: qt.id,
+          topic: {
+            id: qt.topic?.id,
+            name: qt.topic?.name,
+            chapter_id: qt.topic?.chapter_id
+          }
         }))
       };
     });
@@ -352,9 +465,11 @@ export class QuestionController {
   })
   @ApiResponse({ status: 404, description: 'Question not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
+    // Get the question with transformed image data (including presigned URLs)
     const question = await this.questionService.findOne(id);
     
-    // Simplify the response to match the format of the main endpoint
+    // The question already has transformed image data with presigned URLs
+    // Just simplify the structure for the response
     const simplifiedQuestion = {
       id: question.id,
       board_question: question.board_question,
@@ -367,9 +482,9 @@ export class QuestionController {
         question_id: text.question_id,
         image_id: text.image_id,
         question_text: text.question_text,
-        image: text.image,
-        mcq_options: text.mcq_options || [],
-        match_pairs: text.match_pairs || [],
+        image: text.image, // Already has presigned_url from transformSingleQuestion
+        mcq_options: text.mcq_options || [], // Already have presigned_url from transformSingleQuestion
+        match_pairs: text.match_pairs || [], // Already have presigned_url from transformSingleQuestion
         topic: question.question_topics && question.question_topics.length > 0 
           ? {
               id: question.question_topics[0].topic?.id,
@@ -424,11 +539,29 @@ export class QuestionController {
 
   @Get('untranslated/:mediumId')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get questions not translated in specified medium' })
+  @ApiOperation({ 
+    summary: 'Get questions not translated in specified medium',
+    description: `
+      Retrieves all questions that do not have any translation (verified or unverified)
+      in the specified instruction medium.
+      
+      This endpoint is useful for finding content that needs to be translated.
+      
+      You can filter by:
+      - question_type_id: Find questions of a specific type
+      - topic_id: Find questions for a specific topic
+      - chapter_id: Find questions for a specific chapter
+      - board_question: Filter by board question flag
+      - is_verified: When true, returns only questions with verified texts in other mediums
+      
+      The response is paginated and can be sorted by different fields.
+    `
+  })
   @ApiQuery({ name: 'question_type_id', required: false, type: Number })
   @ApiQuery({ name: 'topic_id', required: false, type: Number })
   @ApiQuery({ name: 'chapter_id', required: false, type: Number })
   @ApiQuery({ name: 'board_question', required: false, type: Boolean })
+  @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'When true, only returns questions with verified texts in other mediums' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'page_size', required: false, type: Number })
   @ApiQuery({ 
@@ -453,7 +586,8 @@ export class QuestionController {
       page_size,
       sort_by,
       sort_order,
-      search
+      search,
+      is_verified
     } = filters;
 
     // Add diagnostic logging
@@ -462,12 +596,11 @@ export class QuestionController {
       - filters: ${JSON.stringify(filters)}
       - sort_by: ${sort_by} (${typeof sort_by})
       - sort_order: ${sort_order} (${typeof sort_order})
+      - is_verified: ${is_verified} (${typeof is_verified})
     `);
 
-    // The sort_by now comes directly from the transformed DTO
-    // No need to map standard SortField to QuestionSortField anymore
-
-    return await this.questionService.findUntranslatedQuestions(
+    // The result from the service already includes transformed image data with presigned URLs
+    const result = await this.questionService.findUntranslatedQuestions(
       mediumId,
       {
         question_type_id,
@@ -478,9 +611,14 @@ export class QuestionController {
         page_size,
         sort_by,
         sort_order,
-        search
+        search,
+        is_verified
       }
     );
+
+    // No need for additional transformation or mapping for images
+    // The result from the service already contains all necessary data with presigned URLs
+    return result;
   }
 
   @Put('edit/:id')

@@ -22,4 +22,4 @@ import { AuthModule } from '../auth/auth.module';
   controllers: [BoardManagementController],
   providers: [BoardManagementService],
 })
-export class BoardManagementModule {} 
+export class BoardManagementModule {}

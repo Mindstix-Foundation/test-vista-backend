@@ -40,8 +40,22 @@ export class ChapterController {
 
   @Get()
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get all chapters' })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns all chapters' })
+  @ApiOperation({ 
+    summary: 'Get all chapters',
+    description: 'Retrieves all chapters, optionally filtered by subject ID, standard ID, and instruction medium ID. When using medium ID filter, both subject ID and standard ID must also be provided.'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Returns all chapters that match the specified filters'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.BAD_REQUEST, 
+    description: 'Invalid request, such as providing medium ID without subject ID or standard ID'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'The specified combination of medium, standard, and subject does not exist'
+  })
   @ApiQuery({
     name: 'subjectId',
     required: false,
@@ -54,13 +68,21 @@ export class ChapterController {
     type: Number,
     description: 'Filter chapters by standard ID'
   })
+  @ApiQuery({
+    name: 'mediumId',
+    required: false,
+    type: Number,
+    description: 'Filter chapters by instruction medium ID. Requires both subject and standard IDs.'
+  })
   findAll(
     @Query('subjectId') subjectId?: string,
-    @Query('standardId') standardId?: string
+    @Query('standardId') standardId?: string,
+    @Query('mediumId') mediumId?: string
   ) {
     return this.chapterService.findAll(
       subjectId ? +subjectId : undefined,
-      standardId ? +standardId : undefined
+      standardId ? +standardId : undefined,
+      mediumId ? +mediumId : undefined
     );
   }
 
