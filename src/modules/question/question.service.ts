@@ -109,6 +109,12 @@ export class QuestionService {
         // Deep clone to avoid mutation
         const textResult = { ...text };
         
+        // IMPORTANT: Preserve the topic information during transformation
+        // This ensures topic data isn't lost during image transformation
+        if (textResult.topic) {
+          this.logger.log(`Preserving topic info for question ${result.id}, text ${textResult.id}: ${JSON.stringify(textResult.topic)}`);
+        }
+        
         // Transform main image
         if (textResult.image) {
           textResult.image = await this.transformImageData(textResult.image);
@@ -294,6 +300,13 @@ export class QuestionService {
       // Handle medium and verification filters
       // Always use the same structure to combine these filters consistently
       if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined) {
+        // Log the filters being applied
+        this.logger.log(`Applying filters:
+          - instruction_medium_id: ${instruction_medium_id}
+          - is_verified: ${is_verified}
+          - translation_status: ${translation_status}
+        `);
+        
         const topicCondition = {
           question_text_topics: {
             some: {} as Record<string, any>
@@ -310,8 +323,9 @@ export class QuestionService {
           topicCondition.question_text_topics.some.is_verified = is_verified;
         }
         
-        // Add translation status filter if specified
-        if (translation_status !== undefined) {
+        // Add translation status filter if specified - be very explicit about this
+        if (translation_status !== undefined && translation_status !== null && translation_status !== '') {
+          this.logger.log(`Filtering by translation_status: ${translation_status}`);
           topicCondition.question_text_topics.some.translation_status = translation_status;
         }
         
@@ -426,20 +440,11 @@ export class QuestionService {
                 }
               },
               question_text_topics: {
-                // Apply the same filtering on nested data to ensure consistency
-                where: {
-                  ...(instruction_medium_id !== undefined ? { instruction_medium_id } : {}),
-                  ...(is_verified !== undefined ? { is_verified } : {})
-                },
                 include: {
                   instruction_medium: true,
                   question_topic: {
                     include: {
-                      topic: {
-                        include: {
-                          chapter: true
-                        }
-                      }
+                      topic: true
                     }
                   }
                 }
@@ -448,25 +453,124 @@ export class QuestionService {
           },
           question_topics: {
             include: {
-              topic: {
-                include: {
-                  chapter: true
-                }
-              }
+              topic: true
             }
           }
         }
       });
       
+      // Log detailed information about all questions to help debug topic information
+      questions.forEach(question => {
+        this.logger.log(`Debug data for question ID ${question.id}:
+          - Question type: ${question.question_type?.type_name || 'unknown'}
+          - Question has ${question.question_topics?.length || 0} topics
+          - Question topics: ${JSON.stringify(question.question_topics?.map(qt => ({
+            id: qt.id,
+            topic_id: qt.topic_id,
+            topic_name: qt.topic?.name
+          })))}
+          - Question has ${question.question_texts?.length || 0} texts
+          ${question.question_texts?.map(text => 
+            `- Text ID ${text.id}: "${text.question_text.substring(0, 20)}..."
+             - Has ${text.question_text_topics?.length || 0} text-topic associations
+             - Text-topic associations: ${JSON.stringify(text.question_text_topics?.map(qttm => ({
+                id: qttm.id,
+                question_topic_id: qttm.question_topic_id,
+                medium_id: qttm.instruction_medium_id,
+                has_topic: qttm.question_topic?.topic != null,
+                topic_name: qttm.question_topic?.topic?.name
+              })))}`
+          ).join('\n')}
+        `);
+      });
+      
+      // Post-processing: Map question texts to include translation_status directly
+      const processedQuestions = questions.map(question => {
+        // Clone the question to avoid modifying the original
+        const processedQuestion = { ...question };
+        
+        // Process each question text to add translation_status
+        if (processedQuestion.question_texts) {
+          processedQuestion.question_texts = processedQuestion.question_texts.map(text => {
+            // Get the translation status from question_text_topics
+            // Use explicit type casting to resolve TypeScript errors
+            const textWithStatus: any = { ...text };
+            if (textWithStatus.question_text_topics && textWithStatus.question_text_topics.length > 0) {
+              textWithStatus.translation_status = textWithStatus.question_text_topics[0].translation_status || 'original';
+              
+              // Format topic information if available from question_text_topics
+              if (textWithStatus.question_text_topics[0].question_topic?.topic) {
+                const topicData = textWithStatus.question_text_topics[0].question_topic.topic;
+                textWithStatus.topic = {
+                  id: topicData.id,
+                  name: topicData.name,
+                  chapter_id: topicData.chapter_id
+                };
+                this.logger.log(`Service: Found topic in text-topic for question ${question.id}, text ${textWithStatus.id}: ${JSON.stringify(textWithStatus.topic)}`);
+              } 
+              // If no topic in question_text_topics, try from question_topics
+              else if (question.question_topics && question.question_topics.length > 0 && question.question_topics[0].topic) {
+                const topicData = question.question_topics[0].topic;
+                textWithStatus.topic = {
+                  id: topicData.id,
+                  name: topicData.name,
+                  chapter_id: topicData.chapter_id
+                };
+                this.logger.log(`Service: Using default topic from question_topics for question ${question.id}, text ${textWithStatus.id}: ${JSON.stringify(textWithStatus.topic)}`);
+              }
+            } else {
+              textWithStatus.translation_status = 'original'; // Default if not found
+              
+              // If no question_text_topics, try from question_topics
+              if (question.question_topics && question.question_topics.length > 0 && question.question_topics[0].topic) {
+                const topicData = question.question_topics[0].topic;
+                textWithStatus.topic = {
+                  id: topicData.id,
+                  name: topicData.name,
+                  chapter_id: topicData.chapter_id
+                };
+                this.logger.log(`Service: Using default topic without question_text_topics for question ${question.id}, text ${textWithStatus.id}: ${JSON.stringify(textWithStatus.topic)}`);
+              }
+            }
+            
+            return textWithStatus;
+          });
+        }
+        
+        return processedQuestion;
+      });
+      
       // Post-processing: Filter out question_texts that don't meet criteria
-      const filteredQuestions = questions.map(question => {
+      const filteredQuestions = processedQuestions.map(question => {
         const questionCopy = { ...question };
         
         // Filter the question_texts to only include those with matching question_text_topics
-        if (instruction_medium_id !== undefined || is_verified !== undefined) {
-          questionCopy.question_texts = questionCopy.question_texts.filter(text => 
-            text.question_text_topics && text.question_text_topics.length > 0
-          );
+        if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined) {
+          questionCopy.question_texts = questionCopy.question_texts.filter(text => {
+            if (!text.question_text_topics || text.question_text_topics.length === 0) {
+              return false;
+            }
+            
+            // Check if any question_text_topics matches all criteria
+            return text.question_text_topics.some(qttm => {
+              let match = true;
+              
+              if (instruction_medium_id !== undefined) {
+                match = match && qttm.instruction_medium_id === instruction_medium_id;
+              }
+              
+              if (is_verified !== undefined) {
+                match = match && qttm.is_verified === is_verified;
+              }
+              
+              if (translation_status !== undefined && translation_status !== null && translation_status !== '') {
+                this.logger.log(`Checking translation_status: ${qttm.translation_status} against required: ${translation_status}`);
+                match = match && qttm.translation_status === translation_status;
+              }
+              
+              return match;
+            });
+          });
         }
         
         // If after filtering, there are no question_texts left, we set to empty array to avoid null problems
@@ -486,8 +590,20 @@ export class QuestionService {
         this.logger.log(`First question has ${validQuestions[0].question_texts.length} matching texts`);
       }
       
-      // Transform data for response
-      const transformedQuestions = await this.transformQuestionResults(validQuestions);
+      // NEW STEP: Ensure topics are properly set before transformation
+      const questionsWithTopics = this.ensureTopicsInQuestionData(validQuestions);
+      
+      // Transform data for response (keeping topics intact)
+      const transformedQuestions = await this.transformQuestionResults(questionsWithTopics);
+      
+      // Final verification of topics
+      for (const q of transformedQuestions) {
+        for (const text of q.question_texts || []) {
+          this.logger.log(`Final check - Question ${q.id}, Text ${text.id}, Topic: ${JSON.stringify(text.topic)}`);
+        }
+      }
+      
+      const simplifiedQuestions = this.simplifyQuestionData(transformedQuestions);
       
       // Save the actual total count after all filters applied for accurate pagination
       const actualTotalCount = validQuestions.length;
@@ -506,7 +622,7 @@ export class QuestionService {
       }
       
       return {
-        data: transformedQuestions,
+        data: simplifiedQuestions,
         meta: {
           total_count: totalFilteredCount,
           page,
@@ -528,22 +644,7 @@ export class QuestionService {
           question_type: true,
           question_topics: {
             include: {
-              topic: {
-                include: {
-                  chapter: {
-                    include: {
-                      subject: true,
-                      standard: true
-                    }
-                  }
-                }
-              },
-              question_text_topics: {
-                include: {
-                  instruction_medium: true,
-                  question_text: true
-                }
-              }
+              topic: true
             }
           },
           question_texts: {
@@ -559,24 +660,49 @@ export class QuestionService {
                   left_image: true,
                   right_image: true
                 }
+              },
+              question_text_topics: {
+                include: {
+                  instruction_medium: true,
+                  question_topic: {
+                    include: {
+                      topic: true
+                    }
+                  }
+                }
               }
             }
           }
-        },
+        }
       });
 
       if (!question) {
         throw new NotFoundException(`Question with ID ${id} not found`);
       }
 
-      // Transform the question to include presigned URLs
-      return await this.transformSingleQuestion(question);
+      // First ensure topics are properly preserved/set
+      const [questionWithTopics] = this.ensureTopicsInQuestionData([question]);
+      
+      // Log the topics at each step for debugging
+      this.logger.log(`Question ${id} topics after ensuring: ${JSON.stringify(
+        questionWithTopics.question_texts?.map(t => ({ text_id: t.id, topic: t.topic }))
+      )}`);
+      
+      // Then transform images to include presigned URLs
+      const transformedQuestion = await this.transformSingleQuestion(questionWithTopics);
+      
+      // Final check to ensure topics weren't lost
+      this.logger.log(`Question ${id} topics after transformation: ${JSON.stringify(
+        transformedQuestion.question_texts?.map(t => ({ text_id: t.id, topic: t.topic }))
+      )}`);
+      
+      return transformedQuestion;
     } catch (error) {
-      this.logger.error(`Failed to fetch question ${id}:`, error);
+      this.logger.error(`Error retrieving question with ID ${id}:`, error);
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new InternalServerErrorException('Failed to fetch question');
+      throw new InternalServerErrorException('Failed to retrieve question');
     }
   }
 
@@ -1193,22 +1319,25 @@ export class QuestionService {
           question_type_id: question.question_type_id,
           board_question: question.board_question,
           question_type: question.question_type,
-          question_texts: question.question_texts.map(text => {
-            return {
-              id: text.id,
-              question_id: text.question_id,
-              image_id: text.image_id,
-              question_text: text.question_text,
-              image: text.image, // Already has presigned_url from transformQuestionResults
-              mcq_options: text.mcq_options || [], // Already have presigned_url from transformQuestionResults
-              match_pairs: text.match_pairs || [], // Already have presigned_url from transformQuestionResults
-              topic: question.question_topics[0]?.topic ? {
-                id: question.question_topics[0].topic.id,
-                name: question.question_topics[0].topic.name,
-                chapter_id: question.question_topics[0].topic.chapter_id
-              } : null
-            };
-          }),
+          question_texts: question.question_texts.map(text => ({
+            id: text.id,
+            question_id: text.question_id,
+            image_id: text.image_id,
+            question_text: text.question_text,
+            image: text.image, // Already has presigned_url from transformQuestionResults
+            mcq_options: text.mcq_options || [], // Already have presigned_url from transformQuestionResults
+            match_pairs: text.match_pairs || [], // Already have presigned_url from transformQuestionResults
+            translation_status: text.question_text_topics && text.question_text_topics.length > 0 
+              ? text.question_text_topics[0].translation_status
+              : 'original',
+            topic: text.question_text_topics && text.question_text_topics.length > 0 
+              ? {
+                  id: text.question_text_topics[0].question_topic?.topic?.id,
+                  chapter_id: text.question_text_topics[0].question_topic?.topic?.chapter_id,
+                  name: text.question_text_topics[0].question_topic?.topic?.name
+                }
+              : null
+          })),
           question_topics: question.question_topics.map(qt => ({
             id: qt.id,
             topic: {
@@ -1764,11 +1893,74 @@ export class QuestionService {
         where: { 
           id: question_text_id,
           question_id: id
+        },
+        include: {
+          question_text_topics: {
+            include: {
+              instruction_medium: true
+            }
+          }
         }
       });
 
       if (!questionText) {
         throw new NotFoundException(`Question text with ID ${question_text_id} not found for question ${id}`);
+      }
+
+      // Determine if this is the original text (with translation_status = "original")
+      const isOriginalText = questionText.question_text_topics.some(
+        qtt => qtt.translation_status === 'original'
+      );
+
+      // If we're editing the original text, we need to identify all co-translated texts
+      // to mark them as unverified
+      let relatedTranslationIds = [];
+      if (isOriginalText) {
+        this.logger.log(`Editing original text with ID ${question_text_id}. Will unverify all related translations.`);
+        
+        // Get the question_topic_ids associated with this text
+        const questionTopicIds = questionText.question_text_topics.map(qtt => qtt.question_topic_id);
+        
+        // Find all text-topic-medium relations that:
+        // 1. Have the same question_topic_id as the original text
+        // 2. Are for different question_texts (translations)
+        // 3. Have translation_status === 'translated'
+        // 4. Are verified (is_verified === true)
+        const relatedTranslations = await prisma.question_Text_Topic_Medium.findMany({
+          where: {
+            question_topic_id: { in: questionTopicIds },
+            question_text_id: { not: question_text_id }, // Different from the original text
+            translation_status: 'translated', // Is a translation
+            is_verified: true // Is currently verified
+          },
+          include: {
+            question_text: true,
+            instruction_medium: true
+          }
+        });
+        
+        relatedTranslationIds = relatedTranslations.map(rt => rt.id);
+        
+        if (relatedTranslationIds.length > 0) {
+          this.logger.log(`Found ${relatedTranslationIds.length} related translations that will be unverified.`);
+          
+          // Log details of translations being unverified
+          for (const rt of relatedTranslations) {
+            this.logger.log(`Unverifying translation in ${rt.instruction_medium.instruction_medium} (text ID: ${rt.question_text_id})`);
+          }
+          
+          // Unverify all related translations
+          await prisma.question_Text_Topic_Medium.updateMany({
+            where: {
+              id: { in: relatedTranslationIds }
+            },
+            data: {
+              is_verified: false
+            }
+          });
+        } else {
+          this.logger.log(`No related translations found that need to be unverified.`);
+        }
       }
 
       // 2. Check if the question type allows MCQ options or match pairs
@@ -1799,42 +1991,6 @@ export class QuestionService {
         }
       }
 
-      // 2.3 Check images for MCQ options if provided
-      if (question_text_data.mcq_options) {
-        for (const option of question_text_data.mcq_options) {
-          if (option.image_id) {
-            const image = await prisma.image.findUnique({
-              where: { id: option.image_id }
-            });
-            if (!image) {
-              throw new NotFoundException(`Image with ID ${option.image_id} for MCQ option not found`);
-            }
-          }
-        }
-      }
-
-      // 2.4 Check images for match pairs if provided
-      if (question_text_data.match_pairs) {
-        for (const pair of question_text_data.match_pairs) {
-          if (pair.left_image_id) {
-            const leftImage = await prisma.image.findUnique({
-              where: { id: pair.left_image_id }
-            });
-            if (!leftImage) {
-              throw new NotFoundException(`Left image with ID ${pair.left_image_id} for match pair not found`);
-            }
-          }
-          if (pair.right_image_id) {
-            const rightImage = await prisma.image.findUnique({
-              where: { id: pair.right_image_id }
-            });
-            if (!rightImage) {
-              throw new NotFoundException(`Right image with ID ${pair.right_image_id} for match pair not found`);
-            }
-          }
-        }
-      }
-
       // 3. Update the question board status
       await prisma.question.update({
         where: { id },
@@ -1862,236 +2018,6 @@ export class QuestionService {
           }
         });
       }
-
-      // NEW STEP: Check if a question text with the same content already exists
-      // but exclude the current question text from the search
-      this.logger.log(`Checking if question text "${question_text_data.question_text.substring(0, 50)}..." already exists elsewhere`);
-      const existingQuestionText = await prisma.question_Text.findFirst({
-        where: {
-          question_text: question_text_data.question_text,
-          id: { not: question_text_id } // Exclude the current text being edited
-        },
-        include: {
-          image: true,
-          question: {
-            include: {
-              question_type: true,
-              question_topics: {
-                where: {
-                  topic_id: question_topic_data.topic_id
-                },
-                include: {
-                  topic: true
-                }
-              }
-            }
-          },
-          mcq_options: true,
-          match_pairs: true,
-          question_text_topics: {
-            where: {
-              question_topic: {
-                topic_id: question_topic_data.topic_id
-              }
-            }
-          }
-        }
-      });
-
-      if (existingQuestionText) {
-        this.logger.log(`Found existing question text with ID ${existingQuestionText.id} containing the same content`);
-        
-        // Check if the existing question text is similar enough to reuse (same MCQ options and match pairs structure)
-        let canReuseText = true;
-        let reusableTextExplanation = "";
-        
-        // Implement the image comparison approach (similar to createComplete method)
-        // Check if the current image situation is different from the existing text
-        const currentText = await prisma.question_Text.findUnique({
-          where: { id: question_text_id },
-          select: { image_id: true }
-        });
-        
-        const existingHasImage = existingQuestionText.image_id !== null;
-        const currentHasImage = currentText.image_id !== null;
-        const newHasImage = question_text_data.image_id !== null;
-        
-        let differentImageSituation = false;
-        
-        // Implementation of the file hash comparison approach (Option 3):
-        // 1. If one has an image and the other doesn't, they're considered different questions
-        // 2. If both have images but with different image_ids, they're considered different questions
-        
-        // Case 1: Different image presence
-        if (existingHasImage !== newHasImage) {
-          this.logger.log(`Image presence differs (existing: ${existingHasImage ? 'has image' : 'no image'}, new: ${newHasImage ? 'has image' : 'no image'}). Cannot reuse text.`);
-          differentImageSituation = true;
-        } 
-        // Case 2: Both have images but they're different
-        else if (existingHasImage && newHasImage && existingQuestionText.image_id !== question_text_data.image_id) {
-          this.logger.log(`Both have images but they are different (existing: ${existingQuestionText.image_id}, new: ${question_text_data.image_id}). Cannot reuse text.`);
-          differentImageSituation = true;
-        }
-        
-        if (differentImageSituation) {
-          // If the images are different, don't reuse the text
-          this.logger.log(`Cannot reuse question text due to different image situation.`);
-          canReuseText = false;
-          reusableTextExplanation = "Image situation differs";
-        }
-        
-        // Compare MCQ options count if both have them
-        if (
-          (existingQuestionText.mcq_options?.length > 0 && (!question_text_data.mcq_options || question_text_data.mcq_options.length === 0)) ||
-          (!existingQuestionText.mcq_options?.length && question_text_data.mcq_options?.length > 0)
-        ) {
-          canReuseText = false;
-          reusableTextExplanation = "MCQ options structure differs";
-        }
-        
-        // Compare match pairs count if both have them
-        if (
-          (existingQuestionText.match_pairs?.length > 0 && (!question_text_data.match_pairs || question_text_data.match_pairs.length === 0)) ||
-          (!existingQuestionText.match_pairs?.length && question_text_data.match_pairs?.length > 0)
-        ) {
-          canReuseText = false;
-          reusableTextExplanation = "Match pairs structure differs";
-        }
-        
-        // Check if the existing text is associated with this topic
-        const existingTopicAssociation = existingQuestionText.question.question_topics.length > 0;
-        
-        if (canReuseText) {
-          this.logger.log(`Existing question text can be reused with ID ${existingQuestionText.id}`);
-          
-          // First, find all the question_text_topic_medium entries for the current text
-          const currentTextTopicMediums = await prisma.question_Text_Topic_Medium.findMany({
-            where: { question_text_id: question_text_id }
-          });
-          
-          // Get the question topic id for the target topic
-          let targetQuestionTopicId = existingTopic.id;
-          
-          if (existingTopic.topic_id !== question_topic_data.topic_id) {
-            // If the topic has changed, find or create the appropriate question topic record
-            const existingQuestionTopic = await prisma.question_Topic.findFirst({
-              where: {
-                question_id: existingQuestionText.question_id,
-                topic_id: question_topic_data.topic_id
-              }
-            });
-            
-            if (existingQuestionTopic) {
-              targetQuestionTopicId = existingQuestionTopic.id;
-            } else {
-              // Create new question topic association if needed
-              const newQuestionTopic = await prisma.question_Topic.create({
-                data: {
-                  question_id: existingQuestionText.question_id,
-                  topic_id: question_topic_data.topic_id
-                }
-              });
-              targetQuestionTopicId = newQuestionTopic.id;
-            }
-          }
-          
-          // For each current text-topic-medium, create or update corresponding entries for the existing text
-          for (const textTopicMedium of currentTextTopicMediums) {
-            // Check if this association already exists for the existing text
-            const existingAssociation = await prisma.question_Text_Topic_Medium.findFirst({
-              where: {
-                question_text_id: existingQuestionText.id,
-                question_topic_id: targetQuestionTopicId,
-                instruction_medium_id: textTopicMedium.instruction_medium_id
-              }
-            });
-            
-            if (!existingAssociation) {
-              // Create a new association for the existing text
-              await prisma.question_Text_Topic_Medium.create({
-                data: {
-                  question_text_id: existingQuestionText.id,
-                  question_topic_id: targetQuestionTopicId,
-                  instruction_medium_id: textTopicMedium.instruction_medium_id,
-                  is_verified: false // Always set to false for new entries
-                }
-              });
-            }
-          }
-          
-          // Now we can safely delete the old text since we've migrated all associations
-          // First, delete all question_text_topic_medium entries for the old text
-          await prisma.question_Text_Topic_Medium.deleteMany({
-            where: { question_text_id: question_text_id }
-          });
-          
-          // Delete MCQ options for the old text
-          await prisma.mcq_Option.deleteMany({
-            where: { question_text_id: question_text_id }
-          });
-          
-          // Delete match pairs for the old text
-          await prisma.match_Pair.deleteMany({
-            where: { question_text_id: question_text_id }
-          });
-          
-          // Finally, delete the old question text
-          await prisma.question_Text.delete({
-            where: { id: question_text_id }
-          });
-          
-          // Return the question with the reused text
-          const updatedQuestion = await prisma.question.findUnique({
-            where: { id },
-            include: {
-              question_type: true,
-              question_texts: {
-                where: { id: existingQuestionText.id },
-                include: {
-                  image: true,
-                  mcq_options: {
-                    include: {
-                      image: true
-                    }
-                  },
-                  match_pairs: {
-                    include: {
-                      left_image: true,
-                      right_image: true
-                    }
-                  },
-                  question_text_topics: {
-                    include: {
-                      instruction_medium: true,
-                      question_topic: {
-                        include: {
-                          topic: true
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              question_topics: {
-                include: {
-                  topic: true
-                }
-              }
-            }
-          });
-          
-          return {
-            message: `Reused existing question text to reduce redundancy`,
-            ...await this.transformSingleQuestion(updatedQuestion),
-            reused_existing_text: true
-          };
-        } else {
-          this.logger.log(`Existing question text found but cannot be reused: ${reusableTextExplanation}`);
-        }
-      }
-
-      // If no reusable text was found, proceed with normal update
-      this.logger.log(`No reusable question text found, proceeding with normal update`);
 
       // 5. Update the specified question text
       await prisma.question_Text.update({
@@ -2256,7 +2182,20 @@ export class QuestionService {
         }
       });
       
-      return await this.transformSingleQuestion(updatedQuestion);
+      // Transform the result to include presigned URLs
+      const transformedQuestion = await this.transformSingleQuestion(updatedQuestion);
+      
+      // Add information about unverified translations if applicable
+      if (isOriginalText && relatedTranslationIds.length > 0) {
+        this.logger.log(`Updated original text and unverified ${relatedTranslationIds.length} related translations`);
+        return {
+          ...transformedQuestion,
+          translations_unverified: relatedTranslationIds.length,
+          message: `Question updated successfully. ${relatedTranslationIds.length} related translations were unverified.`
+        };
+      }
+      
+      return transformedQuestion;
     });
   }
 
@@ -2533,30 +2472,85 @@ export class QuestionService {
   private simplifyQuestionItem(question) {
     if (!question) return null;
     
+    // Log the incoming question's topic data
+    this.logger.log(`simplifyQuestionItem processing question ${question.id}:
+      - Has question_topics: ${question.question_topics && question.question_topics.length > 0 ? 'yes' : 'no'}
+      - Number of question_texts: ${question.question_texts?.length || 0}
+      - Text 0 has topic?: ${question.question_texts && question.question_texts[0] && question.question_texts[0].topic ? 'yes' : 'no'}
+      - Text 0 topic data: ${question.question_texts && question.question_texts[0] && question.question_texts[0].topic ? 
+          JSON.stringify(question.question_texts[0].topic) : 'none'}
+    `);
+    
+    // Get the default topic from question_topics as a fallback
+    const defaultTopic = question.question_topics && question.question_topics.length > 0 && question.question_topics[0].topic 
+      ? {
+          id: question.question_topics[0].topic.id,
+          name: question.question_topics[0].topic.name,
+          chapter_id: question.question_topics[0].topic.chapter_id
+        } 
+      : null;
+    
     // Simplified question object with only required fields
     return {
       id: question.id,
       board_question: question.board_question,
+      question_type_id: question.question_type?.id,
       question_type: question.question_type ? {
         id: question.question_type.id,
         type_name: question.question_type.type_name
       } : null,
-      question_texts: (question.question_texts || []).map(text => ({
-        id: text.id,
-        question_id: text.question_id,
-        image_id: text.image_id,
-        question_text: text.question_text,
-        image: text.image,
-        mcq_options: text.mcq_options || [],
-        match_pairs: text.match_pairs || [],
-        topic: text.question_text_topics && text.question_text_topics.length > 0 
-          ? {
-              id: text.question_text_topics[0].question_topic?.topic?.id,
-              chapter_id: text.question_text_topics[0].question_topic?.topic?.chapter_id,
-              name: text.question_text_topics[0].question_topic?.topic?.name
-            }
-          : null
-      }))
+      question_texts: (question.question_texts || []).map(text => {
+        // IMPORTANT: Preserve the topic that was already set in previous processing
+        // This ensures we don't lose the topic information we've carefully built
+        let finalTopic = text.topic;
+        
+        // If text doesn't already have a topic but we have a default, use it
+        if (!finalTopic && defaultTopic) {
+          finalTopic = defaultTopic;
+          this.logger.log(`simplifyQuestionItem: Using default topic for question ${question.id}, text ${text.id}`);
+        }
+        
+        // If we still don't have a topic, try other sources
+        if (!finalTopic) {
+          // Try to get from question_text_topics
+          if (text.question_text_topics && text.question_text_topics.length > 0 && 
+              text.question_text_topics[0].question_topic?.topic) {
+            const topicData = text.question_text_topics[0].question_topic.topic;
+            finalTopic = {
+              id: topicData.id,
+              name: topicData.name,
+              chapter_id: topicData.chapter_id
+            };
+            this.logger.log(`simplifyQuestionItem: Found topic in text_topics for question ${question.id}, text ${text.id}`);
+          }
+        }
+        
+        // Log the final topic decision
+        this.logger.log(`simplifyQuestionItem: Final topic for question ${question.id}, text ${text.id}: ${JSON.stringify(finalTopic)}`);
+        
+        // Create the base text object with explicit typing to avoid TypeScript errors
+        const textObj: any = {
+          id: text.id,
+          question_id: text.question_id,
+          image_id: text.image_id,
+          question_text: text.question_text,
+          image: text.image,
+          mcq_options: text.mcq_options || [],
+          match_pairs: text.match_pairs || [],
+          // Set the topic we've determined
+          topic: finalTopic
+        };
+        
+        // Add translation_status from question_text_topics if available
+        if (text.question_text_topics && text.question_text_topics.length > 0) {
+          textObj.translation_status = text.question_text_topics[0].translation_status || 'original';
+        } else {
+          // Default values if not available
+          textObj.translation_status = 'original';
+        }
+        
+        return textObj;
+      })
     };
   }
 
@@ -2858,6 +2852,7 @@ export class QuestionService {
             id: medium.id,
             instruction_medium: medium.instruction_medium
           } : null,
+          translation_status: transformedText.question_text_topics[0]?.translation_status || 'original',
           mcq_options: transformedText.mcq_options || [],
           match_pairs: transformedText.match_pairs || []
         };
@@ -2894,5 +2889,291 @@ export class QuestionService {
       }
       throw new InternalServerErrorException('Failed to get verified question texts');
     }
+  }
+
+  // Diagnostic method to check question-topic associations
+  async checkQuestionData(id: number) {
+    try {
+      // Fetch a specific question and all its relationships
+      const question = await this.prisma.question.findUnique({
+        where: { id },
+        include: {
+          question_type: true,
+          question_texts: {
+            include: {
+              question_text_topics: {
+                include: {
+                  question_topic: {
+                    include: {
+                      topic: true
+                    }
+                  },
+                  instruction_medium: true
+                }
+              }
+            }
+          },
+          question_topics: {
+            include: {
+              topic: true
+            }
+          }
+        }
+      });
+      
+      if (!question) {
+        throw new NotFoundException(`Question with ID ${id} not found`);
+      }
+      
+      // Format a simplified diagnostic response
+      return {
+        id: question.id,
+        question_type: question.question_type?.type_name,
+        has_question_topics: question.question_topics && question.question_topics.length > 0,
+        question_topics_count: question.question_topics?.length || 0,
+        question_topics: question.question_topics?.map(qt => ({
+          id: qt.id,
+          topic_id: qt.topic_id,
+          topic_name: qt.topic?.name
+        })),
+        question_texts_count: question.question_texts?.length || 0,
+        question_texts: question.question_texts?.map(text => ({
+          id: text.id,
+          text: text.question_text,
+          has_text_topic_medium: text.question_text_topics && text.question_text_topics.length > 0,
+          text_topic_medium_count: text.question_text_topics?.length || 0,
+          text_topic_medium: text.question_text_topics?.map(ttm => ({
+            id: ttm.id,
+            question_topic_id: ttm.question_topic_id,
+            medium_id: ttm.instruction_medium_id,
+            medium_name: ttm.instruction_medium?.instruction_medium,
+            translation_status: ttm.translation_status || 'original',
+            has_topic: ttm.question_topic?.topic != null,
+            topic_id: ttm.question_topic?.topic?.id,
+            topic_name: ttm.question_topic?.topic?.name
+          }))
+        }))
+      };
+    } catch (error) {
+      this.logger.error(`Error in checkQuestionData for question ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to retrieve question diagnostic data');
+    }
+  }
+
+  // Additional diagnostic method to check all questions
+  async checkAllQuestionsData() {
+    try {
+      // Get all questions with minimal data
+      const questions = await this.prisma.question.findMany({
+        include: {
+          question_topics: {
+            include: {
+              topic: true
+            }
+          },
+          question_texts: {
+            include: {
+              question_text_topics: {
+                include: {
+                  instruction_medium: true
+                }
+              }
+            }
+          }
+        }
+      });
+      
+      return questions.map(q => ({
+        id: q.id,
+        has_question_topics: q.question_topics && q.question_topics.length > 0,
+        question_topics_count: q.question_topics?.length || 0,
+        question_topics: q.question_topics?.map(qt => ({
+          id: qt.id,
+          topic_id: qt.topic_id,
+          topic_name: qt.topic?.name
+        })),
+        question_texts_count: q.question_texts?.length || 0,
+        question_texts: q.question_texts?.map(text => ({
+          id: text.id,
+          text: text.question_text,
+          has_text_topic_medium: text.question_text_topics && text.question_text_topics.length > 0,
+          text_topic_medium_count: text.question_text_topics?.length || 0,
+          text_topic_medium: text.question_text_topics?.map(ttm => ({
+            id: ttm.id,
+            question_topic_id: ttm.question_topic_id,
+            medium_id: ttm.instruction_medium_id,
+            medium_name: ttm.instruction_medium?.instruction_medium,
+            translation_status: ttm.translation_status || 'original'
+          }))
+        }))
+      }));
+    } catch (error) {
+      this.logger.error('Error in checkAllQuestionsData:', error);
+      throw new InternalServerErrorException('Failed to retrieve all questions diagnostic data');
+    }
+  }
+
+  /**
+   * Utility method to assign a default topic to questions without topics
+   * This is helpful for fixing questions that don't have any topic associations
+   */
+  async assignDefaultTopicToQuestions() {
+    try {
+      // Step 1: Find all questions without any topics
+      const questionsWithoutTopics = await this.prisma.question.findMany({
+        where: {
+          question_topics: {
+            none: {}
+          }
+        },
+        include: {
+          question_texts: {
+            include: {
+              question_text_topics: true
+            }
+          }
+        }
+      });
+      
+      if (questionsWithoutTopics.length === 0) {
+        return { message: 'No questions without topics found', affected: 0 };
+      }
+      
+      this.logger.log(`Found ${questionsWithoutTopics.length} questions without topics`);
+      
+      // Step 2: Find or create a default topic
+      let defaultTopic = await this.prisma.topic.findFirst({
+        where: {
+          name: 'General'
+        }
+      });
+      
+      if (!defaultTopic) {
+        // Need to find a chapter first
+        const chapter = await this.prisma.chapter.findFirst();
+        
+        if (!chapter) {
+          return { message: 'No chapters found in database - cannot create default topic', affected: 0 };
+        }
+        
+        // Create the default topic
+        defaultTopic = await this.prisma.topic.create({
+          data: {
+            name: 'General',
+            chapter_id: chapter.id,
+            sequential_topic_number: 1
+          }
+        });
+        
+        this.logger.log(`Created default topic 'General' with ID ${defaultTopic.id}`);
+      }
+      
+      // Step 3: Create question_topics for each question
+      const createdAssociations = [];
+      
+      for (const question of questionsWithoutTopics) {
+        // Create a question_topic association
+        const questionTopic = await this.prisma.question_Topic.create({
+          data: {
+            question_id: question.id,
+            topic_id: defaultTopic.id
+          }
+        });
+        
+        createdAssociations.push(questionTopic);
+        
+        // For each question text, create question_text_topic_medium records if needed
+        for (const text of question.question_texts) {
+          // Skip if it already has question_text_topics
+          if (text.question_text_topics && text.question_text_topics.length > 0) {
+            continue;
+          }
+          
+          // Find a default medium if needed
+          const defaultMedium = await this.prisma.instruction_Medium.findFirst();
+          
+          if (!defaultMedium) {
+            this.logger.warn('No instruction mediums found in database');
+            continue;
+          }
+          
+          // Create a question_text_topic_medium association
+          try {
+            await this.prisma.question_Text_Topic_Medium.create({
+              data: {
+                question_text_id: text.id,
+                question_topic_id: questionTopic.id,
+                instruction_medium_id: defaultMedium.id,
+                is_verified: false,
+                translation_status: 'original'
+              }
+            });
+          } catch (error) {
+            this.logger.error(`Failed to create question_text_topic_medium for question_text ${text.id}:`, error);
+          }
+        }
+      }
+      
+      return {
+        message: `Created topic associations for ${questionsWithoutTopics.length} questions`,
+        affected: questionsWithoutTopics.length,
+        defaultTopic
+      };
+    } catch (error) {
+      this.logger.error('Error in assignDefaultTopicToQuestions:', error);
+      throw new InternalServerErrorException('Failed to assign default topics to questions');
+    }
+  }
+
+  // Add this directly after the post-processing step in findAll
+  // Before the transformQuestionResults call
+  
+  // Ensure topics are preserved in the final data
+  private ensureTopicsInQuestionData(questions) {
+    return questions.map(question => {
+      const result = { ...question };
+      
+      // Get default topic from question_topics for fallback
+      let defaultTopic = null;
+      if (question.question_topics && question.question_topics.length > 0 && question.question_topics[0]?.topic) {
+        defaultTopic = {
+          id: question.question_topics[0].topic.id,
+          name: question.question_topics[0].topic.name,
+          chapter_id: question.question_topics[0].topic.chapter_id
+        };
+        this.logger.log(`Found default topic for question ${question.id}: ${JSON.stringify(defaultTopic)}`);
+      }
+      
+      // Process each question text to ensure it has topic data
+      if (result.question_texts) {
+        result.question_texts = result.question_texts.map(text => {
+          const textResult = { ...text };
+          
+          // Get topic from question_text_topics first
+          if (textResult.question_text_topics && textResult.question_text_topics.length > 0 && 
+              textResult.question_text_topics[0].question_topic?.topic) {
+            const topicData = textResult.question_text_topics[0].question_topic.topic;
+            textResult.topic = {
+              id: topicData.id,
+              name: topicData.name,
+              chapter_id: topicData.chapter_id
+            };
+            this.logger.log(`Found topic in text-topics for question ${question.id}, text ${textResult.id}: ${JSON.stringify(textResult.topic)}`);
+          } 
+          // Fallback to default topic from question_topics
+          else if (defaultTopic) {
+            textResult.topic = defaultTopic;
+            this.logger.log(`Using default topic for question ${question.id}, text ${textResult.id}: ${JSON.stringify(textResult.topic)}`);
+          }
+          
+          return textResult;
+        });
+      }
+      
+      return result;
+    });
   }
 } 

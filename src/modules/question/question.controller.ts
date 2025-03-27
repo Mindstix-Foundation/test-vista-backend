@@ -259,6 +259,12 @@ export class QuestionController {
     description: 'Filter by verification status of questions (true/false)' 
   })
   @ApiQuery({ 
+    name: 'translation_status', 
+    required: false, 
+    type: String,
+    description: 'Filter questions by translation status' 
+  })
+  @ApiQuery({ 
     name: 'page', 
     required: false, 
     type: Number,
@@ -304,22 +310,21 @@ export class QuestionController {
       sort_by,
       sort_order,
       search,
-      is_verified
+      is_verified,
+      translation_status
     } = filters;
 
     // Add detailed diagnostic logging
     this.logger.log(`Question findAll called with params:
       - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
       - is_verified: ${is_verified} (${typeof is_verified})
+      - translation_status: ${translation_status} (${typeof translation_status})
       - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
       - all filters: ${JSON.stringify(filters)}
     `);
 
-    // The sort_by now comes directly from the transformed DTO
-    // No need to map standard SortField to QuestionSortField anymore
-
-    // Get the full response from the service
-    const fullResponse = await this.questionService.findAll({
+    // Get the full response from the service - the topics should already be set correctly
+    return await this.questionService.findAll({
       question_type_id,
       topic_id,
       chapter_id,
@@ -330,97 +335,9 @@ export class QuestionController {
       sort_by,
       sort_order,
       search,
-      is_verified
+      is_verified,
+      translation_status
     });
-    
-    // Simplify the response to include only the needed fields
-    const simplifiedData = fullResponse.data.map(question => {
-      return {
-        id: question.id,
-        question_type_id: question.question_type.id,
-        board_question: question.board_question,
-        question_type: {
-          id: question.question_type.id,
-          type_name: question.question_type.type_name
-        },
-        question_texts: question.question_texts.map(text => {
-          // Include only essential properties
-          const simplifiedText = {
-            id: text.id,
-            question_id: text.question_id,
-            image_id: text.image_id,
-            question_text: text.question_text,
-            // Only include necessary image fields
-            image: text.image ? {
-              id: text.image.id,
-              original_filename: text.image.original_filename,
-              file_type: text.image.file_type,
-              width: text.image.width,
-              height: text.image.height,
-              presigned_url: text.image.presigned_url
-            } : null,
-            // Process MCQ options to only include essential fields
-            mcq_options: (text.mcq_options || []).map(option => ({
-              id: option.id,
-              question_text_id: option.question_text_id,
-              option_text: option.option_text,
-              is_correct: option.is_correct,
-              image_id: option.image_id,
-              image: option.image ? {
-                id: option.image.id,
-                original_filename: option.image.original_filename,
-                file_type: option.image.file_type,
-                presigned_url: option.image.presigned_url
-              } : null
-            })),
-            // Process match pairs to only include essential fields
-            match_pairs: (text.match_pairs || []).map(pair => ({
-              id: pair.id,
-              question_text_id: pair.question_text_id,
-              left_text: pair.left_text,
-              right_text: pair.right_text,
-              left_image_id: pair.left_image_id,
-              right_image_id: pair.right_image_id,
-              left_image: pair.left_image ? {
-                id: pair.left_image.id,
-                original_filename: pair.left_image.original_filename,
-                file_type: pair.left_image.file_type,
-                presigned_url: pair.left_image.presigned_url
-              } : null,
-              right_image: pair.right_image ? {
-                id: pair.right_image.id,
-                original_filename: pair.right_image.original_filename,
-                file_type: pair.right_image.file_type,
-                presigned_url: pair.right_image.presigned_url
-              } : null
-            })),
-            // Include simplified topic information
-            topic: question.question_topics && question.question_topics.length > 0 
-              ? {
-                  id: question.question_topics[0].topic?.id,
-                  name: question.question_topics[0].topic?.name,
-                  chapter_id: question.question_topics[0].topic?.chapter_id
-                }
-              : null
-          };
-          
-          return simplifiedText;
-        }),
-        question_topics: question.question_topics.map(qt => ({
-          id: qt.id,
-          topic: {
-            id: qt.topic?.id,
-            name: qt.topic?.name,
-            chapter_id: qt.topic?.chapter_id
-          }
-        }))
-      };
-    });
-    
-    return {
-      data: simplifiedData,
-      meta: fullResponse.meta
-    };
   }
 
   @Get(':id')
@@ -465,37 +382,8 @@ export class QuestionController {
   })
   @ApiResponse({ status: 404, description: 'Question not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    // Get the question with transformed image data (including presigned URLs)
-    const question = await this.questionService.findOne(id);
-    
-    // The question already has transformed image data with presigned URLs
-    // Just simplify the structure for the response
-    const simplifiedQuestion = {
-      id: question.id,
-      board_question: question.board_question,
-      question_type: {
-        id: question.question_type.id,
-        type_name: question.question_type.type_name
-      },
-      question_texts: question.question_texts.map(text => ({
-        id: text.id,
-        question_id: text.question_id,
-        image_id: text.image_id,
-        question_text: text.question_text,
-        image: text.image, // Already has presigned_url from transformSingleQuestion
-        mcq_options: text.mcq_options || [], // Already have presigned_url from transformSingleQuestion
-        match_pairs: text.match_pairs || [], // Already have presigned_url from transformSingleQuestion
-        topic: question.question_topics && question.question_topics.length > 0 
-          ? {
-              id: question.question_topics[0].topic?.id,
-              chapter_id: question.question_topics[0].topic?.chapter_id,
-              name: question.question_topics[0].topic?.name
-            }
-          : null
-      }))
-    };
-    
-    return simplifiedQuestion;
+    // The question service already handles topic associations and transformations
+    return await this.questionService.findOne(id);
   }
 
   @Put(':id')
@@ -632,6 +520,14 @@ export class QuestionController {
       - After any edit, is_verified flag is set to false in Question_Text_Topic_Medium relations
       - Requires specifying which question_text to edit via question_text_id
       
+      *** IMPORTANT TRANSLATION WORKFLOW NOTICE ***
+      When the original text (translation_status = "original") is edited, all related translations 
+      in other languages will be AUTOMATICALLY UNVERIFIED (is_verified = false). This critical feature ensures:
+      1. Translators are notified to review and update their translations 
+      2. Outdated translations aren't presented to users as verified content
+      3. Content consistency is maintained across all languages
+      4. The response will include the count of unverified translations as "translations_unverified"
+      
       The API implements data redundancy reduction:
       - Before updating, it checks if another question with the same text content already exists 
       - If a matching text is found, it may reuse that text instead of creating a duplicate
@@ -746,6 +642,16 @@ export class QuestionController {
         },
         {
           example: {
+            message: "Question updated successfully. 3 related translations were unverified.",
+            id: 1,
+            question_type_id: 1,
+            board_question: true,
+            translations_unverified: 3
+          },
+          description: "When an original text is edited and related translations are unverified"
+        },
+        {
+          example: {
             message: "Reused existing question text to reduce redundancy",
             id: 1,
             question_type_id: 1,
@@ -770,7 +676,19 @@ export class QuestionController {
       2. Updates the question text and manages any associated entities (MCQ options, match pairs)
       3. If needed, creates new associations for topics or mediums
       
-      Important: This API implements an image comparison strategy for question text management:
+      *** TRANSLATION INTEGRITY FEATURE ***
+      When editing the original text (with translation_status="original"), the system automatically
+      unverifies ALL related translations (sets is_verified=false). This critical workflow feature:
+      
+      - Ensures translators know when source content has changed and requires review
+      - Prevents outdated translations from being served to users
+      - Maintains educational content integrity across all language versions
+      - Provides a clear translation workflow with verification states
+      
+      The response includes a "translations_unverified" count showing how many translations
+      were affected by this automatic process.
+      
+      This API implements an image comparison strategy for question text management:
       - When updating a question with a new image, the system evaluates whether to create a new question text entry
       - Questions with the same text but different images are treated as distinct entities
       - Image uniqueness is determined by comparing image_ids (simplified file hash)
@@ -1046,5 +964,55 @@ export class QuestionController {
     @Param('topicId', ParseIntPipe) topicId: number
   ) {
     return await this.questionService.getVerifiedQuestionTexts(id, topicId);
+  }
+
+  @Get('diagnostic/:id')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Diagnostic endpoint to check question structure' })
+  async checkQuestionData(@Param('id', ParseIntPipe) id: number) {
+    return await this.questionService.checkQuestionData(id);
+  }
+  
+  @Get('diagnostic')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Diagnostic endpoint to check all questions structure' })
+  async checkAllQuestionsData() {
+    return await this.questionService.checkAllQuestionsData();
+  }
+
+  @Post('assign-default-topics')
+  @Roles('ADMIN')
+  @ApiOperation({ 
+    summary: 'Assign a default topic to all questions without topics',
+    description: `
+      This is a utility endpoint to fix questions that don't have any topics assigned.
+      It will:
+      1. Find all questions without topic associations
+      2. Create a default 'General' topic if it doesn't exist
+      3. Associate each question with the default topic
+      4. Create question_text_topic_medium records for each question text
+      
+      This is helpful for ensuring all questions have a topic, which is needed
+      for proper functioning of the system.
+    `
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Default topics assigned successfully',
+    schema: {
+      example: {
+        message: "Created topic associations for 5 questions",
+        affected: 5,
+        defaultTopic: {
+          id: 1,
+          name: "General",
+          chapter_id: 1
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async assignDefaultTopicToQuestions() {
+    return await this.questionService.assignDefaultTopicToQuestions();
   }
 }
