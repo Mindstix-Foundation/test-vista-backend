@@ -118,6 +118,16 @@ export class QuestionFilterDto {
   @IsBoolean({ message: 'is_verified must be a boolean' })
   is_verified?: boolean;
   
+  @ApiProperty({
+    required: false,
+    example: 'original',
+    enum: ['original', 'translated'],
+    description: 'Filter by translation status'
+  })
+  @IsOptional()
+  @IsString()
+  translation_status?: string;
+  
   // Add pagination fields
   @ApiProperty({ required: false })
   @IsOptional()
@@ -355,6 +365,17 @@ export class CreateQuestionTextTopicMediumData {
   @IsInt()
   @IsNotEmpty()
   instruction_medium_id: number;
+  
+  @ApiProperty({
+    example: 'original',
+    enum: ['original', 'translated'],
+    description: 'Translation status (original or translated)',
+    default: 'original',
+    required: false
+  })
+  @IsOptional()
+  @IsString()
+  translation_status?: string;
 }
 
 export class CompleteQuestionDto {
@@ -423,6 +444,17 @@ export class CreateQuestionTextTopicMediumDto {
   @IsInt()
   @IsNotEmpty()
   instruction_medium_id: number;
+  
+  @ApiProperty({
+    example: 'original',
+    enum: ['original', 'translated'],
+    description: 'Translation status (original or translated)',
+    default: 'original',
+    required: false
+  })
+  @IsOptional()
+  @IsString()
+  translation_status?: string;
 }
 
 export class CreateQuestionTopicDto {
@@ -564,6 +596,10 @@ export class AddTranslationDto {
   @IsInt()
   @IsNotEmpty()
   instruction_medium_id: number;
+  
+  // This field is always set to "translated" internally
+  @IsOptional()
+  translation_status?: string = 'translated';
 
   @ApiProperty({
     type: [UpdateMcqOptionDto],
