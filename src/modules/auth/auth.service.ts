@@ -69,10 +69,19 @@ export class AuthService {
         roles: user.roles
       };
 
+      // Get complete user information - exclude password
+      const { password, ...userInfo } = user;
+
       return {
         id: user.id,
         email_id: user.email_id,
+        name: user.name,
         roles: user.roles,
+        contact_number: user.contact_number,
+        alternate_contact_number: user.alternate_contact_number,
+        highest_qualification: user.highest_qualification,
+        status: user.status,
+        schools: user.schools || [],
         access_token: this.jwtService.sign(payload)
       };
     } catch (error) {

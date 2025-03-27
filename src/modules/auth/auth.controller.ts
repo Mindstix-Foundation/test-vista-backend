@@ -5,11 +5,15 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/password.dto';
+import { UserService } from '../user/user.service';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly userService: UserService
+  ) {}
 
   @Post('login')
   @UseGuards(LocalAuthGuard)
@@ -30,7 +34,13 @@ export class AuthController {
           user: {
             id: result.id,
             email_id: result.email_id,
-            roles: result.roles
+            name: result.name,
+            roles: result.roles,
+            contact_number: result.contact_number,
+            alternate_contact_number: result.alternate_contact_number,
+            highest_qualification: result.highest_qualification,
+            status: result.status,
+            schools: result.schools || []
           },
           access_token: result.access_token
         }
@@ -63,9 +73,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns user profile' })
   async getProfile(@Request() req) {
+    const userProfile = await this.userService.findOne(req.user.id);
+    
     return {
       statusCode: HttpStatus.OK,
-      data: req.user
+      data: userProfile
     };
   }
 
