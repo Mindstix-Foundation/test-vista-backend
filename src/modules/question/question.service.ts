@@ -1105,8 +1105,12 @@ export class QuestionService {
         sort_by = QuestionSortField.CREATED_AT,
         sort_order = SortOrder.DESC,
         search,
-        is_verified
+        is_verified,
+        translation_status
       } = filters;
+
+      // Add diagnostic logging for translation_status
+      this.logger.log(`findUntranslatedQuestions translation_status parameter: ${translation_status}`);
 
       const whereConditions: any = {};
 
@@ -1193,6 +1197,16 @@ export class QuestionService {
           )` : 
           Prisma.sql``
         }
+        ${translation_status ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 
+            FROM "Question_Text" qt4 
+            JOIN "Question_Text_Topic_Medium" qttm4 ON qt4.id = qttm4.question_text_id
+            WHERE qt4.question_id = q.id 
+            AND qttm4.translation_status = ${translation_status}
+          )` : 
+          Prisma.sql``
+        }
       `;
 
       // Extract just the IDs
@@ -1245,6 +1259,15 @@ export class QuestionService {
       // Log the order by clause for debugging
       this.logger.log(`Sorting untranslated questions with: ${JSON.stringify(orderBy)}`);
 
+      // Create where condition for question_text_topics
+      const questionTextTopicsWhere = {};
+      if (is_verified !== undefined) {
+        questionTextTopicsWhere['is_verified'] = is_verified;
+      }
+      if (translation_status !== undefined) {
+        questionTextTopicsWhere['translation_status'] = translation_status;
+      }
+
       const questions = await this.prisma.question.findMany({
         where: finalWhereConditions,
         orderBy,
@@ -1272,7 +1295,7 @@ export class QuestionService {
                 }
               },
               question_text_topics: {
-                where: is_verified !== undefined ? { is_verified } : {},
+                where: Object.keys(questionTextTopicsWhere).length > 0 ? questionTextTopicsWhere : {},
                 include: {
                   instruction_medium: {
                     select: {

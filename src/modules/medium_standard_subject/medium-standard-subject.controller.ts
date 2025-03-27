@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { MediumStandardSubjectService } from './medium-standard-subject.service';
 import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
 import { GetMediumsQueryDto, MediumsResponse } from './dto/get-mediums.dto';
@@ -33,10 +33,10 @@ export class MediumStandardSubjectController {
   @ApiQuery({ name: 'subject_id', required: false, type: Number })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns all associations' })
   async findAll(
-    @Query('boardId', new ParseIntPipe({ optional: true })) boardId?: string,
-    @Query('instruction_medium_id', new ParseIntPipe({ optional: true })) instruction_medium_id?: string,
-    @Query('standard_id', new ParseIntPipe({ optional: true })) standard_id?: string,
-    @Query('subject_id', new ParseIntPipe({ optional: true })) subject_id?: string,
+    @Query('boardId', new ParseIntPipe({ optional: true, errorHttpStatusCode: HttpStatus.BAD_REQUEST })) boardId?: string,
+    @Query('instruction_medium_id', new ParseIntPipe({ optional: true, errorHttpStatusCode: HttpStatus.BAD_REQUEST })) instruction_medium_id?: string,
+    @Query('standard_id', new ParseIntPipe({ optional: true, errorHttpStatusCode: HttpStatus.BAD_REQUEST })) standard_id?: string,
+    @Query('subject_id', new ParseIntPipe({ optional: true, errorHttpStatusCode: HttpStatus.BAD_REQUEST })) subject_id?: string,
   ) {
     return this.mssService.findAll(
       boardId,
@@ -73,11 +73,40 @@ export class MediumStandardSubjectController {
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns subjects for the medium and standard' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium or Standard not found' })
   async findByMediumAndStandard(
-    @Param('mediumId', ParseIntPipe) mediumId: number,
-    @Param('standardId', ParseIntPipe) standardId: number,
-    @Query('board_id', new ParseIntPipe({ optional: true })) boardId?: number
+    @Param('mediumId') mediumId: string,
+    @Param('standardId') standardId: string,
+    @Query('board_id') boardId?: string
   ) {
-    return await this.mssService.findByMediumAndStandard(mediumId, standardId, boardId);
+    try {
+      const mediumIdNum = parseInt(mediumId, 10);
+      const standardIdNum = parseInt(standardId, 10);
+      const boardIdNum = boardId ? parseInt(boardId, 10) : undefined;
+      
+      if (isNaN(mediumIdNum)) {
+        throw new BadRequestException('Invalid medium ID: must be a number');
+      }
+      
+      if (isNaN(standardIdNum)) {
+        throw new BadRequestException('Invalid standard ID: must be a number');
+      }
+      
+      if (boardId && isNaN(boardIdNum)) {
+        throw new BadRequestException('Invalid board ID: must be a number');
+      }
+      
+      const result = await this.mssService.findByMediumAndStandard(mediumIdNum, standardIdNum, boardIdNum);
+      
+      // Transform the response to use explicit field names
+      return result.map(item => ({
+        subject_id: item.subject.id,
+        subject_name: item.subject.name
+      }));
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Invalid parameters provided');
+    }
   }
 
   @Get(':id')
@@ -85,7 +114,7 @@ export class MediumStandardSubjectController {
   @ApiOperation({ summary: 'Get medium standard subject by ID' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns the medium standard subject' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium standard subject not found' })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id', new ParseIntPipe({ errorHttpStatusCode: HttpStatus.BAD_REQUEST })) id: number) {
     return await this.mssService.findOne(id);
   }
 
@@ -96,7 +125,7 @@ export class MediumStandardSubjectController {
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Association deleted successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Association not found' })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Cannot delete due to existing relationships' })
-  async remove(@Param('id', ParseIntPipe) id: number) {
+  async remove(@Param('id', new ParseIntPipe({ errorHttpStatusCode: HttpStatus.BAD_REQUEST })) id: number) {
     await this.mssService.remove(id);
   }
 } 

@@ -343,6 +343,49 @@ export class BoardService {
         - ${relatedCounts.instruction_mediums} instruction mediums
         and all their related records`);
 
+      // Find questions that would be orphaned after deleting this board's topics
+      // First, get all topics related to this board's standards and subjects
+      const boardTopics = await this.prisma.topic.findMany({
+        where: {
+          chapter: {
+            OR: [
+              { standard_id: { in: board.standards.map(s => s.id) } },
+              { subject_id: { in: board.subjects.map(s => s.id) } }
+            ]
+          }
+        },
+        select: { id: true }
+      });
+
+      const topicIds = boardTopics.map(topic => topic.id);
+
+      // Find questions that are only connected to topics from this board
+      // and would become orphaned after deletion
+      const orphanedQuestions = await this.prisma.question.findMany({
+        where: {
+          question_topics: {
+            every: {
+              topic_id: { in: topicIds }
+            }
+          }
+        },
+        select: { id: true }
+      });
+
+      const orphanedQuestionIds = orphanedQuestions.map(q => q.id);
+      
+      // Log the orphaned questions that will be deleted
+      if (orphanedQuestionIds.length > 0) {
+        this.logger.log(`Deleting ${orphanedQuestionIds.length} questions that would be orphaned`);
+        
+        // Delete the orphaned questions
+        await this.prisma.question.deleteMany({
+          where: {
+            id: { in: orphanedQuestionIds }
+          }
+        });
+      }
+
       // Delete the board - cascade will handle all related records
       await this.prisma.board.delete({
         where: { id }

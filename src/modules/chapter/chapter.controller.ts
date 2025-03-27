@@ -30,7 +30,10 @@ export class ChapterController {
 
   @Post()
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Create a new chapter' })
+  @ApiOperation({ 
+    summary: 'Create a new chapter',
+    description: 'Creates a new chapter with the provided details. The sequential_chapter_number is automatically assigned by the system as the next available number for the given subject and standard.'
+  })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Chapter created successfully' })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Chapter already exists' })
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })

@@ -10,6 +10,7 @@ import {
 } from './dto/question-text.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
+import { AwsS3Service } from '../aws/aws-s3.service';
 
 interface QuestionTextFilters {
   topic_id?: number;
@@ -29,7 +30,10 @@ interface QuestionTextFilters {
 export class QuestionTextService {
   private readonly logger = new Logger(QuestionTextService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly awsS3Service: AwsS3Service
+  ) {}
 
   async create(createQuestionTextDto: CreateQuestionTextDto) {
     try {
@@ -357,12 +361,24 @@ export class QuestionTextService {
         include: {
           question: {
             include: {
-              question_type: true,
+              question_type: {
+                select: {
+                  id: true,
+                  type_name: true
+                }
+              },
               question_topics: {
                 include: {
                   topic: {
-                    include: {
-                      chapter: true
+                    select: {
+                      id: true,
+                      name: true,
+                      chapter: {
+                        select: {
+                          id: true,
+                          name: true
+                        }
+                      }
                     }
                   }
                 }
@@ -370,14 +386,33 @@ export class QuestionTextService {
             }
           },
           image: true,
-          mcq_options: true,
-          match_pairs: true,
+          mcq_options: {
+            include: {
+              image: true
+            }
+          },
+          match_pairs: {
+            include: {
+              left_image: true,
+              right_image: true
+            }
+          },
           question_text_topics: {
             include: {
-              instruction_medium: true,
+              instruction_medium: {
+                select: {
+                  id: true,
+                  instruction_medium: true
+                }
+              },
               question_topic: {
                 include: {
-                  topic: true
+                  topic: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  }
                 }
               }
             }
@@ -389,7 +424,60 @@ export class QuestionTextService {
         throw new NotFoundException(`Question text with ID ${id} not found`);
       }
 
-      return questionText;
+      // Transform the response to remove created_at and updated_at fields
+      // and add presigned URLs for images
+      const transformedResponse = {
+        id: questionText.id,
+        question_id: questionText.question_id,
+        question_text: questionText.question_text,
+        image: questionText.image ? {
+          id: questionText.image.id,
+          url: await this.awsS3Service.generatePresignedUrl(questionText.image.image_url),
+          alt_text: questionText.image.original_filename || ''
+        } : null,
+        question_type: questionText.question.question_type.type_name,
+        topics: questionText.question.question_topics.map(qt => ({
+          id: qt.topic.id,
+          name: qt.topic.name,
+          chapter: {
+            id: qt.topic.chapter.id,
+            name: qt.topic.chapter.name
+          }
+        })),
+        mcq_options: await Promise.all(questionText.mcq_options.map(async option => ({
+          id: option.id,
+          option_text: option.option_text,
+          is_correct: option.is_correct,
+          image: option.image ? {
+            id: option.image.id,
+            url: await this.awsS3Service.generatePresignedUrl(option.image.image_url),
+            alt_text: option.image.original_filename || ''
+          } : null
+        }))),
+        match_pairs: await Promise.all(questionText.match_pairs.map(async pair => ({
+          id: pair.id,
+          left_text: pair.left_text,
+          right_text: pair.right_text,
+          left_image: pair.left_image ? {
+            id: pair.left_image.id,
+            url: await this.awsS3Service.generatePresignedUrl(pair.left_image.image_url),
+            alt_text: pair.left_image.original_filename || ''
+          } : null,
+          right_image: pair.right_image ? {
+            id: pair.right_image.id,
+            url: await this.awsS3Service.generatePresignedUrl(pair.right_image.image_url),
+            alt_text: pair.right_image.original_filename || ''
+          } : null
+        }))),
+        instruction_mediums: questionText.question_text_topics.map(qtt => ({
+          id: qtt.instruction_medium.id,
+          name: qtt.instruction_medium.instruction_medium,
+          is_verified: qtt.is_verified,
+          translation_status: qtt.translation_status
+        }))
+      };
+
+      return transformedResponse;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
