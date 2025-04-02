@@ -396,7 +396,8 @@ export class AuthService {
               school: {
                 select: {
                   id: true,
-                  name: true
+                  name: true,
+                  board: true
                 }
               }
             }
@@ -443,6 +444,17 @@ export class AuthService {
       }
 
       // Transform the data to a more consumable format
+      // Sort teaching subjects first by standard sequence number, then alphabetically by subject name
+      const sortedTeachingSubjects = [...user.teacher_subjects]
+        .sort((a, b) => {
+          // First sort by standard sequence number
+          const seqDiff = a.school_standard.standard.sequence_number - b.school_standard.standard.sequence_number;
+          if (seqDiff !== 0) return seqDiff;
+          
+          // Then sort by subject name alphabetically
+          return a.medium_standard_subject.subject.name.localeCompare(b.medium_standard_subject.subject.name);
+        });
+
       return {
         id: user.id,
         name: user.name,
@@ -459,9 +471,10 @@ export class AuthService {
         })),
         schools: user.user_schools.map(us => ({
           id: us.school.id,
-          name: us.school.name
+          name: us.school.name,
+          board: us.school.board
         })),
-        teaching_subjects: user.teacher_subjects.map(ts => ({
+        teaching_subjects: sortedTeachingSubjects.map(ts => ({
           id: ts.id,
           standard: {
             id: ts.school_standard.standard.id,

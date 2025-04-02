@@ -14,6 +14,7 @@ import { Prisma } from '@prisma/client';
 import { UserExistsException } from './exceptions/user-exists.exception';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
+import { AddTeacherDto } from './dto/add-teacher.dto';
 
 @Injectable()
 export class UserService {
@@ -627,6 +628,211 @@ export class UserService {
       }
       this.logger.error('Failed to check email availability:', error);
       throw new InternalServerErrorException('Failed to check email availability');
+    }
+  }
+
+  /**
+   * Add a new teacher with school and subject assignments
+   * 
+   * This method handles the complete process of adding a teacher:
+   * 1. Creating a user with TEACHER role
+   * 2. Assigning the teacher to a school
+   * 3. Creating teacher_subject entries for all valid medium-standard-subject combinations
+   * 
+   * The method performs several validations:
+   * - Validates email format and checks for existing users
+   * - Verifies the TEACHER role exists
+   * - Confirms the school exists and has instruction mediums
+   * - Validates that all school-standards belong to the specified school
+   * - Verifies valid medium-standard-subject combinations exist
+   * 
+   * All operations are performed in a single transaction for data integrity.
+   * 
+   * @param addTeacherDto - Data transfer object containing all teacher information
+   * @returns The created teacher with assignment details
+   * @throws BadRequestException for validation errors
+   * @throws NotFoundException if required entities are not found
+   * @throws UserExistsException if email already exists
+   * @throws InternalServerErrorException for other errors
+   */
+  async addTeacher(addTeacherDto: AddTeacherDto) {
+    try {
+      // Validate email format
+      if (!this.isValidEmail(addTeacherDto.email_id)) {
+        throw new BadRequestException('Invalid email format');
+      }
+
+      // Check for existing email
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email_id: addTeacherDto.email_id }
+      });
+
+      if (existingUser) {
+        throw new UserExistsException(addTeacherDto.email_id);
+      }
+
+      // Get the TEACHER role ID
+      const teacherRole = await this.prisma.role.findFirst({
+        where: { role_name: 'TEACHER' }
+      });
+
+      if (!teacherRole) {
+        throw new NotFoundException('Teacher role not found');
+      }
+
+      // Hash password
+      const hashedPassword = await this.hashPassword(addTeacherDto.password);
+
+      // Verify the school exists
+      const school = await this.prisma.school.findUnique({
+        where: { id: addTeacherDto.school_id },
+        include: {
+          school_instruction_mediums: {
+            include: {
+              instruction_medium: true
+            }
+          }
+        }
+      });
+
+      if (!school) {
+        throw new NotFoundException(`School with ID ${addTeacherDto.school_id} not found`);
+      }
+
+      // Get available instruction mediums for the school
+      const schoolMediumIds = school.school_instruction_mediums.map(medium => medium.instruction_medium_id);
+      
+      if (schoolMediumIds.length === 0) {
+        throw new BadRequestException(`School with ID ${addTeacherDto.school_id} has no instruction mediums`);
+      }
+
+      // Validate school standards
+      const schoolStandardIds = addTeacherDto.standard_subjects.map(ss => ss.schoolStandardId);
+
+      // Check if all provided school-standards exist and belong to the specified school
+      const validSchoolStandards = await this.prisma.school_Standard.findMany({
+        where: {
+          id: { in: schoolStandardIds },
+          school_id: addTeacherDto.school_id
+        },
+        include: {
+          standard: true
+        }
+      });
+
+      if (validSchoolStandards.length !== schoolStandardIds.length) {
+        const foundIds = validSchoolStandards.map(ss => ss.id);
+        const invalidIds = schoolStandardIds.filter(id => !foundIds.includes(id));
+        throw new BadRequestException(`Invalid school-standard IDs: ${invalidIds.join(', ')}`);
+      }
+
+      // Execute all operations in a transaction to ensure data consistency
+      return await this.prisma.$transaction(async (prisma) => {
+        // 1. Create the user
+        const user = await prisma.user.create({
+          data: {
+            name: toTitleCase(addTeacherDto.name),
+            email_id: addTeacherDto.email_id,
+            password: hashedPassword,
+            contact_number: addTeacherDto.contact_number,
+            alternate_contact_number: addTeacherDto.alternate_contact_number || null,
+            highest_qualification: addTeacherDto.highest_qualification || null,
+            status: addTeacherDto.status
+          }
+        });
+
+        // 2. Assign the TEACHER role
+        await prisma.user_Role.create({
+          data: {
+            user_id: user.id,
+            role_id: teacherRole.id
+          }
+        });
+
+        // 3. Assign the user to the school
+        await prisma.user_School.create({
+          data: {
+            user_id: user.id,
+            school_id: addTeacherDto.school_id,
+            start_date: addTeacherDto.start_date,
+            end_date: addTeacherDto.end_date || null
+          }
+        });
+
+        // 4. Process each standard and its subjects
+        const teacherSubjects = [];
+
+        // For each standard-subject combination in the request
+        for (const standardSubject of addTeacherDto.standard_subjects) {
+          const { schoolStandardId, subjectIds } = standardSubject;
+
+          // Get the standard information to use for finding medium_standard_subject entries
+          const schoolStandard = validSchoolStandards.find(ss => ss.id === schoolStandardId);
+          
+          // For each subject, create teacher_subject entries for all available mediums
+          for (const subjectId of subjectIds) {
+            // Find valid medium_standard_subject combinations for this standard and subject
+            // This checks if there are entries that match the school's mediums with the provided standard and subject
+            const mediumStandardSubjects = await prisma.medium_Standard_Subject.findMany({
+              where: {
+                instruction_medium_id: { in: schoolMediumIds },
+                standard_id: schoolStandard.standard_id,
+                subject_id: subjectId
+              }
+            });
+
+            // If no valid combinations found, log a warning and skip
+            if (mediumStandardSubjects.length === 0) {
+              this.logger.warn(
+                `No valid medium-standard-subject found for standard ${schoolStandard.standard_id}, subject ${subjectId}`
+              );
+              continue;
+            }
+
+            // Add teacher_subject entries for each valid medium-standard-subject
+            // This creates an entry for EACH medium available in the school for this standard-subject
+            for (const mss of mediumStandardSubjects) {
+              teacherSubjects.push({
+                user_id: user.id,
+                school_standard_id: schoolStandardId,
+                medium_standard_subject_id: mss.id
+              });
+            }
+          }
+        }
+
+        // Create all teacher_subject entries in a batch operation
+        if (teacherSubjects.length > 0) {
+          await prisma.teacher_Subject.createMany({
+            data: teacherSubjects
+          });
+        } else {
+          throw new BadRequestException('No valid medium-standard-subject combinations found for the provided standards and subjects');
+        }
+
+        // Return the created user with role and school information
+        return {
+          id: user.id,
+          name: user.name,
+          email_id: user.email_id,
+          contact_number: user.contact_number,
+          alternate_contact_number: user.alternate_contact_number,
+          highest_qualification: user.highest_qualification,
+          status: user.status,
+          role: 'TEACHER',
+          school: school.name,
+          assigned_standards: validSchoolStandards.map(ss => ss.standard.name),
+          message: 'Teacher added successfully'
+        };
+      });
+    } catch (error) {
+      if (error instanceof BadRequestException || 
+          error instanceof NotFoundException || 
+          error instanceof UserExistsException) {
+        throw error;
+      }
+      this.logger.error('Failed to add teacher:', error);
+      throw new InternalServerErrorException('Failed to add teacher');
     }
   }
 } 

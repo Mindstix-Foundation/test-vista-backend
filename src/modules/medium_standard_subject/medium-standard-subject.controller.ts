@@ -1,17 +1,20 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
 import { MediumStandardSubjectService } from './medium-standard-subject.service';
 import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
 import { GetMediumsQueryDto, MediumsResponse } from './dto/get-mediums.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { Logger } from '@nestjs/common';
 
 @ApiTags('medium-standard-subjects')
 @Controller('medium-standard-subjects')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class MediumStandardSubjectController {
+  private readonly logger = new Logger(MediumStandardSubjectController.name);
+
   constructor(private readonly mssService: MediumStandardSubjectService) {}
 
   @Post()
@@ -68,10 +71,39 @@ export class MediumStandardSubjectController {
 
   @Get('medium/:mediumId/standard/:standardId')
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get subjects for medium and standard' })
-  @ApiQuery({ name: 'board_id', required: false, type: Number })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns subjects for the medium and standard' })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Medium or Standard not found' })
+  @ApiOperation({ 
+    summary: 'Get subjects for a specific medium and standard',
+    description: 'Returns a list of subjects available for the given medium and standard combination. Optional board ID filter can be provided as a query parameter.'
+  })
+  @ApiParam({ name: 'mediumId', description: 'Instruction Medium ID' })
+  @ApiParam({ name: 'standardId', description: 'Standard ID' })
+  @ApiQuery({ name: 'board_id', required: false, description: 'Optional Board ID to filter by' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Returns an array of subjects with their IDs and names',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          subject_id: { type: 'number', example: 1 },
+          subject_name: { type: 'string', example: 'Mathematics' }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: HttpStatus.BAD_REQUEST, 
+    description: 'Invalid parameters (non-numeric IDs or resource not found)',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Standard with ID 2 not found' },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
   async findByMediumAndStandard(
     @Param('mediumId') mediumId: string,
     @Param('standardId') standardId: string,
@@ -105,6 +137,11 @@ export class MediumStandardSubjectController {
       if (error instanceof BadRequestException) {
         throw error;
       }
+      if (error instanceof NotFoundException) {
+        // Preserve the specific error message from the service
+        throw new BadRequestException(error.message);
+      }
+      this.logger.error(`Error in findByMediumAndStandard: ${error.message}`, error.stack);
       throw new BadRequestException('Invalid parameters provided');
     }
   }

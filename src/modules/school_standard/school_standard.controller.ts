@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, BadRequestException, ArgumentMetadata, Injectable, PipeTransform, ParseBoolPipe, UseGuards } from '@nestjs/common';
 import { SchoolStandardService } from './school_standard.service';
-import { CreateSchoolStandardDto, SchoolStandardDto } from './dto/school-standard.dto';
+import { CreateSchoolStandardDto, SchoolStandardDto, SchoolStandardSimplifiedDto } from './dto/school-standard.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -59,7 +59,7 @@ export class SchoolStandardController {
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get standards for a specific school' })
   @ApiQuery({ name: 'hasSyllabus', required: false, type: Boolean })
-  @ApiResponse({ status: HttpStatus.OK, description: 'List of standards for the school', type: [SchoolStandardDto] })
+  @ApiResponse({ status: HttpStatus.OK, description: 'List of standards for the school', type: [SchoolStandardSimplifiedDto] })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found' })
   async findBySchool(
     @Param('schoolId', ParseIntPipe) schoolId: number,

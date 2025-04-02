@@ -1,26 +1,50 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserService } from './user.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, ConflictException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
+import { AddTeacherDto } from './dto/add-teacher.dto';
+import { UserExistsException } from './exceptions/user-exists.exception';
 
 describe('UserService', () => {
   let service: UserService;
   let prisma: PrismaService;
 
+  // Create a more complete mock of the PrismaService
   const mockPrismaService = {
     user: {
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
       count: jest.fn(),
     },
     user_School: {
       count: jest.fn(),
+      create: jest.fn(),
     },
+    user_Role: {
+      create: jest.fn(),
+    },
+    role: {
+      findFirst: jest.fn(),
+    },
+    school: {
+      findUnique: jest.fn(),
+    },
+    school_Standard: {
+      findMany: jest.fn(),
+    },
+    medium_Standard_Subject: {
+      findMany: jest.fn(),
+    },
+    teacher_Subject: {
+      createMany: jest.fn(),
+    },
+    $transaction: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -37,6 +61,16 @@ describe('UserService', () => {
     service = module.get<UserService>(UserService);
     prisma = module.get<PrismaService>(PrismaService);
     jest.clearAllMocks();
+
+    // Expose private methods for testing
+    service['isValidEmail'] = jest.fn().mockImplementation((email: string) => {
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      return emailRegex.test(email) && email.length <= 254;
+    });
+
+    service['hashPassword'] = jest.fn().mockImplementation(async (password: string) => {
+      return 'hashedPassword';
+    });
   });
 
   afterEach(() => {
@@ -288,6 +322,149 @@ describe('UserService', () => {
       const invalidEmail = 'invalid-email';
       
       await expect(service.checkEmailAvailability(invalidEmail)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('addTeacher', () => {
+    const mockAddTeacherDto: AddTeacherDto = {
+      name: 'Test Teacher',
+      email_id: 'teacher@example.com',
+      password: 'Password123!',
+      contact_number: '+911234567890',
+      alternate_contact_number: '+919876543210',
+      highest_qualification: 'M.Tech',
+      status: true,
+      school_id: 1,
+      start_date: new Date('2023-01-01'),
+      end_date: new Date('2024-12-31'),
+      standard_subjects: [
+        { schoolStandardId: 1, subjectIds: [1, 2] },
+        { schoolStandardId: 2, subjectIds: [3, 4] }
+      ]
+    };
+
+    it('should add a teacher with valid data', async () => {
+      // Configure mocks for valid test case
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test School',
+        school_instruction_mediums: [
+          { instruction_medium_id: 1, instruction_medium: { id: 1, instruction_medium: 'English' } },
+          { instruction_medium_id: 2, instruction_medium: { id: 2, instruction_medium: 'Hindi' } }
+        ]
+      });
+      mockPrismaService.school_Standard.findMany.mockResolvedValue([
+        { id: 1, school_id: 1, standard_id: 1, standard: { id: 1, name: 'Class 1' } },
+        { id: 2, school_id: 1, standard_id: 2, standard: { id: 2, name: 'Class 2' } }
+      ]);
+      
+      // Mock transaction
+      mockPrismaService.$transaction.mockImplementation(async (callback) => {
+        const txPrisma = {
+          user: {
+            create: jest.fn().mockResolvedValue({
+              id: 1,
+              name: 'Test Teacher',
+              email_id: 'teacher@example.com',
+              password: 'hashedPassword',
+              contact_number: '+911234567890',
+              alternate_contact_number: '+919876543210',
+              highest_qualification: 'M.Tech',
+              status: true
+            })
+          },
+          user_Role: {
+            create: jest.fn().mockResolvedValue({})
+          },
+          user_School: {
+            create: jest.fn().mockResolvedValue({})
+          },
+          medium_Standard_Subject: {
+            findMany: jest.fn()
+              .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
+              .mockResolvedValueOnce([{ id: 3 }, { id: 4 }])
+              .mockResolvedValueOnce([{ id: 5 }, { id: 6 }])
+              .mockResolvedValueOnce([{ id: 7 }, { id: 8 }])
+          },
+          teacher_Subject: {
+            createMany: jest.fn().mockResolvedValue({ count: 8 })
+          }
+        };
+        return await callback(txPrisma);
+      });
+
+      const result = await service.addTeacher(mockAddTeacherDto);
+      
+      expect(result).toBeDefined();
+      expect(result.id).toBe(1);
+      expect(result.name).toBe('Test Teacher');
+      expect(result.role).toBe('TEACHER');
+      expect(result.message).toBe('Teacher added successfully');
+      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+    });
+
+    it('should throw an error if email already exists', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: 1, email_id: 'teacher@example.com' });
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(UserExistsException);
+    });
+
+    it('should throw an error if email format is invalid', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(false);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw an error if teacher role not found', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue(null);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw an error if school not found', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue(null);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw an error if school has no instruction mediums', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test School',
+        school_instruction_mediums: []
+      });
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw an error if invalid school-standard IDs', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test School',
+        school_instruction_mediums: [
+          { instruction_medium_id: 1, instruction_medium: { id: 1, instruction_medium: 'English' } }
+        ]
+      });
+      mockPrismaService.school_Standard.findMany.mockResolvedValue([
+        { id: 1, school_id: 1, standard_id: 1, standard: { id: 1, name: 'Class 1' } }
+      ]);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(BadRequestException);
     });
   });
 }); 
