@@ -10,6 +10,7 @@ import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { AddTeacherDto } from './dto/add-teacher.dto';
+import { EditTeacherDto } from './dto/edit-teacher.dto';
 
 class GetUsersQueryDto extends PaginationDto {
   @ApiProperty({ required: false })
@@ -202,5 +203,87 @@ export class UserController {
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
   async addTeacher(@Body() addTeacherDto: AddTeacherDto) {
     return await this.userService.addTeacher(addTeacherDto);
+  }
+
+  @Put('teacher')
+  @Roles('ADMIN')
+  @ApiOperation({ 
+    summary: 'Edit an existing teacher with updated school and subject assignments',
+    description: `Updates a teacher account with the provided details. This API allows updating basic details, 
+    school assignment, and subject assignments in a single transaction.
+    
+    ## Workflow and Logic:
+    1. The API updates the user details if provided
+    2. If school_id is provided, it updates or creates the school assignment
+    3. If standard_subjects are provided, it replaces existing subject assignments with the new ones:
+       - Existing teacher_subject entries for the teacher are removed
+       - New entries are created based on the provided standard-subject combinations
+       - Each combination will generate entries for all available instruction mediums
+    
+    ## Important Notes:
+    - All fields except the user ID are optional, allowing partial updates
+    - If updating school assignment, the school must have at least one instruction medium defined
+    - If updating standard-subjects, all school-standard IDs must belong to the specified school
+    - If changing school, the standard_subjects must be provided and must belong to the new school
+    - For each standard-subject combination, there must exist valid medium_standard_subject entries
+    - All operations are performed in a single transaction for data integrity
+    - If a password is provided, it will be hashed before storage`
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Teacher updated successfully with updated role, school, and subject assignments',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', example: 1 },
+        name: { type: 'string', example: 'John Teacher' },
+        email_id: { type: 'string', example: 'john.teacher@example.com' },
+        contact_number: { type: 'string', example: '+911234567890' },
+        alternate_contact_number: { type: 'string', example: '+919876543210', nullable: true },
+        highest_qualification: { type: 'string', example: 'M.Tech', nullable: true },
+        status: { type: 'boolean', example: true },
+        role: { type: 'string', example: 'TEACHER' },
+        school: { type: 'string', example: 'Delhi Public School' },
+        assigned_standards: { 
+          type: 'array', 
+          items: { type: 'string' },
+          example: ['Class 1', 'Class 2'] 
+        },
+        message: { type: 'string', example: 'Teacher updated successfully' }
+      }
+    }
+  })
+  @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Email already exists' })
+  @ApiResponse({ 
+    status: HttpStatus.BAD_REQUEST, 
+    description: 'Invalid input data (email format, no valid instruction mediums, invalid standard-subject combinations)',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { 
+          type: 'string', 
+          example: 'Invalid school-standard IDs: 3, 4 | No valid medium-standard-subject combinations found'
+        },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Teacher not found, School not found, Teacher role not found',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 404 },
+        message: { type: 'string', example: 'User with ID 999 not found' },
+        error: { type: 'string', example: 'Not Found' }
+      }
+    }
+  })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
+  async editTeacher(@Body() editTeacherDto: EditTeacherDto) {
+    return await this.userService.editTeacher(editTeacherDto);
   }
 } 
