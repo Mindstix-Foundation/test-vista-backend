@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsNotEmpty } from 'class-validator';
+import { IsNumber, IsNotEmpty, IsString } from 'class-validator';
 
 export class SchoolStandardDto {
   @ApiProperty({ example: 1 })
@@ -13,6 +13,37 @@ export class SchoolStandardDto {
   @ApiProperty({ example: 1 })
   @IsNumber()
   standard_id: number;
+}
+
+export class StandardInfoDto {
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  id: number;
+  
+  @ApiProperty({ example: 'First' })
+  @IsString()
+  name: string;
+  
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  sequence_number: number;
+  
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  board_id: number;
+}
+
+export class SchoolStandardSimplifiedDto {
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  id: number;
+
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  school_id: number;
+
+  @ApiProperty()
+  standard: StandardInfoDto;
 }
 
 export class CreateSchoolStandardDto {

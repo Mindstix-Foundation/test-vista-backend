@@ -366,4 +366,137 @@ export class AuthService {
       this.logger.error('Failed to invalidate tokens:', error);
     }
   }
+
+  async getFullUserProfile(userId: number) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          name: true,
+          email_id: true,
+          contact_number: true,
+          alternate_contact_number: true,
+          highest_qualification: true,
+          status: true,
+          created_at: true,
+          updated_at: true,
+          user_roles: {
+            select: {
+              role: {
+                select: {
+                  id: true,
+                  role_name: true
+                }
+              }
+            }
+          },
+          user_schools: {
+            select: {
+              school: {
+                select: {
+                  id: true,
+                  name: true,
+                  board: true
+                }
+              }
+            }
+          },
+          teacher_subjects: {
+            select: {
+              id: true,
+              school_standard: {
+                select: {
+                  id: true,
+                  standard: {
+                    select: {
+                      id: true,
+                      name: true,
+                      sequence_number: true
+                    }
+                  }
+                }
+              },
+              medium_standard_subject: {
+                select: {
+                  id: true,
+                  subject: {
+                    select: {
+                      id: true,
+                      name: true
+                    }
+                  },
+                  instruction_medium: {
+                    select: {
+                      id: true,
+                      instruction_medium: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!user) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+
+      // Transform the data to a more consumable format
+      // Sort teaching subjects first by standard sequence number, then alphabetically by subject name
+      const sortedTeachingSubjects = [...user.teacher_subjects]
+        .sort((a, b) => {
+          // First sort by standard sequence number
+          const seqDiff = a.school_standard.standard.sequence_number - b.school_standard.standard.sequence_number;
+          if (seqDiff !== 0) return seqDiff;
+          
+          // Then sort by subject name alphabetically
+          return a.medium_standard_subject.subject.name.localeCompare(b.medium_standard_subject.subject.name);
+        });
+
+      return {
+        id: user.id,
+        name: user.name,
+        email_id: user.email_id,
+        contact_number: user.contact_number,
+        alternate_contact_number: user.alternate_contact_number,
+        highest_qualification: user.highest_qualification,
+        status: user.status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        roles: user.user_roles.map(ur => ({
+          id: ur.role.id,
+          name: ur.role.role_name
+        })),
+        schools: user.user_schools.map(us => ({
+          id: us.school.id,
+          name: us.school.name,
+          board: us.school.board
+        })),
+        teaching_subjects: sortedTeachingSubjects.map(ts => ({
+          id: ts.id,
+          standard: {
+            id: ts.school_standard.standard.id,
+            name: ts.school_standard.standard.name,
+            sequence_number: ts.school_standard.standard.sequence_number
+          },
+          subject: {
+            id: ts.medium_standard_subject.subject.id,
+            name: ts.medium_standard_subject.subject.name
+          },
+          medium: {
+            id: ts.medium_standard_subject.instruction_medium.id,
+            name: ts.medium_standard_subject.instruction_medium.instruction_medium
+          }
+        }))
+      };
+    } catch (error) {
+      this.logger.error('Failed to fetch user profile:', error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to fetch user profile');
+    }
+  }
 } 

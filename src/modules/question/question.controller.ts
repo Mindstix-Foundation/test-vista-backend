@@ -475,7 +475,8 @@ export class QuestionController {
       sort_by,
       sort_order,
       search,
-      is_verified
+      is_verified,
+      translation_status
     } = filters;
 
     // Add diagnostic logging
@@ -485,6 +486,7 @@ export class QuestionController {
       - sort_by: ${sort_by} (${typeof sort_by})
       - sort_order: ${sort_order} (${typeof sort_order})
       - is_verified: ${is_verified} (${typeof is_verified})
+      - translation_status: ${translation_status} (${typeof translation_status})
     `);
 
     // The result from the service already includes transformed image data with presigned URLs
@@ -500,7 +502,8 @@ export class QuestionController {
         sort_by,
         sort_order,
         search,
-        is_verified
+        is_verified,
+        translation_status
       }
     );
 

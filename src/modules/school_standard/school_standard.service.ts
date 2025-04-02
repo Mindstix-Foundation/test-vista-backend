@@ -106,16 +106,33 @@ export class SchoolStandardService {
         };
       }
 
-      return await this.prisma.school_Standard.findMany({
+      const schoolStandards = await this.prisma.school_Standard.findMany({
         where,
         include: {
           standard: {
-            include: {
-              medium_standard_subjects: true
+            select: {
+              id: true,
+              name: true,
+              sequence_number: true,
+              board_id: true
             }
           }
         }
       });
+
+      // Sort standards by sequence number and transform to simpler response
+      return schoolStandards
+        .sort((a, b) => a.standard.sequence_number - b.standard.sequence_number)
+        .map(ss => ({
+          id: ss.id,
+          school_id: ss.school_id,
+          standard: {
+            id: ss.standard.id,
+            name: ss.standard.name,
+            sequence_number: ss.standard.sequence_number,
+            board_id: ss.standard.board_id
+          }
+        }));
     } catch (error) {
       this.logger.error(`Failed to fetch standards for school ${schoolId}:`, error);
       if (error instanceof NotFoundException) {

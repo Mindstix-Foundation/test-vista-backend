@@ -30,23 +30,24 @@ export class ChapterService {
         throw new NotFoundException('Standard not found');
       }
 
-      // Check for duplicate chapter sequence
-      const existingChapter = await this.prisma.chapter.findFirst({
+      // Determine the next sequential chapter number
+      // Find the highest existing sequential number for this subject and standard
+      const highestChapter = await this.prisma.chapter.findFirst({
         where: {
           subject_id: createChapterDto.subject_id,
           standard_id: createChapterDto.standard_id,
-          sequential_chapter_number: createChapterDto.sequential_chapter_number,
+        },
+        orderBy: {
+          sequential_chapter_number: 'desc',
         },
       });
 
-      if (existingChapter) {
-        throw new ConflictException(
-          `Chapter with sequence number ${createChapterDto.sequential_chapter_number} already exists for this subject and standard`,
-        );
-      }
+      // If no chapters exist, start with 1, otherwise increment the highest
+      const sequential_chapter_number = highestChapter ? highestChapter.sequential_chapter_number + 1 : 1;
 
       const chapterData = {
         ...createChapterDto,
+        sequential_chapter_number,
         name: toTitleCase(createChapterDto.name),
       };
 

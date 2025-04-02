@@ -3,6 +3,7 @@ import { UserController } from './user.controller';
 import { UserService } from './user.service';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
+import { AddTeacherDto } from './dto/add-teacher.dto';
 
 describe('UserController', () => {
   let controller: UserController;
@@ -15,6 +16,7 @@ describe('UserController', () => {
     update: jest.fn(),
     remove: jest.fn(),
     checkEmailAvailability: jest.fn(),
+    addTeacher: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -171,6 +173,45 @@ describe('UserController', () => {
       const result = await controller.checkEmailAvailability(email);
       expect(result).toEqual(expectedResult);
       expect(service.checkEmailAvailability).toHaveBeenCalledWith(email);
+    });
+  });
+
+  describe('addTeacher', () => {
+    it('should create a new teacher', async () => {
+      const addTeacherDto: AddTeacherDto = {
+        name: 'John Teacher',
+        email_id: 'john.teacher@example.com',
+        password: 'StrongPassword123!',
+        contact_number: '+911234567890',
+        alternate_contact_number: '+919876543210',
+        highest_qualification: 'M.Tech',
+        status: true,
+        school_id: 1,
+        start_date: new Date('2023-01-01'),
+        end_date: new Date('2024-12-31'),
+        standard_subjects: [
+          { schoolStandardId: 1, subjectIds: [1, 2] }
+        ]
+      };
+
+      const mockResult = {
+        id: 1,
+        name: 'John Teacher',
+        email_id: 'john.teacher@example.com',
+        contact_number: '+911234567890',
+        alternate_contact_number: '+919876543210',
+        highest_qualification: 'M.Tech',
+        status: true,
+        role: 'TEACHER',
+        school: 'Test School',
+        assigned_standards: ['Class 1'],
+        message: 'Teacher added successfully'
+      };
+
+      jest.spyOn(service, 'addTeacher').mockResolvedValue(mockResult);
+
+      expect(await controller.addTeacher(addTeacherDto)).toBe(mockResult);
+      expect(service.addTeacher).toHaveBeenCalledWith(addTeacherDto);
     });
   });
 }); 

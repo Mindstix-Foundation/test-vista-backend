@@ -63,9 +63,10 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: HttpStatus.OK, description: 'Returns user profile' })
   async getProfile(@Request() req) {
+    const fullUserProfile = await this.authService.getFullUserProfile(req.user.id);
     return {
       statusCode: HttpStatus.OK,
-      data: req.user
+      data: fullUserProfile
     };
   }
 
