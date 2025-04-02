@@ -4,6 +4,7 @@ import { UserService } from './user.service';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AddTeacherDto } from './dto/add-teacher.dto';
+import { EditTeacherDto } from './dto/edit-teacher.dto';
 
 describe('UserController', () => {
   let controller: UserController;
@@ -17,6 +18,7 @@ describe('UserController', () => {
     remove: jest.fn(),
     checkEmailAvailability: jest.fn(),
     addTeacher: jest.fn(),
+    editTeacher: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -212,6 +214,42 @@ describe('UserController', () => {
 
       expect(await controller.addTeacher(addTeacherDto)).toBe(mockResult);
       expect(service.addTeacher).toHaveBeenCalledWith(addTeacherDto);
+    });
+  });
+
+  describe('editTeacher', () => {
+    it('should update an existing teacher', async () => {
+      const editTeacherDto: EditTeacherDto = {
+        id: 1,
+        name: 'Updated Teacher Name',
+        email_id: 'updated.teacher@example.com',
+        contact_number: '+911234567890',
+        status: true,
+        school_id: 2,
+        start_date: new Date('2023-02-01'),
+        standard_subjects: [
+          { schoolStandardId: 3, subjectIds: [4, 5] }
+        ]
+      };
+
+      const mockResult = {
+        id: 1,
+        name: 'Updated Teacher Name',
+        email_id: 'updated.teacher@example.com',
+        contact_number: '+911234567890',
+        alternate_contact_number: '+919876543210',
+        highest_qualification: 'M.Tech',
+        status: true,
+        role: 'TEACHER',
+        school: 'New School',
+        assigned_standards: ['Class 3'],
+        message: 'Teacher updated successfully'
+      };
+
+      jest.spyOn(service, 'editTeacher').mockResolvedValue(mockResult);
+
+      expect(await controller.editTeacher(editTeacherDto)).toBe(mockResult);
+      expect(service.editTeacher).toHaveBeenCalledWith(editTeacherDto);
     });
   });
 }); 

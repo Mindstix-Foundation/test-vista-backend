@@ -15,6 +15,7 @@ import { UserExistsException } from './exceptions/user-exists.exception';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AddTeacherDto } from './dto/add-teacher.dto';
+import { EditTeacherDto } from './dto/edit-teacher.dto';
 
 @Injectable()
 export class UserService {
@@ -833,6 +834,333 @@ export class UserService {
       }
       this.logger.error('Failed to add teacher:', error);
       throw new InternalServerErrorException('Failed to add teacher');
+    }
+  }
+
+  /**
+   * Edit an existing teacher with updated school and subject assignments
+   * 
+   * This method handles updating a teacher's information:
+   * 1. Updates basic user details if provided
+   * 2. Updates school assignment if school_id is provided
+   * 3. Updates standard-subject assignments if standard_subjects are provided
+   * 
+   * The method performs several validations:
+   * - Validates that the teacher exists and has the TEACHER role
+   * - Validates email format and checks for existing users if email is changed
+   * - If school is changed, verifies the new school exists and has instruction mediums
+   * - If standard_subjects are provided, validates that all school-standards belong to the specified school
+   * - Verifies valid medium-standard-subject combinations exist
+   * 
+   * All operations are performed in a single transaction for data integrity.
+   * 
+   * @param editTeacherDto - Data transfer object containing teacher update information
+   * @returns The updated teacher with assignment details
+   * @throws BadRequestException for validation errors
+   * @throws NotFoundException if required entities are not found
+   * @throws UserExistsException if email already exists
+   * @throws InternalServerErrorException for other errors
+   */
+  async editTeacher(editTeacherDto: EditTeacherDto) {
+    try {
+      // Find the user to update and verify it exists
+      const existingUser = await this.prisma.user.findUnique({
+        where: { id: editTeacherDto.id },
+        include: {
+          user_roles: {
+            include: {
+              role: true
+            }
+          },
+          user_schools: {
+            orderBy: {
+              created_at: 'desc'
+            },
+            take: 1,
+            include: {
+              school: true
+            }
+          }
+        }
+      });
+
+      if (!existingUser) {
+        throw new NotFoundException(`User with ID ${editTeacherDto.id} not found`);
+      }
+
+      // Verify that the user is a teacher
+      const isTeacher = existingUser.user_roles.some(ur => ur.role.role_name === 'TEACHER');
+      if (!isTeacher) {
+        throw new BadRequestException(`User with ID ${editTeacherDto.id} is not a teacher`);
+      }
+
+      // Validate email if it's being updated
+      if (editTeacherDto.email_id && editTeacherDto.email_id !== existingUser.email_id) {
+        if (!this.isValidEmail(editTeacherDto.email_id)) {
+          throw new BadRequestException('Invalid email format');
+        }
+
+        // Check if email is already taken by another user
+        const userWithEmail = await this.prisma.user.findUnique({
+          where: { email_id: editTeacherDto.email_id }
+        });
+
+        if (userWithEmail && userWithEmail.id !== editTeacherDto.id) {
+          throw new UserExistsException(editTeacherDto.email_id);
+        }
+      }
+
+      // Prepare data for user update
+      const updateData: Prisma.UserUpdateInput = {};
+      
+      // Add fields to update if they are provided
+      if (editTeacherDto.name) {
+        updateData.name = toTitleCase(editTeacherDto.name);
+      }
+      
+      if (editTeacherDto.email_id) {
+        updateData.email_id = editTeacherDto.email_id;
+      }
+      
+      if (editTeacherDto.password) {
+        updateData.password = await this.hashPassword(editTeacherDto.password);
+      }
+      
+      if (editTeacherDto.contact_number) {
+        updateData.contact_number = editTeacherDto.contact_number;
+      }
+      
+      if (editTeacherDto.alternate_contact_number !== undefined) {
+        updateData.alternate_contact_number = editTeacherDto.alternate_contact_number || null;
+      }
+      
+      if (editTeacherDto.highest_qualification !== undefined) {
+        updateData.highest_qualification = editTeacherDto.highest_qualification || null;
+      }
+      
+      if (editTeacherDto.status !== undefined) {
+        updateData.status = editTeacherDto.status;
+      }
+
+      // If school_id is provided, validate the school
+      let school = null;
+      let schoolMediumIds = [];
+      
+      if (editTeacherDto.school_id) {
+        school = await this.prisma.school.findUnique({
+          where: { id: editTeacherDto.school_id },
+          include: {
+            school_instruction_mediums: {
+              include: {
+                instruction_medium: true
+              }
+            }
+          }
+        });
+
+        if (!school) {
+          throw new NotFoundException(`School with ID ${editTeacherDto.school_id} not found`);
+        }
+
+        // Get available instruction mediums for the school
+        schoolMediumIds = school.school_instruction_mediums.map(medium => medium.instruction_medium_id);
+        
+        if (schoolMediumIds.length === 0) {
+          throw new BadRequestException(`School with ID ${editTeacherDto.school_id} has no instruction mediums`);
+        }
+      } else if (existingUser.user_schools.length > 0) {
+        // Use existing school information if school_id is not provided
+        const existingSchool = existingUser.user_schools[0].school;
+        const existingSchoolWithMediums = await this.prisma.school.findUnique({
+          where: { id: existingSchool.id },
+          include: {
+            school_instruction_mediums: {
+              include: {
+                instruction_medium: true
+              }
+            }
+          }
+        });
+        
+        school = existingSchoolWithMediums;
+        schoolMediumIds = existingSchoolWithMediums.school_instruction_mediums.map(
+          medium => medium.instruction_medium_id
+        );
+      }
+
+      // Validate standard_subjects if provided
+      let validSchoolStandards = [];
+      
+      if (editTeacherDto.standard_subjects) {
+        if (!school) {
+          throw new BadRequestException('Cannot update standard-subject assignments without a school');
+        }
+
+        const schoolStandardIds = editTeacherDto.standard_subjects.map(ss => ss.schoolStandardId);
+
+        // Check if all provided school-standards exist and belong to the specified school
+        validSchoolStandards = await this.prisma.school_Standard.findMany({
+          where: {
+            id: { in: schoolStandardIds },
+            school_id: school.id
+          },
+          include: {
+            standard: true
+          }
+        });
+
+        if (validSchoolStandards.length !== schoolStandardIds.length) {
+          const foundIds = validSchoolStandards.map(ss => ss.id);
+          const invalidIds = schoolStandardIds.filter(id => !foundIds.includes(id));
+          throw new BadRequestException(`Invalid school-standard IDs for the specified school: ${invalidIds.join(', ')}`);
+        }
+      }
+
+      // Execute all operations in a transaction
+      return await this.prisma.$transaction(async (prisma) => {
+        // 1. Update the user
+        const updatedUser = await prisma.user.update({
+          where: { id: editTeacherDto.id },
+          data: updateData
+        });
+
+        // 2. Update or create school assignment if school_id is provided
+        if (editTeacherDto.school_id) {
+          // Check if there's already a school assignment
+          const existingSchoolAssignment = await prisma.user_School.findFirst({
+            where: {
+              user_id: updatedUser.id,
+              school_id: editTeacherDto.school_id
+            }
+          });
+
+          if (existingSchoolAssignment) {
+            // Update existing assignment
+            await prisma.user_School.update({
+              where: { id: existingSchoolAssignment.id },
+              data: {
+                start_date: editTeacherDto.start_date || existingSchoolAssignment.start_date,
+                end_date: editTeacherDto.end_date !== undefined 
+                  ? editTeacherDto.end_date 
+                  : existingSchoolAssignment.end_date
+              }
+            });
+          } else {
+            // Create new assignment
+            await prisma.user_School.create({
+              data: {
+                user_id: updatedUser.id,
+                school_id: editTeacherDto.school_id,
+                start_date: editTeacherDto.start_date || new Date(),
+                end_date: editTeacherDto.end_date || null
+              }
+            });
+          }
+        }
+
+        // 3. Update standard-subject assignments if provided
+        if (editTeacherDto.standard_subjects && editTeacherDto.standard_subjects.length > 0) {
+          // Delete existing teacher_subject entries
+          await prisma.teacher_Subject.deleteMany({
+            where: { user_id: updatedUser.id }
+          });
+
+          // Create new teacher_subject entries
+          const teacherSubjects = [];
+
+          // For each standard-subject combination in the request
+          for (const standardSubject of editTeacherDto.standard_subjects) {
+            const { schoolStandardId, subjectIds } = standardSubject;
+
+            // Get the standard information to use for finding medium_standard_subject entries
+            const schoolStandard = validSchoolStandards.find(ss => ss.id === schoolStandardId);
+            
+            // For each subject, create teacher_subject entries for all available mediums
+            for (const subjectId of subjectIds) {
+              // Find valid medium_standard_subject combinations for this standard and subject
+              const mediumStandardSubjects = await prisma.medium_Standard_Subject.findMany({
+                where: {
+                  instruction_medium_id: { in: schoolMediumIds },
+                  standard_id: schoolStandard.standard_id,
+                  subject_id: subjectId
+                }
+              });
+
+              // If no valid combinations found, log a warning and skip
+              if (mediumStandardSubjects.length === 0) {
+                this.logger.warn(
+                  `No valid medium-standard-subject found for standard ${schoolStandard.standard_id}, subject ${subjectId}`
+                );
+                continue;
+              }
+
+              // Add teacher_subject entries for each valid medium-standard-subject
+              for (const mss of mediumStandardSubjects) {
+                teacherSubjects.push({
+                  user_id: updatedUser.id,
+                  school_standard_id: schoolStandardId,
+                  medium_standard_subject_id: mss.id
+                });
+              }
+            }
+          }
+
+          // Create all teacher_subject entries in a batch operation
+          if (teacherSubjects.length > 0) {
+            await prisma.teacher_Subject.createMany({
+              data: teacherSubjects
+            });
+          } else {
+            throw new BadRequestException('No valid medium-standard-subject combinations found for the provided standards and subjects');
+          }
+        }
+
+        // 4. Get updated teacher details
+        // Get the latest school assignment
+        const latestSchoolAssignment = await prisma.user_School.findFirst({
+          where: { user_id: updatedUser.id },
+          orderBy: { created_at: 'desc' },
+          include: {
+            school: true
+          }
+        });
+
+        // Get current standard assignments
+        const currentStandards = await prisma.teacher_Subject.findMany({
+          where: { user_id: updatedUser.id },
+          distinct: ['school_standard_id'],
+          include: {
+            school_standard: {
+              include: {
+                standard: true
+              }
+            }
+          }
+        });
+
+        // Return the updated teacher details
+        return {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email_id: updatedUser.email_id,
+          contact_number: updatedUser.contact_number,
+          alternate_contact_number: updatedUser.alternate_contact_number,
+          highest_qualification: updatedUser.highest_qualification,
+          status: updatedUser.status,
+          role: 'TEACHER',
+          school: latestSchoolAssignment?.school.name || 'Not Assigned',
+          assigned_standards: currentStandards.map(ts => ts.school_standard.standard.name),
+          message: 'Teacher updated successfully'
+        };
+      });
+    } catch (error) {
+      if (error instanceof BadRequestException || 
+          error instanceof NotFoundException || 
+          error instanceof UserExistsException) {
+        throw error;
+      }
+      this.logger.error('Failed to edit teacher:', error);
+      throw new InternalServerErrorException('Failed to edit teacher');
     }
   }
 } 
