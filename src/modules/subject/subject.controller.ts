@@ -69,6 +69,37 @@ export class SubjectController {
     );
   }
 
+  @Get('school-standard')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Get subjects by school and standard',
+    description: 'Returns unique subjects for the specified school and standard based on the mediums associated with the school'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Returns unique subjects for the specified school and standard, sorted alphabetically by name',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'number', example: 1 },
+          name: { type: 'string', example: 'Physics' }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School or Standard not found' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input parameters' })
+  async findSubjectsBySchoolAndStandard(
+    @Query(new ValidationPipe({ transform: true })) query: SchoolStandardSubjectsQueryDto
+  ) {
+    return await this.subjectService.findSubjectsBySchoolAndStandard(
+      query.school_id,
+      query.standard_id
+    );
+  }
+
   @Get('board/:boardId')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
@@ -110,36 +141,5 @@ export class SubjectController {
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Subject not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.subjectService.remove(id);
-  }
-
-  @Get('school-standard')
-  @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ 
-    summary: 'Get subjects by school and standard',
-    description: 'Returns unique subjects for the specified school and standard based on the mediums associated with the school'
-  })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Returns unique subjects for the specified school and standard, sorted alphabetically by name',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'number', example: 1 },
-          name: { type: 'string', example: 'Physics' }
-        }
-      }
-    }
-  })
-  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School or Standard not found' })
-  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input parameters' })
-  async findSubjectsBySchoolAndStandard(
-    @Query(new ValidationPipe({ transform: true })) query: SchoolStandardSubjectsQueryDto
-  ) {
-    return await this.subjectService.findSubjectsBySchoolAndStandard(
-      query.school_id,
-      query.standard_id
-    );
   }
 } 
