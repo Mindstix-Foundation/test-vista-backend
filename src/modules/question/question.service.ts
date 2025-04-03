@@ -257,73 +257,241 @@ export class QuestionService {
         whereConditions.board_question = board_question;
       }
 
-      // Topic filter - handle both direct topic_id and chapter_id
-      if (topic_id !== undefined || chapter_id !== undefined) {
-        // Start with empty topic conditions
-        const topicConditions: any = {};
+      // UPDATED APPROACH: Use raw query to get matching question IDs first when using
+      // complex filters involving medium, verification status and chapter
+      if ((instruction_medium_id !== undefined || is_verified !== undefined) && chapter_id !== undefined) {
+        this.logger.log(`ENHANCED DEBUG - Using direct SQL approach for complex filters`);
+        
+        try {
+          // Construct SQL parameters for the query
+          const params = [];
+          const conditions = [];
+          
+          // Build WHERE conditions
+          if (instruction_medium_id !== undefined) {
+            conditions.push('qttm.instruction_medium_id = ?');
+            params.push(instruction_medium_id);
+          }
+          
+          if (chapter_id !== undefined) {
+            conditions.push('t.chapter_id = ?');
+            params.push(chapter_id);
+          }
+          
+          if (is_verified !== undefined) {
+            conditions.push('qttm.is_verified = ?');
+            params.push(is_verified);
+          }
+          
+          if (topic_id !== undefined) {
+            conditions.push('t.id = ?');
+            params.push(topic_id);
+          }
+          
+          if (translation_status !== undefined) {
+            conditions.push('qttm.translation_status = ?');
+            params.push(translation_status);
+          }
+          
+          const whereClause = conditions.length > 0 
+            ? 'WHERE ' + conditions.join(' AND ')
+            : '';
+          
+          // Use raw query to get the question IDs matching all criteria
+          const rawQuery = `
+            SELECT DISTINCT q.id 
+            FROM "Question" q
+            JOIN "Question_Topic" qt ON q.id = qt.question_id
+            JOIN "Topic" t ON qt.topic_id = t.id
+            JOIN "Question_Text" qtxt ON q.id = qtxt.question_id
+            JOIN "Question_Text_Topic_Medium" qttm ON 
+              qtxt.id = qttm.question_text_id AND
+              qt.id = qttm.question_topic_id
+            ${whereClause}
+          `;
+          
+          this.logger.log(`ENHANCED DEBUG - Executing raw query: ${rawQuery} with params: ${params}`);
+          
+          const matchingQuestionIds = await this.prisma.$queryRawUnsafe<{ id: number }[]>(
+            rawQuery,
+            ...params
+          );
+          
+          // Extract the IDs and add them to the where conditions
+          const ids = matchingQuestionIds.map(row => row.id);
+          
+          this.logger.log(`ENHANCED DEBUG - Found ${ids.length} matching question IDs`);
+          
+          if (ids.length > 0) {
+            // If we found matching IDs, use them directly in the Prisma query
+            whereConditions.id = {
+              in: ids
+            };
+            
+            // Clear other filters since we've already applied them in the raw query
+            // This ensures we don't double-filter and lose results
+            delete whereConditions.question_topics;
+            delete whereConditions.question_texts;
+          } else {
+            // If no IDs found, return empty results immediately
+            this.logger.log(`ENHANCED DEBUG - No matching IDs found in direct SQL query`);
+            return {
+              data: [],
+              pagination: {
+                total: 0,
+                page,
+                page_size,
+                total_pages: 0
+              }
+            };
+          }
+        } catch (sqlError) {
+          this.logger.error(`Error in direct SQL query: ${sqlError.message}`, sqlError.stack);
+          
+          // Fallback to original approach if SQL query fails
+          this.logger.log(`ENHANCED DEBUG - Falling back to original approach due to SQL error`);
+          
+          // Original approach below - use only if direct SQL approach fails
+          // Topic filter - handle both direct topic_id and chapter_id
+          if (topic_id !== undefined || chapter_id !== undefined) {
+            // Start with empty topic conditions
+            const topicConditions: any = {};
 
-        // If we have a specific topic_id, use it
-        if (topic_id !== undefined) {
-          topicConditions.topic_id = topic_id;
+            // If we have a specific topic_id, use it
+            if (topic_id !== undefined) {
+              topicConditions.topic_id = topic_id;
+            }
+
+            // If we have a chapter_id, add topic.chapter_id condition
+            if (chapter_id !== undefined) {
+              topicConditions.topic = {
+                chapter_id
+              };
+            }
+
+            // Add to where conditions
+            whereConditions.question_topics = {
+              some: topicConditions
+            };
+          }
+
+          // Build question_texts filter for medium, verification, and search
+          let questionTextsFilter: any = undefined;
+
+          if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined || search) {
+            questionTextsFilter = {
+              some: {} // Start with empty condition
+            };
+
+            // Medium & verification filter - need to go through question_text_topics
+            const qttConditions: any = {};
+            let hasQttConditions = false;
+
+            if (instruction_medium_id !== undefined) {
+              qttConditions.instruction_medium_id = instruction_medium_id;
+              hasQttConditions = true;
+            }
+
+            if (is_verified !== undefined) {
+              qttConditions.is_verified = is_verified;
+              hasQttConditions = true;
+            }
+
+            if (translation_status !== undefined) {
+              qttConditions.translation_status = translation_status;
+              hasQttConditions = true;
+            }
+
+            // Only add question_text_topics conditions if we have any
+            if (hasQttConditions) {
+              questionTextsFilter.some.question_text_topics = {
+                some: qttConditions
+              };
+            }
+
+            // Search filter
+            if (search) {
+              questionTextsFilter.some.question_text = {
+                contains: search,
+                mode: 'insensitive' as const
+              };
+            }
+
+            // Add to where conditions if we have any question_texts conditions
+            whereConditions.question_texts = questionTextsFilter;
+          }
         }
+      } else {
+        // Original approach when not using complex filter combination
+        
+        // Topic filter - handle both direct topic_id and chapter_id
+        if (topic_id !== undefined || chapter_id !== undefined) {
+          // Start with empty topic conditions
+          const topicConditions: any = {};
 
-        // If we have a chapter_id, add topic.chapter_id condition
-        if (chapter_id !== undefined) {
-          topicConditions.topic = {
-            chapter_id
+          // If we have a specific topic_id, use it
+          if (topic_id !== undefined) {
+            topicConditions.topic_id = topic_id;
+          }
+
+          // If we have a chapter_id, add topic.chapter_id condition
+          if (chapter_id !== undefined) {
+            topicConditions.topic = {
+              chapter_id
+            };
+          }
+
+          // Add to where conditions
+          whereConditions.question_topics = {
+            some: topicConditions
           };
         }
 
-        // Add to where conditions
-        whereConditions.question_topics = {
-          some: topicConditions
-        };
-      }
+        // Build question_texts filter for medium, verification, and search
+        let questionTextsFilter: any = undefined;
 
-      // Build question_texts filter for medium, verification, and search
-      let questionTextsFilter: any = undefined;
-
-      if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined || search) {
-        questionTextsFilter = {
-          some: {} // Start with empty condition
-        };
-
-        // Medium & verification filter - need to go through question_text_topics
-        const qttConditions: any = {};
-        let hasQttConditions = false;
-
-        if (instruction_medium_id !== undefined) {
-          qttConditions.instruction_medium_id = instruction_medium_id;
-          hasQttConditions = true;
-        }
-
-        if (is_verified !== undefined) {
-          qttConditions.is_verified = is_verified;
-          hasQttConditions = true;
-        }
-
-        if (translation_status !== undefined) {
-          qttConditions.translation_status = translation_status;
-          hasQttConditions = true;
-        }
-
-        // Only add question_text_topics conditions if we have any
-        if (hasQttConditions) {
-          questionTextsFilter.some.question_text_topics = {
-            some: qttConditions
+        if (instruction_medium_id !== undefined || is_verified !== undefined || translation_status !== undefined || search) {
+          questionTextsFilter = {
+            some: {} // Start with empty condition
           };
-        }
 
-        // Search filter
-        if (search) {
-          questionTextsFilter.some.question_text = {
-            contains: search,
-            mode: 'insensitive' as const
-          };
-        }
+          // Medium & verification filter - need to go through question_text_topics
+          const qttConditions: any = {};
+          let hasQttConditions = false;
 
-        // Add to where conditions if we have any question_texts conditions
-        whereConditions.question_texts = questionTextsFilter;
+          if (instruction_medium_id !== undefined) {
+            qttConditions.instruction_medium_id = instruction_medium_id;
+            hasQttConditions = true;
+          }
+
+          if (is_verified !== undefined) {
+            qttConditions.is_verified = is_verified;
+            hasQttConditions = true;
+          }
+
+          if (translation_status !== undefined) {
+            qttConditions.translation_status = translation_status;
+            hasQttConditions = true;
+          }
+
+          // Only add question_text_topics conditions if we have any
+          if (hasQttConditions) {
+            questionTextsFilter.some.question_text_topics = {
+              some: qttConditions
+            };
+          }
+
+          // Search filter
+          if (search) {
+            questionTextsFilter.some.question_text = {
+              contains: search,
+              mode: 'insensitive' as const
+            };
+          }
+
+          // Add to where conditions if we have any question_texts conditions
+          whereConditions.question_texts = questionTextsFilter;
+        }
       }
 
       // Debug log the constructed query
@@ -3407,6 +3575,30 @@ export class QuestionService {
         AND qttm.is_verified = ${is_verified};
       `;
       
+      // Run a more detailed SQL query showing the actual structure
+      const detailedSqlResult = await this.prisma.$queryRaw`
+        SELECT 
+          q.id as question_id,
+          qtxt.id as question_text_id,
+          qt.id as question_topic_id,
+          t.id as topic_id,
+          t.chapter_id,
+          qttm.id as qttm_id,
+          qttm.instruction_medium_id,
+          qttm.is_verified
+        FROM "Question" q
+        JOIN "Question_Topic" qt ON q.id = qt.question_id
+        JOIN "Topic" t ON qt.topic_id = t.id
+        JOIN "Question_Text" qtxt ON q.id = qtxt.question_id
+        JOIN "Question_Text_Topic_Medium" qttm ON 
+          qtxt.id = qttm.question_text_id AND
+          qt.id = qttm.question_topic_id
+        WHERE qttm.instruction_medium_id = ${instruction_medium_id}
+        AND t.chapter_id = ${chapter_id}
+        AND qttm.is_verified = ${is_verified}
+        LIMIT 10;
+      `;
+      
       // Get question IDs from direct SQL to compare with Prisma query
       const rawQuestionsResult = await this.prisma.$queryRaw`
         SELECT DISTINCT q.id FROM "Question" q
@@ -3416,6 +3608,18 @@ export class QuestionService {
         JOIN "Question_Text_Topic_Medium" qttm ON 
           qtxt.id = qttm.question_text_id AND
           qt.id = qttm.question_topic_id
+        WHERE qttm.instruction_medium_id = ${instruction_medium_id}
+        AND t.chapter_id = ${chapter_id}
+        AND qttm.is_verified = ${is_verified};
+      `;
+      
+      // Try variation 1: Check if we get results with a different query structure
+      const alternativeQueryResult = await this.prisma.$queryRaw`
+        SELECT DISTINCT q.id FROM "Question" q
+        JOIN "Question_Topic" qt ON q.id = qt.question_id
+        JOIN "Topic" t ON qt.topic_id = t.id
+        JOIN "Question_Text" qtxt ON q.id = qtxt.question_id
+        JOIN "Question_Text_Topic_Medium" qttm ON qtxt.id = qttm.question_text_id
         WHERE qttm.instruction_medium_id = ${instruction_medium_id}
         AND t.chapter_id = ${chapter_id}
         AND qttm.is_verified = ${is_verified};
@@ -3455,12 +3659,70 @@ export class QuestionService {
         }
       });
       
+      // Try variation of Prisma query - closer to SQL structure
+      const alternativePrismaWhere: any = {
+        question_topics: {
+          some: {
+            topic: {
+              chapter_id
+            },
+            question_texts: {
+              some: {
+                question_text_topics: {
+                  some: {
+                    instruction_medium_id,
+                    is_verified
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      
+      // Try the alternative Prisma query
+      const alternativePrismaCount = await this.prisma.question.count({
+        where: alternativePrismaWhere
+      });
+      
+      const alternativePrismaQuestions = await this.prisma.question.findMany({
+        where: alternativePrismaWhere,
+        select: {
+          id: true
+        }
+      });
+      
+      // Try a raw count of ALL questions, topics, and mediums to check data existence
+      const rawDataCounts = await this.prisma.$queryRaw`
+        SELECT
+          (SELECT COUNT(*) FROM "Question") as question_count,
+          (SELECT COUNT(*) FROM "Question_Topic") as question_topic_count,
+          (SELECT COUNT(*) FROM "Topic" WHERE chapter_id = ${chapter_id}) as topic_count,
+          (SELECT COUNT(*) FROM "Question_Text_Topic_Medium" WHERE instruction_medium_id = ${instruction_medium_id}) as medium_count,
+          (SELECT COUNT(*) FROM "Question_Text_Topic_Medium" WHERE is_verified = ${is_verified}) as verified_count;
+      `;
+      
       return {
+        // SQL results
         directSqlCount: rawCountResult[0]?.count || 0,
         directSqlQuestionIds: rawQuestionsResult,
+        detailedSqlResult,
+        alternativeQueryResult,
+        
+        // Prisma results
         prismaCount,
         prismaQuestionIds: prismaQuestions,
-        whereConditions
+        
+        // Alternative Prisma approach
+        alternativePrismaCount,
+        alternativePrismaQuestionIds: alternativePrismaQuestions,
+        
+        // Data counts to validate existence
+        rawDataCounts: rawDataCounts[0],
+        
+        // Query structures for comparison
+        whereConditions,
+        alternativePrismaWhere
       };
     } catch (error) {
       this.logger.error('Error running diagnostic queries:', error);
