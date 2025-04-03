@@ -512,6 +512,86 @@ export class QuestionController {
     return result;
   }
 
+  @Get('untranslated/:mediumId/count')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Count untranslated questions for a specific medium',
+    description: 'Returns the count of questions that have not been translated to the specified medium'
+  })
+  @ApiParam({ 
+    name: 'mediumId', 
+    type: Number, 
+    description: 'ID of the instruction medium to check for untranslated questions',
+    required: true
+  })
+  @ApiQuery({ name: 'question_type_id', required: false, type: Number })
+  @ApiQuery({ name: 'topic_id', required: false, type: Number })
+  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
+  @ApiQuery({ name: 'board_question', required: false, type: Boolean })
+  @ApiQuery({ name: 'is_verified', required: false, type: Boolean, description: 'When true, only counts questions with verified texts in other mediums' })
+  @ApiQuery({ name: 'translation_status', required: false, enum: ['original', 'translated'], description: 'Filter by translation status: "original" or "translated"' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns the count of untranslated questions for the specified medium',
+    schema: {
+      type: 'object',
+      properties: {
+        count: { 
+          type: 'number', 
+          example: 42,
+          description: 'The number of questions not translated to the specified medium'
+        },
+        medium_id: { 
+          type: 'number', 
+          example: 1,
+          description: 'The ID of the medium requested'
+        },
+        filters: {
+          type: 'object',
+          description: 'The filters that were applied to the count',
+          properties: {
+            question_type_id: { type: 'number', nullable: true },
+            topic_id: { type: 'number', nullable: true },
+            chapter_id: { type: 'number', nullable: true },
+            board_question: { type: 'boolean', nullable: true },
+            is_verified: { type: 'boolean', nullable: true },
+            translation_status: { type: 'string', nullable: true }
+          }
+        }
+      }
+    }
+  })
+  async countUntranslatedQuestions(
+    @Param('mediumId', ParseIntPipe) mediumId: number,
+    @Query() filters: QuestionFilterDto
+  ) {
+    const {
+      question_type_id,
+      topic_id,
+      chapter_id,
+      board_question,
+      is_verified,
+      translation_status
+    } = filters;
+
+    this.logger.log(`countUntranslatedQuestions called with params:
+      - medium_id: ${mediumId}
+      - filters: ${JSON.stringify(filters)}
+    `);
+
+    return await this.questionService.countUntranslatedQuestions(
+      mediumId,
+      {
+        question_type_id,
+        topic_id,
+        chapter_id,
+        board_question,
+        is_verified,
+        translation_status
+      }
+    );
+  }
+
   @Put('edit/:id')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
@@ -1017,5 +1097,93 @@ export class QuestionController {
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async assignDefaultTopicToQuestions() {
     return await this.questionService.assignDefaultTopicToQuestions();
+  }
+
+  @Get('count')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Count questions with optional filters',
+    description: 'Returns the total count of questions matching the specified filters, without retrieving the full question data'
+  })
+  @ApiQuery({ 
+    name: 'question_type_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by specific question type ID (e.g., MCQ, Match Pairs, etc.)' 
+  })
+  @ApiQuery({ 
+    name: 'topic_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by specific topic ID' 
+  })
+  @ApiQuery({ 
+    name: 'chapter_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by chapter ID' 
+  })
+  @ApiQuery({ 
+    name: 'board_question', 
+    required: false, 
+    type: Boolean,
+    description: 'Filter questions by board question status (true/false)' 
+  })
+  @ApiQuery({ 
+    name: 'instruction_medium_id', 
+    required: false, 
+    type: Number,
+    description: 'Filter questions by instruction medium ID (e.g., English, Hindi, etc.)' 
+  })
+  @ApiQuery({ 
+    name: 'is_verified', 
+    required: false, 
+    type: Boolean, 
+    description: 'Filter by verification status of questions (true/false)' 
+  })
+  @ApiQuery({ 
+    name: 'translation_status', 
+    required: false, 
+    type: String,
+    description: 'Filter questions by translation status (e.g., "original", "translated")' 
+  })
+  @ApiQuery({ 
+    name: 'search', 
+    required: false, 
+    type: String,
+    description: 'Search term to filter questions by text content (case-insensitive)' 
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns the count of questions matching the specified filters',
+    schema: {
+      type: 'object',
+      properties: {
+        count: { 
+          type: 'number', 
+          example: 42,
+          description: 'The number of questions matching the filters'
+        },
+        filters: {
+          type: 'object',
+          description: 'The filters that were applied to the count',
+          properties: {
+            question_type_id: { type: 'number', nullable: true },
+            topic_id: { type: 'number', nullable: true },
+            chapter_id: { type: 'number', nullable: true },
+            board_question: { type: 'boolean', nullable: true },
+            instruction_medium_id: { type: 'number', nullable: true },
+            is_verified: { type: 'boolean', nullable: true },
+            translation_status: { type: 'string', nullable: true },
+            search: { type: 'string', nullable: true }
+          }
+        }
+      }
+    }
+  })
+  async countQuestions(@Query() filters: QuestionFilterDto) {
+    this.logger.log(`countQuestions called with filters: ${JSON.stringify(filters)}`);
+    
+    return await this.questionService.countQuestions(filters);
   }
 }
