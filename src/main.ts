@@ -31,10 +31,7 @@ async function bootstrap() {
   // Global validation pipe
   app.useGlobalPipes(new ValidationPipe({
     transform: true,
-    whitelist: true,
-    transformOptions: {
-      enableImplicitConversion: true
-    }
+    whitelist: true
   }));
 
   // Swagger setup

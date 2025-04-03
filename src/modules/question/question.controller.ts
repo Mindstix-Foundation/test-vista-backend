@@ -1182,31 +1182,4 @@ export class QuestionController {
   async assignDefaultTopicToQuestions() {
     return await this.questionService.assignDefaultTopicToQuestions();
   }
-
-  @Get('diagnostic-filters')
-  @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Diagnostic endpoint to troubleshoot filter issues' })
-  @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
-  @ApiQuery({ name: 'chapter_id', required: false, type: Number })
-  @ApiQuery({ name: 'is_verified', required: false, type: Boolean })
-  async diagnosticFilters(
-    @Query() filters: QuestionFilterDto
-  ) {
-    const { instruction_medium_id, chapter_id, is_verified } = filters;
-    
-    this.logger.log(`DIAGNOSTIC FILTERS - Testing filters:
-      - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
-      - chapter_id: ${chapter_id} (${typeof chapter_id})
-      - is_verified: ${is_verified} (${typeof is_verified})
-    `);
-    
-    // Use the questionService to run these queries rather than accessing prisma directly
-    const diagnosticResults = await this.questionService.runDiagnosticQueries(
-      instruction_medium_id, 
-      chapter_id, 
-      is_verified
-    );
-    
-    return diagnosticResults;
-  }
 }
