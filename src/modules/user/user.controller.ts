@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe } from '@nestjs/common';
 import { UserService } from './user.service';
 import { UserDto, CreateUserDto, UpdateUserDto, UserListDto } from './dto/user.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
@@ -281,7 +281,7 @@ export class UserController {
   })
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
-  async editTeacher(@Body() editTeacherDto: EditTeacherDto) {
+  async editTeacher(@Body(new ValidationPipe({ transform: true })) editTeacherDto: EditTeacherDto) {
     return await this.userService.editTeacher(editTeacherDto);
   }
 } 

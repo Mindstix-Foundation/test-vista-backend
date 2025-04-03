@@ -28,6 +28,7 @@ export class EditStandardSubjectsDto {
   })
   @IsNumber()
   @IsNotEmpty()
+  @Type(() => Number)
   schoolStandardId: number;
 
   @ApiProperty({ 
@@ -38,6 +39,7 @@ export class EditStandardSubjectsDto {
   @IsArray()
   @IsNumber({}, { each: true })
   @ArrayMinSize(1, { message: 'At least one subject must be specified' })
+  @Type(() => Number)
   subjectIds: number[];
 }
 
@@ -59,6 +61,7 @@ export class EditTeacherDto {
   @IsNumber()
   @IsPositive()
   @IsNotEmpty()
+  @Type(() => Number)
   id: number;
 
   // User details - all optional
@@ -128,6 +131,7 @@ export class EditTeacherDto {
   })
   @IsOptional()
   @IsNumber()
+  @Type(() => Number)
   school_id?: number;
 
   @ApiPropertyOptional({ 
