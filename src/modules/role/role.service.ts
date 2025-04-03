@@ -69,4 +69,24 @@ export class RoleService {
 
     return userRoles.map(userRole => userRole.role);
   }
+
+  async getRoleIdByName(roleName: string): Promise<number> {
+    try {
+      const role = await this.prisma.role.findFirst({
+        where: { role_name: roleName }
+      });
+
+      if (!role) {
+        throw new NotFoundException(`Role with name ${roleName} not found`);
+      }
+
+      return role.id;
+    } catch (error) {
+      this.logger.error(`Failed to fetch role ID for name ${roleName}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw error;
+    }
+  }
 } 

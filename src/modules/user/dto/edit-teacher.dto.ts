@@ -31,7 +31,7 @@ export class EditStandardSubjectsDto {
   schoolStandardId: number;
 
   @ApiProperty({ 
-    description: 'Array of subject IDs to assign to the teacher for this standard. The system will automatically create entries for all available instruction mediums.', 
+    description: 'Array of subject IDs to assign to the teacher for this standard. The system directly uses these subject IDs to assign subjects to the teacher.', 
     type: [Number], 
     example: [1, 2, 3] 
   })
@@ -153,7 +153,7 @@ export class EditTeacherDto {
     description: `Array of standard and subject assignments. 
     If provided, these will completely replace existing assignments.
     Each entry represents one school standard with multiple subject assignments.
-    The system will automatically create entries for all available instruction mediums for each standard-subject combination.`, 
+    The system now directly uses subject_id rather than medium_standard_subject_id.`, 
     type: [EditStandardSubjectsDto],
     example: [
       { schoolStandardId: 1, subjectIds: [1, 2] },

@@ -16,12 +16,16 @@ import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AddTeacherDto } from './dto/add-teacher.dto';
 import { EditTeacherDto } from './dto/edit-teacher.dto';
+import { RoleService } from '../role/role.service';
 
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly roleService: RoleService
+  ) {}
 
   async create(createDto: CreateUserDto) {
     try {
@@ -234,21 +238,10 @@ export class UserService {
                   }
                 }
               },
-              medium_standard_subject: {
+              subject: {
                 select: {
                   id: true,
-                  subject: {
-                    select: {
-                      id: true,
-                      name: true
-                    }
-                  },
-                  instruction_medium: {
-                    select: {
-                      id: true,
-                      instruction_medium: true
-                    }
-                  }
+                  name: true
                 }
               }
             },
@@ -261,10 +254,8 @@ export class UserService {
                 }
               },
               {
-                medium_standard_subject: {
-                  subject: {
-                    name: 'asc'
-                  }
+                subject: {
+                  name: 'asc'
                 }
               }
             ]
@@ -303,12 +294,8 @@ export class UserService {
             sequence_number: ts.school_standard.standard.sequence_number
           },
           subject: {
-            id: ts.medium_standard_subject.subject.id,
-            name: ts.medium_standard_subject.subject.name
-          },
-          medium: {
-            id: ts.medium_standard_subject.instruction_medium.id,
-            name: ts.medium_standard_subject.instruction_medium.instruction_medium
+            id: ts.subject.id,
+            name: ts.subject.name
           }
         }))
       };
@@ -397,12 +384,7 @@ export class UserService {
                   standard: true
                 }
               },
-              medium_standard_subject: {
-                include: {
-                  subject: true,
-                  instruction_medium: true
-                }
-              }
+              subject: true
             }
           }
         }
@@ -418,7 +400,7 @@ export class UserService {
         schools: new Set(user.user_schools.map(us => us.school_id)).size,
         teachingAssignments: user.teacher_subjects.length,
         uniqueSubjects: new Set(user.teacher_subjects.map(ts => 
-          ts.medium_standard_subject.subject.name
+          ts.subject.name
         )).size
       };
 
@@ -427,16 +409,14 @@ export class UserService {
         - ${relatedCounts.roles} role assignments
         - ${relatedCounts.schools} school associations
         - ${relatedCounts.teachingAssignments} teaching assignments
-        - Teaching assignments for ${relatedCounts.uniqueSubjects} unique subjects
         
         Details:
         - Roles: ${user.user_roles.map(ur => ur.role.role_name).join(', ')}
         - Schools: ${user.user_schools.map(us => us.school.name).join(', ')}
         - Teaching: ${user.teacher_subjects.map(ts => 
-          `${ts.medium_standard_subject.subject.name} at ${ts.school_standard.school.name}`
+          `${ts.subject.name} at ${ts.school_standard.school.name}`
         ).join(', ')}
-        
-        All related records will be deleted.`);
+        `);
 
       // Delete the user - cascade will handle all related records
       await this.prisma.user.delete({
@@ -663,7 +643,7 @@ export class UserService {
         throw new BadRequestException('Invalid email format');
       }
 
-      // Check for existing email
+      // Check if a user with this email already exists
       const existingUser = await this.prisma.user.findUnique({
         where: { email_id: addTeacherDto.email_id }
       });
@@ -672,19 +652,7 @@ export class UserService {
         throw new UserExistsException(addTeacherDto.email_id);
       }
 
-      // Get the TEACHER role ID
-      const teacherRole = await this.prisma.role.findFirst({
-        where: { role_name: 'TEACHER' }
-      });
-
-      if (!teacherRole) {
-        throw new NotFoundException('Teacher role not found');
-      }
-
-      // Hash password
-      const hashedPassword = await this.hashPassword(addTeacherDto.password);
-
-      // Verify the school exists
+      // Validate the school exists
       const school = await this.prisma.school.findUnique({
         where: { id: addTeacherDto.school_id },
         include: {
@@ -700,14 +668,15 @@ export class UserService {
         throw new NotFoundException(`School with ID ${addTeacherDto.school_id} not found`);
       }
 
-      // Get available instruction mediums for the school
-      const schoolMediumIds = school.school_instruction_mediums.map(medium => medium.instruction_medium_id);
-      
-      if (schoolMediumIds.length === 0) {
+      // Validate that the school has at least one instruction medium
+      if (school.school_instruction_mediums.length === 0) {
         throw new BadRequestException(`School with ID ${addTeacherDto.school_id} has no instruction mediums`);
       }
 
-      // Validate school standards
+      // Get all instruction medium IDs for the school
+      const schoolMediumIds = school.school_instruction_mediums.map(medium => medium.instruction_medium_id);
+
+      // Validate standard-subject combinations
       const schoolStandardIds = addTeacherDto.standard_subjects.map(ss => ss.schoolStandardId);
 
       // Check if all provided school-standards exist and belong to the specified school
@@ -724,29 +693,29 @@ export class UserService {
       if (validSchoolStandards.length !== schoolStandardIds.length) {
         const foundIds = validSchoolStandards.map(ss => ss.id);
         const invalidIds = schoolStandardIds.filter(id => !foundIds.includes(id));
-        throw new BadRequestException(`Invalid school-standard IDs: ${invalidIds.join(', ')}`);
+        throw new BadRequestException(`Invalid school-standard IDs for the specified school: ${invalidIds.join(', ')}`);
       }
 
-      // Execute all operations in a transaction to ensure data consistency
+      // Execute all operations in a transaction
       return await this.prisma.$transaction(async (prisma) => {
         // 1. Create the user
         const user = await prisma.user.create({
           data: {
             name: toTitleCase(addTeacherDto.name),
             email_id: addTeacherDto.email_id,
-            password: hashedPassword,
+            password: await this.hashPassword(addTeacherDto.password),
             contact_number: addTeacherDto.contact_number,
             alternate_contact_number: addTeacherDto.alternate_contact_number || null,
             highest_qualification: addTeacherDto.highest_qualification || null,
-            status: addTeacherDto.status
+            status: true
           }
         });
 
-        // 2. Assign the TEACHER role
+        // 2. Assign the user to the TEACHER role
         await prisma.user_Role.create({
           data: {
             user_id: user.id,
-            role_id: teacherRole.id
+            role_id: await this.roleService.getRoleIdByName('TEACHER')
           }
         });
 
@@ -770,35 +739,27 @@ export class UserService {
           // Get the standard information to use for finding medium_standard_subject entries
           const schoolStandard = validSchoolStandards.find(ss => ss.id === schoolStandardId);
           
-          // For each subject, create teacher_subject entries for all available mediums
+          // For each subject, create one teacher_subject entry
           for (const subjectId of subjectIds) {
-            // Find valid medium_standard_subject combinations for this standard and subject
-            // This checks if there are entries that match the school's mediums with the provided standard and subject
-            const mediumStandardSubjects = await prisma.medium_Standard_Subject.findMany({
+            // Verify that the subject exists for this board
+            const subject = await prisma.subject.findFirst({
               where: {
-                instruction_medium_id: { in: schoolMediumIds },
-                standard_id: schoolStandard.standard_id,
-                subject_id: subjectId
+                id: subjectId,
+                board_id: school.board_id
               }
             });
 
-            // If no valid combinations found, log a warning and skip
-            if (mediumStandardSubjects.length === 0) {
-              this.logger.warn(
-                `No valid medium-standard-subject found for standard ${schoolStandard.standard_id}, subject ${subjectId}`
-              );
+            if (!subject) {
+              this.logger.warn(`Subject ${subjectId} not found or doesn't belong to the board of the school`);
               continue;
             }
 
-            // Add teacher_subject entries for each valid medium-standard-subject
-            // This creates an entry for EACH medium available in the school for this standard-subject
-            for (const mss of mediumStandardSubjects) {
-              teacherSubjects.push({
-                user_id: user.id,
-                school_standard_id: schoolStandardId,
-                medium_standard_subject_id: mss.id
-              });
-            }
+            // Add teacher_subject entry directly with subject_id
+            teacherSubjects.push({
+              user_id: user.id,
+              school_standard_id: schoolStandardId,
+              subject_id: subjectId
+            });
           }
         }
 
@@ -808,7 +769,7 @@ export class UserService {
             data: teacherSubjects
           });
         } else {
-          throw new BadRequestException('No valid medium-standard-subject combinations found for the provided standards and subjects');
+          throw new BadRequestException('No valid subject combinations found for the provided standards and subjects');
         }
 
         // Return the created user with role and school information
@@ -1075,33 +1036,27 @@ export class UserService {
             // Get the standard information to use for finding medium_standard_subject entries
             const schoolStandard = validSchoolStandards.find(ss => ss.id === schoolStandardId);
             
-            // For each subject, create teacher_subject entries for all available mediums
+            // For each subject, create one teacher_subject entry
             for (const subjectId of subjectIds) {
-              // Find valid medium_standard_subject combinations for this standard and subject
-              const mediumStandardSubjects = await prisma.medium_Standard_Subject.findMany({
+              // Verify that the subject exists for this board
+              const subject = await prisma.subject.findFirst({
                 where: {
-                  instruction_medium_id: { in: schoolMediumIds },
-                  standard_id: schoolStandard.standard_id,
-                  subject_id: subjectId
+                  id: subjectId,
+                  board_id: school.board_id
                 }
               });
 
-              // If no valid combinations found, log a warning and skip
-              if (mediumStandardSubjects.length === 0) {
-                this.logger.warn(
-                  `No valid medium-standard-subject found for standard ${schoolStandard.standard_id}, subject ${subjectId}`
-                );
+              if (!subject) {
+                this.logger.warn(`Subject ${subjectId} not found or doesn't belong to the board of the school`);
                 continue;
               }
 
-              // Add teacher_subject entries for each valid medium-standard-subject
-              for (const mss of mediumStandardSubjects) {
-                teacherSubjects.push({
-                  user_id: updatedUser.id,
-                  school_standard_id: schoolStandardId,
-                  medium_standard_subject_id: mss.id
-                });
-              }
+              // Add teacher_subject entry directly with subject_id
+              teacherSubjects.push({
+                user_id: updatedUser.id,
+                school_standard_id: schoolStandardId,
+                subject_id: subjectId
+              });
             }
           }
 
@@ -1111,7 +1066,7 @@ export class UserService {
               data: teacherSubjects
             });
           } else {
-            throw new BadRequestException('No valid medium-standard-subject combinations found for the provided standards and subjects');
+            throw new BadRequestException('No valid subject combinations found for the provided standards and subjects');
           }
         }
 

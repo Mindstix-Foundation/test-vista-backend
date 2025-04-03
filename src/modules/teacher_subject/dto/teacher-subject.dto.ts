@@ -17,7 +17,7 @@ export class TeacherSubjectDto {
 
   @ApiProperty({ example: 1 })
   @IsNumber()
-  medium_standard_subject_id: number;
+  subject_id: number;
 }
 
 export class CreateTeacherSubjectDto {
@@ -34,7 +34,7 @@ export class CreateTeacherSubjectDto {
   @ApiProperty({ example: 1 })
   @IsNumber()
   @IsNotEmpty()
-  medium_standard_subject_id: number;
+  subject_id: number;
 }
 
 export class GetTeacherSubjectsQueryDto {

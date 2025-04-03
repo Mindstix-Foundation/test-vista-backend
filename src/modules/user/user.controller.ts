@@ -135,15 +135,13 @@ export class UserController {
     1. The API creates a new user entry with the TEACHER role
     2. Assigns the teacher to the specified school
     3. For each standard and subject combination provided:
-       - Finds all available instruction mediums for the school
-       - For each standard-subject combination, creates entries in the teacher_subject table
-         for all valid medium-standard-subject combinations
-       - This automatically handles multiple instruction mediums (e.g., English, Hindi)
+       - Creates entries in the teacher_subject table using the subject_id directly
+       - This approach has been updated to use subject_id instead of medium_standard_subject_id
     
     ## Important Notes:
     - The school must have at least one instruction medium defined
     - All school-standard IDs must belong to the specified school
-    - For each standard-subject combination, there must exist valid medium_standard_subject entries
+    - All subject IDs must be valid and belong to the school's board
     - The API will validate all inputs and return appropriate error messages if validation fails
     - All operations are performed in a single transaction for data integrity`
   })
@@ -218,14 +216,14 @@ export class UserController {
     3. If standard_subjects are provided, it replaces existing subject assignments with the new ones:
        - Existing teacher_subject entries for the teacher are removed
        - New entries are created based on the provided standard-subject combinations
-       - Each combination will generate entries for all available instruction mediums
+       - The system uses subject_id directly instead of medium_standard_subject_id
     
     ## Important Notes:
     - All fields except the user ID are optional, allowing partial updates
     - If updating school assignment, the school must have at least one instruction medium defined
     - If updating standard-subjects, all school-standard IDs must belong to the specified school
     - If changing school, the standard_subjects must be provided and must belong to the new school
-    - For each standard-subject combination, there must exist valid medium_standard_subject entries
+    - For each standard-subject combination, the subject must exist and belong to the school's board
     - All operations are performed in a single transaction for data integrity
     - If a password is provided, it will be hashed before storage`
   })

@@ -18,6 +18,12 @@ export class MediumStandardSubjectDto {
   @ApiProperty({ example: 1 })
   @IsNumber()
   subject_id: number;
+
+  @ApiProperty({ 
+    example: false, 
+    description: 'Indicates whether chapters exist for this standard and subject combination' 
+  })
+  has_chapters: boolean;
 }
 
 export class CreateMediumStandardSubjectDto {

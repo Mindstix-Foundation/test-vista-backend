@@ -56,6 +56,9 @@ export class SubjectService {
       return await this.prisma.subject.findMany({
         include: {
           board: true
+        },
+        orderBy: {
+          name: 'asc' // Sort alphabetically by name
         }
       });
     } catch (error) {
@@ -152,13 +155,14 @@ export class SubjectService {
 
       // Get medium standard subjects
       const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
+        where: { subject_id: id }
+      });
+
+      // Get teacher subjects directly related to this subject
+      const teacherSubjects = await this.prisma.teacher_Subject.findMany({
         where: { subject_id: id },
         include: {
-          teacher_subjects: {
-            include: {
-              user: true
-            }
-          }
+          user: true
         }
       });
 
@@ -173,9 +177,7 @@ export class SubjectService {
       // Get counts of related entities for informative message
       const relatedCounts = {
         mediumStandards: mediumStandardSubjects.length,
-        teachers: new Set(mediumStandardSubjects.flatMap(mss => 
-          mss.teacher_subjects.map(ts => ts.user_id)
-        )).size,
+        teachers: new Set(teacherSubjects.map(ts => ts.user_id)).size,
         chapters: chapters.length,
         topics: chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
       };
@@ -206,6 +208,76 @@ export class SubjectService {
   async findByBoard(boardId: number) {
     return await this.prisma.subject.findMany({
       where: { board_id: boardId },
+      orderBy: {
+        name: 'asc' // Sort alphabetically by name
+      }
     });
+  }
+
+  async findUnconnectedSubjects(boardId: number, mediumId: number, standardId: number) {
+    try {
+      // Validate that board exists
+      const board = await this.prisma.board.findUnique({
+        where: { id: boardId }
+      });
+      
+      if (!board) {
+        throw new NotFoundException(`Board with ID ${boardId} not found`);
+      }
+
+      // Validate that medium exists and belongs to the board
+      const medium = await this.prisma.instruction_Medium.findFirst({
+        where: { 
+          id: mediumId,
+          board_id: boardId 
+        }
+      });
+      
+      if (!medium) {
+        throw new NotFoundException(`Instruction medium with ID ${mediumId} not found in board ${boardId}`);
+      }
+
+      // Validate that standard exists and belongs to the board
+      const standard = await this.prisma.standard.findFirst({
+        where: { 
+          id: standardId,
+          board_id: boardId 
+        }
+      });
+      
+      if (!standard) {
+        throw new NotFoundException(`Standard with ID ${standardId} not found in board ${boardId}`);
+      }
+
+      // Get subjects that belong to the board but don't have a connection with the medium and standard
+      const subjects = await this.prisma.subject.findMany({
+        where: {
+          board_id: boardId,
+          NOT: {
+            medium_standard_subjects: {
+              some: {
+                instruction_medium_id: mediumId,
+                standard_id: standardId
+              }
+            }
+          }
+        },
+        orderBy: {
+          name: 'asc' // Sort alphabetically by name
+        },
+        select: {
+          id: true,
+          name: true
+        }
+      });
+
+      return subjects;
+    } catch (error) {
+      this.logger.error(`Failed to fetch unconnected subjects for board ${boardId}, medium ${mediumId}, standard ${standardId}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to fetch unconnected subjects');
+    }
   }
 }

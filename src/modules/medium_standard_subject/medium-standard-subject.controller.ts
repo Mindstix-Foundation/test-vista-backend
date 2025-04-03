@@ -34,7 +34,10 @@ export class MediumStandardSubjectController {
   @ApiQuery({ name: 'instruction_medium_id', required: false, type: Number })
   @ApiQuery({ name: 'standard_id', required: false, type: Number })
   @ApiQuery({ name: 'subject_id', required: false, type: Number })
-  @ApiResponse({ status: HttpStatus.OK, description: 'Returns all associations' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Returns all associations sorted alphabetically by subject name, with a flag indicating if chapters exist for each standard-subject pair. Unnecessary fields like created_at and updated_at are excluded.' 
+  })
   async findAll(
     @Query('boardId', new ParseIntPipe({ optional: true, errorHttpStatusCode: HttpStatus.BAD_REQUEST })) boardId?: string,
     @Query('instruction_medium_id', new ParseIntPipe({ optional: true, errorHttpStatusCode: HttpStatus.BAD_REQUEST })) instruction_medium_id?: string,
@@ -131,7 +134,8 @@ export class MediumStandardSubjectController {
       // Transform the response to use explicit field names
       return result.map(item => ({
         subject_id: item.subject.id,
-        subject_name: item.subject.name
+        subject_name: item.subject.name,
+        has_chapters: item.has_chapters
       }));
     } catch (error) {
       if (error instanceof BadRequestException) {

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsNumber, IsOptional, IsNotEmpty } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class SubjectDto {
   @ApiProperty({ example: 1 })
@@ -45,4 +46,33 @@ export class UpdateSubjectDto {
   @IsNumber({}, { message: 'Board ID must be a number' })
   @IsNotEmpty({ message: 'Board ID cannot be empty if provided' })
   board_id?: number;
+}
+
+export class UnconnectedSubjectsQueryDto {
+  @ApiProperty({ 
+    example: 1, 
+    description: 'ID of the board to filter subjects by' 
+  })
+  @IsNumber({}, { message: 'Board ID must be a number' })
+  @IsNotEmpty({ message: 'Board ID is required' })
+  @Transform(({ value }) => parseInt(value))
+  board_id: number;
+
+  @ApiProperty({ 
+    example: 1, 
+    description: 'ID of the instruction medium' 
+  })
+  @IsNumber({}, { message: 'Medium ID must be a number' })
+  @IsNotEmpty({ message: 'Medium ID is required' })
+  @Transform(({ value }) => parseInt(value))
+  medium_id: number;
+
+  @ApiProperty({ 
+    example: 1, 
+    description: 'ID of the standard' 
+  })
+  @IsNumber({}, { message: 'Standard ID must be a number' })
+  @IsNotEmpty({ message: 'Standard ID is required' })
+  @Transform(({ value }) => parseInt(value))
+  standard_id: number;
 } 
