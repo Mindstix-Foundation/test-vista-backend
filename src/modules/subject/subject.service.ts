@@ -280,4 +280,78 @@ export class SubjectService {
       throw new InternalServerErrorException('Failed to fetch unconnected subjects');
     }
   }
+
+  async findSubjectsBySchoolAndStandard(schoolId: number, standardId: number) {
+    try {
+      // Validate that school exists
+      const school = await this.prisma.school.findUnique({
+        where: { id: schoolId }
+      });
+      
+      if (!school) {
+        throw new NotFoundException(`School with ID ${schoolId} not found`);
+      }
+
+      // Validate that standard exists
+      const standard = await this.prisma.standard.findUnique({
+        where: { id: standardId }
+      });
+      
+      if (!standard) {
+        throw new NotFoundException(`Standard with ID ${standardId} not found`);
+      }
+
+      // Get instruction mediums associated with the school
+      const schoolMediums = await this.prisma.school_Instruction_Medium.findMany({
+        where: { school_id: schoolId },
+        select: { instruction_medium_id: true }
+      });
+
+      if (!schoolMediums.length) {
+        return [];
+      }
+
+      const mediumIds = schoolMediums.map(medium => medium.instruction_medium_id);
+
+      // Get all subjects from medium-standard-subject that match the mediums and standard
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
+        where: {
+          standard_id: standardId,
+          instruction_medium_id: {
+            in: mediumIds
+          }
+        },
+        include: {
+          subject: true
+        },
+        orderBy: {
+          subject: {
+            name: 'asc'
+          }
+        }
+      });
+
+      // Create a map to track unique subjects by ID
+      const uniqueSubjectsMap = new Map();
+      
+      // Add each subject to the map using subject ID as the key
+      mediumStandardSubjects.forEach(mss => {
+        if (!uniqueSubjectsMap.has(mss.subject.id)) {
+          uniqueSubjectsMap.set(mss.subject.id, {
+            id: mss.subject.id,
+            name: mss.subject.name
+          });
+        }
+      });
+      
+      // Convert the map values to an array
+      return Array.from(uniqueSubjectsMap.values());
+    } catch (error) {
+      this.logger.error(`Failed to fetch subjects for school ${schoolId} and standard ${standardId}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to fetch subjects for school and standard');
+    }
+  }
 }

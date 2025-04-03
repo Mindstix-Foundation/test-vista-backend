@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe, ConflictException, BadRequestException } from '@nestjs/common';
 import { UserService } from './user.service';
 import { UserDto, CreateUserDto, UpdateUserDto, UserListDto } from './dto/user.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
@@ -10,7 +10,7 @@ import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { AddTeacherDto } from './dto/add-teacher.dto';
-import { EditTeacherDto } from './dto/edit-teacher.dto';
+import { UpdateTeacherDto } from './dto/update-teacher.dto';
 
 class GetUsersQueryDto extends PaginationDto {
   @ApiProperty({ required: false })
@@ -129,176 +129,80 @@ export class UserController {
   @Roles('ADMIN')
   @ApiOperation({ 
     summary: 'Add a new teacher with school and subject assignments',
-    description: `Creates a new teacher account with appropriate role, school, and subject assignments in a single transaction.
-    
-    ## Workflow and Logic:
-    1. The API creates a new user entry with the TEACHER role
-    2. Assigns the teacher to the specified school
-    3. For each standard and subject combination provided:
-       - Creates entries in the teacher_subject table using the subject_id directly
-       - This approach has been updated to use subject_id instead of medium_standard_subject_id
-    
-    ## Important Notes:
-    - The school must have at least one instruction medium defined
-    - All school-standard IDs must belong to the specified school
-    - All subject IDs must be valid and belong to the school's board
-    - The API will validate all inputs and return appropriate error messages if validation fails
-    - All operations are performed in a single transaction for data integrity`
+    description: 'Creates a new teacher account with role, school, and subject assignments'
   })
   @ApiResponse({ 
     status: HttpStatus.CREATED, 
-    description: 'Teacher created successfully with role, school, and subject assignments',
-    schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', example: 1 },
-        name: { type: 'string', example: 'John Teacher' },
-        email_id: { type: 'string', example: 'john.teacher@example.com' },
-        contact_number: { type: 'string', example: '+911234567890' },
-        alternate_contact_number: { type: 'string', example: '+919876543210', nullable: true },
-        highest_qualification: { type: 'string', example: 'M.Tech', nullable: true },
-        status: { type: 'boolean', example: true },
-        role: { type: 'string', example: 'TEACHER' },
-        school: { type: 'string', example: 'Delhi Public School' },
-        assigned_standards: { 
-          type: 'array', 
-          items: { type: 'string' },
-          example: ['Class 1', 'Class 2'] 
-        },
-        message: { type: 'string', example: 'Teacher added successfully' }
-      }
-    }
+    description: 'Teacher created successfully'
   })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Email already exists' })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data (email format, no valid instruction mediums, invalid standard-subject combinations)',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 400 },
-        message: { 
-          type: 'string', 
-          example: 'Invalid school-standard IDs: 3, 4 | No valid medium-standard-subject combinations found'
-        },
-        error: { type: 'string', example: 'Bad Request' }
-      }
-    }
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'School not found, Teacher role not found',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 404 },
-        message: { type: 'string', example: 'School with ID 999 not found' },
-        error: { type: 'string', example: 'Not Found' }
-      }
-    }
-  })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input data' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School not found or invalid assignments' })
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
-  async addTeacher(@Body() addTeacherDto: AddTeacherDto) {
-    return await this.userService.addTeacher(addTeacherDto);
+  async addTeacher(
+    @Body(new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+        exposeDefaultValues: true
+      }
+    }))
+    addTeacherDto: AddTeacherDto
+  ) {
+    try {
+      return await this.userService.addTeacher(addTeacherDto);
+    } catch (error) {
+      if (error.name === 'UserExistsException') {
+        throw new ConflictException(error.message);
+      }
+      throw error;
+    }
   }
 
-  @Put('teacher')
+  @Put('teachers/:id')
   @Roles('ADMIN')
   @ApiOperation({ 
-    summary: 'Edit an existing teacher with updated school and subject assignments',
-    description: `Updates a teacher account with the provided details. This API allows updating basic details, 
-    school assignment, and subject assignments in a single transaction.
-    
-    ## Workflow and Logic:
-    1. The API updates the user details if provided
-    2. If school_id is provided, it updates or creates the school assignment
-    3. If standard_subjects are provided, it replaces existing subject assignments with the new ones:
-       - Existing teacher_subject entries for the teacher are removed
-       - New entries are created based on the provided standard-subject combinations
-       - The system uses subject_id directly instead of medium_standard_subject_id
-    
-    ## Important Notes:
-    - All fields except the user ID are optional, allowing partial updates
-    - If updating school assignment, the school must have at least one instruction medium defined
-    - If updating standard-subjects, all school-standard IDs must belong to the specified school
-    - If changing school, the standard_subjects must be provided and must belong to the new school
-    - For each standard-subject combination, the subject must exist and belong to the school's board
-    - All operations are performed in a single transaction for data integrity
-    - If a password is provided, it will be hashed before storage`
+    summary: 'Update teacher with ID from URL',
+    description: 'Updates a teacher using the ID from the URL path'
   })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Teacher updated successfully with updated role, school, and subject assignments',
-    schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', example: 1 },
-        name: { type: 'string', example: 'John Teacher' },
-        email_id: { type: 'string', example: 'john.teacher@example.com' },
-        contact_number: { type: 'string', example: '+911234567890' },
-        alternate_contact_number: { type: 'string', example: '+919876543210', nullable: true },
-        highest_qualification: { type: 'string', example: 'M.Tech', nullable: true },
-        status: { type: 'boolean', example: true },
-        role: { type: 'string', example: 'TEACHER' },
-        school: { type: 'string', example: 'Delhi Public School' },
-        assigned_standards: { 
-          type: 'array', 
-          items: { type: 'string' },
-          example: ['Class 1', 'Class 2'] 
-        },
-        message: { type: 'string', example: 'Teacher updated successfully' }
-      }
-    }
+    description: 'Teacher updated successfully'
   })
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Email already exists' })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data (email format, no valid instruction mediums, invalid standard-subject combinations)',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 400 },
-        message: { 
-          type: 'string', 
-          example: 'Invalid school-standard IDs: 3, 4 | No valid medium-standard-subject combinations found'
-        },
-        error: { type: 'string', example: 'Bad Request' }
-      }
-    }
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'Teacher not found, School not found, Teacher role not found',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 404 },
-        message: { type: 'string', example: 'User with ID 999 not found' },
-        error: { type: 'string', example: 'Not Found' }
-      }
-    }
-  })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input data' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Teacher or school not found' })
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
-  async editTeacher(@Body(new ValidationPipe({ 
-    transform: true, 
-    transformOptions: { enableImplicitConversion: true },
-    forbidNonWhitelisted: false
-  })) editTeacherDto: EditTeacherDto) {
-    // Log the received data for debugging
-    console.log('Received teacher data:', JSON.stringify(editTeacherDto));
-    
-    // Make sure all numeric values are properly converted
-    if (editTeacherDto.standard_subjects) {
-      editTeacherDto.standard_subjects = editTeacherDto.standard_subjects.map(ss => ({
-        schoolStandardId: Number(ss.schoolStandardId),
-        subjectIds: Array.isArray(ss.subjectIds) 
-          ? ss.subjectIds.map(id => Number(id)) 
-          : ss.subjectIds
-      }));
+  async updateTeacherById(
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+        exposeDefaultValues: true
+      }
+    }))
+    updateTeacherDto: UpdateTeacherDto
+  ) {
+    try {
+      // Create a combined DTO with the ID from URL and the body data
+      const fullDto = {
+        id,
+        ...updateTeacherDto
+      };
+      
+      return await this.userService.editTeacher(fullDto);
+    } catch (error) {
+      if (error.name === 'UserExistsException') {
+        throw new ConflictException(error.message);
+      }
+      throw error;
     }
-    
-    return await this.userService.editTeacher(editTeacherDto);
   }
 } 

@@ -15,7 +15,7 @@ import { UserExistsException } from './exceptions/user-exists.exception';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AddTeacherDto } from './dto/add-teacher.dto';
-import { EditTeacherDto } from './dto/edit-teacher.dto';
+import { UpdateTeacherDto } from './dto/update-teacher.dto';
 import { RoleService } from '../role/role.service';
 
 @Injectable()
@@ -815,18 +815,18 @@ export class UserService {
    * 
    * All operations are performed in a single transaction for data integrity.
    * 
-   * @param editTeacherDto - Data transfer object containing teacher update information
+   * @param teacherData - Data transfer object containing teacher update information
    * @returns The updated teacher with assignment details
    * @throws BadRequestException for validation errors
    * @throws NotFoundException if required entities are not found
    * @throws UserExistsException if email already exists
    * @throws InternalServerErrorException for other errors
    */
-  async editTeacher(editTeacherDto: EditTeacherDto) {
+  async editTeacher(teacherData: any) {
     try {
       // Find the user to update and verify it exists
       const existingUser = await this.prisma.user.findUnique({
-        where: { id: editTeacherDto.id },
+        where: { id: teacherData.id },
         include: {
           user_roles: {
             include: {
@@ -846,28 +846,28 @@ export class UserService {
       });
 
       if (!existingUser) {
-        throw new NotFoundException(`User with ID ${editTeacherDto.id} not found`);
+        throw new NotFoundException(`User with ID ${teacherData.id} not found`);
       }
 
       // Verify that the user is a teacher
       const isTeacher = existingUser.user_roles.some(ur => ur.role.role_name === 'TEACHER');
       if (!isTeacher) {
-        throw new BadRequestException(`User with ID ${editTeacherDto.id} is not a teacher`);
+        throw new BadRequestException(`User with ID ${teacherData.id} is not a teacher`);
       }
 
       // Validate email if it's being updated
-      if (editTeacherDto.email_id && editTeacherDto.email_id !== existingUser.email_id) {
-        if (!this.isValidEmail(editTeacherDto.email_id)) {
+      if (teacherData.email_id && teacherData.email_id !== existingUser.email_id) {
+        if (!this.isValidEmail(teacherData.email_id)) {
           throw new BadRequestException('Invalid email format');
         }
 
         // Check if email is already taken by another user
         const userWithEmail = await this.prisma.user.findUnique({
-          where: { email_id: editTeacherDto.email_id }
+          where: { email_id: teacherData.email_id }
         });
 
-        if (userWithEmail && userWithEmail.id !== editTeacherDto.id) {
-          throw new UserExistsException(editTeacherDto.email_id);
+        if (userWithEmail && userWithEmail.id !== teacherData.id) {
+          throw new UserExistsException(teacherData.email_id);
         }
       }
 
@@ -875,41 +875,41 @@ export class UserService {
       const updateData: Prisma.UserUpdateInput = {};
       
       // Add fields to update if they are provided
-      if (editTeacherDto.name) {
-        updateData.name = toTitleCase(editTeacherDto.name);
+      if (teacherData.name) {
+        updateData.name = toTitleCase(teacherData.name);
       }
       
-      if (editTeacherDto.email_id) {
-        updateData.email_id = editTeacherDto.email_id;
+      if (teacherData.email_id) {
+        updateData.email_id = teacherData.email_id;
       }
       
-      if (editTeacherDto.password) {
-        updateData.password = await this.hashPassword(editTeacherDto.password);
+      if (teacherData.password) {
+        updateData.password = await this.hashPassword(teacherData.password);
       }
       
-      if (editTeacherDto.contact_number) {
-        updateData.contact_number = editTeacherDto.contact_number;
+      if (teacherData.contact_number) {
+        updateData.contact_number = teacherData.contact_number;
       }
       
-      if (editTeacherDto.alternate_contact_number !== undefined) {
-        updateData.alternate_contact_number = editTeacherDto.alternate_contact_number || null;
+      if (teacherData.alternate_contact_number !== undefined) {
+        updateData.alternate_contact_number = teacherData.alternate_contact_number || null;
       }
       
-      if (editTeacherDto.highest_qualification !== undefined) {
-        updateData.highest_qualification = editTeacherDto.highest_qualification || null;
+      if (teacherData.highest_qualification !== undefined) {
+        updateData.highest_qualification = teacherData.highest_qualification || null;
       }
       
-      if (editTeacherDto.status !== undefined) {
-        updateData.status = editTeacherDto.status;
+      if (teacherData.status !== undefined) {
+        updateData.status = teacherData.status;
       }
 
       // If school_id is provided, validate the school
       let school = null;
       let schoolMediumIds = [];
       
-      if (editTeacherDto.school_id) {
+      if (teacherData.school_id) {
         school = await this.prisma.school.findUnique({
-          where: { id: editTeacherDto.school_id },
+          where: { id: teacherData.school_id },
           include: {
             school_instruction_mediums: {
               include: {
@@ -920,14 +920,14 @@ export class UserService {
         });
 
         if (!school) {
-          throw new NotFoundException(`School with ID ${editTeacherDto.school_id} not found`);
+          throw new NotFoundException(`School with ID ${teacherData.school_id} not found`);
         }
 
         // Get available instruction mediums for the school
         schoolMediumIds = school.school_instruction_mediums.map(medium => medium.instruction_medium_id);
         
         if (schoolMediumIds.length === 0) {
-          throw new BadRequestException(`School with ID ${editTeacherDto.school_id} has no instruction mediums`);
+          throw new BadRequestException(`School with ID ${teacherData.school_id} has no instruction mediums`);
         }
       } else if (existingUser.user_schools.length > 0) {
         // Use existing school information if school_id is not provided
@@ -952,12 +952,12 @@ export class UserService {
       // Validate standard_subjects if provided
       let validSchoolStandards = [];
       
-      if (editTeacherDto.standard_subjects) {
+      if (teacherData.standard_subjects) {
         if (!school) {
           throw new BadRequestException('Cannot update standard-subject assignments without a school');
         }
 
-        const schoolStandardIds = editTeacherDto.standard_subjects.map(ss => ss.schoolStandardId);
+        const schoolStandardIds = teacherData.standard_subjects.map(ss => ss.schoolStandardId);
 
         // Check if all provided school-standards exist and belong to the specified school
         validSchoolStandards = await this.prisma.school_Standard.findMany({
@@ -981,17 +981,17 @@ export class UserService {
       return await this.prisma.$transaction(async (prisma) => {
         // 1. Update the user
         const updatedUser = await prisma.user.update({
-          where: { id: editTeacherDto.id },
+          where: { id: teacherData.id },
           data: updateData
         });
 
         // 2. Update or create school assignment if school_id is provided
-        if (editTeacherDto.school_id) {
+        if (teacherData.school_id) {
           // Check if there's already a school assignment
           const existingSchoolAssignment = await prisma.user_School.findFirst({
             where: {
               user_id: updatedUser.id,
-              school_id: editTeacherDto.school_id
+              school_id: teacherData.school_id
             }
           });
 
@@ -1000,9 +1000,9 @@ export class UserService {
             await prisma.user_School.update({
               where: { id: existingSchoolAssignment.id },
               data: {
-                start_date: editTeacherDto.start_date || existingSchoolAssignment.start_date,
-                end_date: editTeacherDto.end_date !== undefined 
-                  ? editTeacherDto.end_date 
+                start_date: teacherData.start_date || existingSchoolAssignment.start_date,
+                end_date: teacherData.end_date !== undefined 
+                  ? teacherData.end_date 
                   : existingSchoolAssignment.end_date
               }
             });
@@ -1011,16 +1011,16 @@ export class UserService {
             await prisma.user_School.create({
               data: {
                 user_id: updatedUser.id,
-                school_id: editTeacherDto.school_id,
-                start_date: editTeacherDto.start_date || new Date(),
-                end_date: editTeacherDto.end_date || null
+                school_id: teacherData.school_id,
+                start_date: teacherData.start_date || new Date(),
+                end_date: teacherData.end_date || null
               }
             });
           }
         }
 
         // 3. Update standard-subject assignments if provided
-        if (editTeacherDto.standard_subjects && editTeacherDto.standard_subjects.length > 0) {
+        if (teacherData.standard_subjects && teacherData.standard_subjects.length > 0) {
           // Delete existing teacher_subject entries
           await prisma.teacher_Subject.deleteMany({
             where: { user_id: updatedUser.id }
@@ -1030,7 +1030,7 @@ export class UserService {
           const teacherSubjects = [];
 
           // For each standard-subject combination in the request
-          for (const standardSubject of editTeacherDto.standard_subjects) {
+          for (const standardSubject of teacherData.standard_subjects) {
             const { schoolStandardId, subjectIds } = standardSubject;
 
             // Get the standard information to use for finding medium_standard_subject entries

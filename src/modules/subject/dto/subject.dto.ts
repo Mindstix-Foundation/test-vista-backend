@@ -75,4 +75,24 @@ export class UnconnectedSubjectsQueryDto {
   @IsNotEmpty({ message: 'Standard ID is required' })
   @Transform(({ value }) => parseInt(value))
   standard_id: number;
+}
+
+export class SchoolStandardSubjectsQueryDto {
+  @ApiProperty({ 
+    example: 1, 
+    description: 'ID of the school to fetch subjects for' 
+  })
+  @IsNumber({}, { message: 'School ID must be a number' })
+  @IsNotEmpty({ message: 'School ID is required' })
+  @Transform(({ value }) => parseInt(value))
+  school_id: number;
+
+  @ApiProperty({ 
+    example: 1, 
+    description: 'ID of the standard to fetch subjects for' 
+  })
+  @IsNumber({}, { message: 'Standard ID must be a number' })
+  @IsNotEmpty({ message: 'Standard ID is required' })
+  @Transform(({ value }) => parseInt(value))
+  standard_id: number;
 } 

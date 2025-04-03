@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { 
   IsString, 
   IsNumber, 
@@ -11,69 +11,60 @@ import {
   IsDate, 
   IsArray, 
   ValidateNested,
-  ArrayMinSize,
-  IsPositive
+  ArrayMinSize
 } from 'class-validator';
-import { Transform, Type, TransformFnParams } from 'class-transformer';
+import { Type, Transform, Expose } from 'class-transformer';
 import { IsStrongPassword } from '../../../common/validators/password.validator';
 
 /**
- * DTO for standard and subject assignments for editing a teacher
+ * DTO for standard and subject assignments for updating a teacher
  * Each entry represents one school-standard with multiple subject assignments
  */
-export class EditStandardSubjectsDto {
-  @ApiProperty({ 
-    description: 'ID of the school_standard entry (not the standard ID itself). This ID comes from the School_Standard table which maps standards to schools.', 
+export class UpdateStandardSubjectsDto {
+  @ApiPropertyOptional({ 
+    description: 'ID of the school_standard entry', 
     example: 1 
   })
-  @IsNumber()
-  @IsNotEmpty()
-  @Transform(({ value }) => Number(value))
-  schoolStandardId: number;
-
-  @ApiProperty({ 
-    description: 'Array of subject IDs to assign to the teacher for this standard. The system directly uses these subject IDs to assign subjects to the teacher.', 
-    type: [Number], 
-    example: [1, 2, 3] 
-  })
-  @IsArray()
-  @IsNumber({}, { each: true })
-  @ArrayMinSize(1, { message: 'At least one subject must be specified' })
+  @Expose()
   @Transform(({ value }) => {
-    if (Array.isArray(value)) {
-      return value.map(item => Number(item));
+    if (typeof value === 'string') {
+      return parseInt(value, 10);
     }
     return value;
   })
+  @IsNumber({}, { message: 'School standard ID must be a number' })
+  @IsNotEmpty({ message: 'School standard ID is required' })
+  schoolStandardId: number;
+
+  @ApiPropertyOptional({ 
+    description: 'Array of subject IDs', 
+    type: [Number], 
+    example: [1, 2, 3] 
+  })
+  @Expose()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) {
+      return value.map(item => typeof item === 'string' ? parseInt(item, 10) : item);
+    }
+    return value;
+  })
+  @IsArray({ message: 'Subject IDs must be an array' })
+  @IsNumber({}, { each: true, message: 'Each subject ID must be a number' })
+  @ArrayMinSize(1, { message: 'At least one subject must be specified' })
   subjectIds: number[];
 }
 
 /**
- * DTO for editing a teacher with updated school and subject assignments
- * 
- * This DTO captures all information needed to:
- * 1. Update user details
- * 2. Update school assignment
- * 3. Update standard-subject assignments
- * 
+ * DTO for updating a teacher with school and subject assignments
  * All fields are optional to allow partial updates
  */
-export class EditTeacherDto {
-  @ApiProperty({
-    description: 'ID of the teacher to edit',
-    example: 1
-  })
-  @IsNumber()
-  @IsPositive()
-  @IsNotEmpty()
-  @Transform(({ value }) => Number(value))
-  id: number;
-
+export class UpdateTeacherDto {
   // User details - all optional
   @ApiPropertyOptional({ 
     example: 'John Doe',
     description: 'Full name of the teacher'
   })
+  @Expose()
   @IsOptional()
   @IsString({ message: 'Name must be a string' })
   @Length(2, 100, { message: 'Name must be between 2 and 100 characters' })
@@ -81,16 +72,18 @@ export class EditTeacherDto {
 
   @ApiPropertyOptional({ 
     example: 'john.doe@example.com',
-    description: 'Email address for the teacher (must be unique)'
+    description: 'Email address for the teacher'
   })
+  @Expose()
   @IsOptional()
   @IsEmail({}, { message: 'Please provide a valid email address' })
   email_id?: string;
 
   @ApiPropertyOptional({ 
     example: 'Password123!',
-    description: 'Password must be at least 8 characters long and contain uppercase, lowercase, number and special character. Only provide this if you want to change the password.'
+    description: 'Password for the teacher'
   })
+  @Expose()
   @IsOptional()
   @IsString({ message: 'Password must be a string' })
   @IsStrongPassword()
@@ -100,22 +93,25 @@ export class EditTeacherDto {
     example: '+911234567890', 
     description: 'Contact number with country code' 
   })
+  @Expose()
   @IsOptional()
-  @IsPhoneNumber()
+  @IsPhoneNumber(undefined, { message: 'Please provide a valid phone number with country code' })
   contact_number?: string;
 
   @ApiPropertyOptional({ 
     example: '+919876543210', 
-    description: 'Optional alternate contact number with country code' 
+    description: 'Optional alternate contact number' 
   })
+  @Expose()
   @IsOptional()
-  @IsPhoneNumber()
+  @IsPhoneNumber(undefined, { message: 'Please provide a valid phone number with country code' })
   alternate_contact_number?: string;
 
   @ApiPropertyOptional({ 
     example: 'M.Tech',
-    description: 'Highest educational qualification of the teacher'
+    description: 'Highest educational qualification' 
   })
+  @Expose()
   @IsOptional()
   @IsString({ message: 'Qualification must be a string' })
   @Length(2, 50, { message: 'Qualification must be between 2 and 50 characters' })
@@ -125,54 +121,66 @@ export class EditTeacherDto {
     example: true, 
     description: 'Account status (active/inactive)'
   })
+  @Expose()
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
   @IsBoolean({ message: 'Status must be a boolean' })
   status?: boolean;
 
   // School assignment
   @ApiPropertyOptional({ 
     example: 1, 
-    description: 'ID of the school to assign the teacher to. The teacher will be associated with this school.'
+    description: 'ID of the school to assign'
   })
+  @Expose()
   @IsOptional()
-  @IsNumber()
-  @Transform(({ value }) => Number(value))
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return parseInt(value, 10);
+    }
+    return value;
+  })
+  @IsNumber({}, { message: 'School ID must be a number' })
   school_id?: number;
 
   @ApiPropertyOptional({ 
     example: '2023-01-01', 
-    description: 'Start date for the teacher at the school (employment start date)' 
+    description: 'Start date at the school' 
   })
+  @Expose()
   @IsOptional()
-  @IsDate()
   @Type(() => Date)
+  @IsDate({ message: 'Start date must be a valid date' })
   start_date?: Date;
 
   @ApiPropertyOptional({ 
     example: '2024-12-31', 
-    description: 'Optional end date for the teacher at the school (for temporary contracts)' 
+    description: 'End date at the school' 
   })
+  @Expose()
   @IsOptional()
-  @IsDate()
   @Type(() => Date)
+  @IsDate({ message: 'End date must be a valid date' })
   end_date?: Date;
 
   // Standard and subject assignments
   @ApiPropertyOptional({ 
-    description: `Array of standard and subject assignments. 
-    If provided, these will completely replace existing assignments.
-    Each entry represents one school standard with multiple subject assignments.
-    The system now directly uses subject_id rather than medium_standard_subject_id.`, 
-    type: [EditStandardSubjectsDto],
+    description: 'Standard and subject assignments', 
+    type: [UpdateStandardSubjectsDto],
     example: [
       { schoolStandardId: 1, subjectIds: [1, 2] },
       { schoolStandardId: 2, subjectIds: [3, 4] }
     ]
   })
+  @Expose()
   @IsOptional()
-  @IsArray()
+  @IsArray({ message: 'Standard-subject assignments must be an array' })
+  @Type(() => UpdateStandardSubjectsDto)
   @ValidateNested({ each: true })
-  @Type(() => EditStandardSubjectsDto)
   @ArrayMinSize(1, { message: 'At least one standard-subject assignment must be specified' })
-  standard_subjects?: EditStandardSubjectsDto[];
+  standard_subjects?: UpdateStandardSubjectsDto[];
 } 
