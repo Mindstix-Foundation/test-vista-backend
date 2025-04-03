@@ -281,7 +281,24 @@ export class UserController {
   })
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
   @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
-  async editTeacher(@Body(new ValidationPipe({ transform: true })) editTeacherDto: EditTeacherDto) {
+  async editTeacher(@Body(new ValidationPipe({ 
+    transform: true, 
+    transformOptions: { enableImplicitConversion: true },
+    forbidNonWhitelisted: false
+  })) editTeacherDto: EditTeacherDto) {
+    // Log the received data for debugging
+    console.log('Received teacher data:', JSON.stringify(editTeacherDto));
+    
+    // Make sure all numeric values are properly converted
+    if (editTeacherDto.standard_subjects) {
+      editTeacherDto.standard_subjects = editTeacherDto.standard_subjects.map(ss => ({
+        schoolStandardId: Number(ss.schoolStandardId),
+        subjectIds: Array.isArray(ss.subjectIds) 
+          ? ss.subjectIds.map(id => Number(id)) 
+          : ss.subjectIds
+      }));
+    }
+    
     return await this.userService.editTeacher(editTeacherDto);
   }
 } 

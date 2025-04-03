@@ -29,10 +29,16 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   
   // Global validation pipe
-  app.useGlobalPipes(new ValidationPipe({
-    transform: true,
-    whitelist: true
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true
+      },
+      whitelist: true,
+      forbidNonWhitelisted: false
+    })
+  );
 
   // Swagger setup
   const config = new DocumentBuilder()

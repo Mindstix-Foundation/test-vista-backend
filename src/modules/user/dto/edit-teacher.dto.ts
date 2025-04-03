@@ -14,7 +14,7 @@ import {
   ArrayMinSize,
   IsPositive
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type, TransformFnParams } from 'class-transformer';
 import { IsStrongPassword } from '../../../common/validators/password.validator';
 
 /**
@@ -28,7 +28,7 @@ export class EditStandardSubjectsDto {
   })
   @IsNumber()
   @IsNotEmpty()
-  @Type(() => Number)
+  @Transform(({ value }) => Number(value))
   schoolStandardId: number;
 
   @ApiProperty({ 
@@ -39,7 +39,12 @@ export class EditStandardSubjectsDto {
   @IsArray()
   @IsNumber({}, { each: true })
   @ArrayMinSize(1, { message: 'At least one subject must be specified' })
-  @Type(() => Number)
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) {
+      return value.map(item => Number(item));
+    }
+    return value;
+  })
   subjectIds: number[];
 }
 
@@ -61,7 +66,7 @@ export class EditTeacherDto {
   @IsNumber()
   @IsPositive()
   @IsNotEmpty()
-  @Type(() => Number)
+  @Transform(({ value }) => Number(value))
   id: number;
 
   // User details - all optional
@@ -131,7 +136,7 @@ export class EditTeacherDto {
   })
   @IsOptional()
   @IsNumber()
-  @Type(() => Number)
+  @Transform(({ value }) => Number(value))
   school_id?: number;
 
   @ApiPropertyOptional({ 
