@@ -153,7 +153,7 @@ export class SchoolStandardService {
           teacher_subjects: {
             include: {
               user: true,
-              medium_standard_subject: true
+              subject: true
             }
           }
         }
@@ -166,7 +166,7 @@ export class SchoolStandardService {
       // Get counts of related entities for informative message
       const relatedCounts = {
         teachers: new Set(schoolStandard.teacher_subjects.map(ts => ts.user_id)).size,
-        subjects: new Set(schoolStandard.teacher_subjects.map(ts => ts.medium_standard_subject_id)).size
+        subjects: new Set(schoolStandard.teacher_subjects.map(ts => ts.subject_id)).size
       };
 
       // Log what will be deleted

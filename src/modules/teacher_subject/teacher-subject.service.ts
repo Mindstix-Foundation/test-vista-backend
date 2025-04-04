@@ -36,16 +36,11 @@ export class TeacherSubjectService {
         }
       }
     },
-    medium_standard_subject: {
+    subject: {
       select: {
         id: true,
-        instruction_medium: {
-          select: {
-            id: true,
-            instruction_medium: true
-          }
-        },
-        subject: {
+        name: true,
+        board: {
           select: {
             id: true,
             name: true
@@ -94,27 +89,14 @@ export class TeacherSubjectService {
         throw new NotFoundException(`School standard with ID ${createDto.school_standard_id} not found`);
       }
 
-      // Get medium standard subject details
-      const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
-        where: { id: createDto.medium_standard_subject_id },
-        include: {
-          standard: true,
-          instruction_medium: true,
-          subject: true
-        }
+      // Get subject details
+      const subject = await this.prisma.subject.findUnique({
+        where: { id: createDto.subject_id }
       });
 
-      if (!mediumStandardSubject) {
+      if (!subject) {
         throw new NotFoundException(
-          `Medium standard subject with ID ${createDto.medium_standard_subject_id} not found`
-        );
-      }
-
-      // Check if standards match
-      if (schoolStandard.standard_id !== mediumStandardSubject.standard_id) {
-        throw new BadRequestException(
-          `Standards do not match. School Standard: ${schoolStandard.standard.name}, ` +
-          `Medium Standard Subject Standard: ${mediumStandardSubject.standard.name}`
+          `Subject with ID ${createDto.subject_id} not found`
         );
       }
 
@@ -123,7 +105,7 @@ export class TeacherSubjectService {
         where: {
           user_id: createDto.user_id,
           school_standard_id: createDto.school_standard_id,
-          medium_standard_subject_id: createDto.medium_standard_subject_id
+          subject_id: createDto.subject_id
         }
       });
 
@@ -134,26 +116,14 @@ export class TeacherSubjectService {
       return await this.prisma.teacher_Subject.create({
         data: createDto,
         include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email_id: true
-            }
-          },
+          user: true,
           school_standard: {
             include: {
               school: true,
               standard: true
             }
           },
-          medium_standard_subject: {
-            include: {
-              instruction_medium: true,
-              standard: true,
-              subject: true
-            }
-          }
+          subject: true
         }
       });
     } catch (error) {
@@ -189,52 +159,7 @@ export class TeacherSubjectService {
 
       return await this.prisma.teacher_Subject.findMany({
         where,
-        select: {
-          id: true,
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email_id: true
-            }
-          },
-          school_standard: {
-            select: {
-              id: true,
-              school: {
-                select: {
-                  id: true,
-                  name: true
-                }
-              },
-              standard: {
-                select: {
-                  id: true,
-                  name: true
-                }
-              }
-            }
-          },
-          medium_standard_subject: {
-            select: {
-              id: true,
-              instruction_medium: {
-                select: {
-                  id: true,
-                  instruction_medium: true
-                }
-              },
-              subject: {
-                select: {
-                  id: true,
-                  name: true
-                }
-              }
-            }
-          },
-          created_at: true,
-          updated_at: true
-        }
+        select: this.teacherSubjectSelect
       });
     } catch (error) {
       this.logger.error('Failed to fetch teacher subjects:', error);
@@ -276,12 +201,7 @@ export class TeacherSubjectService {
               standard: true
             }
           },
-          medium_standard_subject: {
-            include: {
-              instruction_medium: true,
-              subject: true
-            }
-          }
+          subject: true
         }
       });
 
@@ -294,8 +214,7 @@ export class TeacherSubjectService {
         - Teacher: ${teacherSubject.user.name}
         - School: ${teacherSubject.school_standard.school.name}
         - Standard: ${teacherSubject.school_standard.standard.name}
-        - Subject: ${teacherSubject.medium_standard_subject.subject.name}
-        - Medium: ${teacherSubject.medium_standard_subject.instruction_medium.instruction_medium}`);
+        - Subject: ${teacherSubject.subject.name}`);
 
       // Delete the teacher subject - cascade will handle related records
       await this.prisma.teacher_Subject.delete({
@@ -325,12 +244,7 @@ export class TeacherSubjectService {
               standard: true
             }
           },
-          medium_standard_subject: {
-            include: {
-              instruction_medium: true,
-              subject: true
-            }
-          }
+          subject: true
         }
       });
 
@@ -344,8 +258,7 @@ export class TeacherSubjectService {
         this.logger.log(`
           - School: ${assignment.school_standard.school.name}
           - Standard: ${assignment.school_standard.standard.name}
-          - Subject: ${assignment.medium_standard_subject.subject.name}
-          - Medium: ${assignment.medium_standard_subject.instruction_medium.instruction_medium}
+          - Subject: ${assignment.subject.name}
         `);
       });
 

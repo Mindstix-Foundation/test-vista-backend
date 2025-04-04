@@ -3199,4 +3199,223 @@ export class QuestionService {
       return result;
     });
   }
+
+  async countUntranslatedQuestions(instruction_medium_id_param: number, filters: QuestionFilterDto) {
+    try {
+      const {
+        question_type_id,
+        topic_id,
+        chapter_id,
+        board_question,
+        is_verified,
+        translation_status
+      } = filters;
+
+      // Basic raw query to get untranslated questions count for this medium
+      const untranslatedQuestionsCount = await this.prisma.$queryRaw<[{ count: string }]>`
+        SELECT COUNT(DISTINCT q.id) as count
+        FROM "Question" q
+        WHERE NOT EXISTS (
+          SELECT 1 
+          FROM "Question_Text" qt 
+          JOIN "Question_Text_Topic_Medium" qttm ON qt.id = qttm.question_text_id
+          WHERE qt.question_id = q.id 
+          AND qttm.instruction_medium_id = ${instruction_medium_id_param}
+        )
+        ${topic_id ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "Question_Topic" qt1
+            WHERE qt1.question_id = q.id AND qt1.topic_id = ${topic_id}
+          )` : 
+          Prisma.sql``
+        }
+        ${chapter_id ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "Question_Topic" qt2
+            JOIN "Topic" t ON qt2.topic_id = t.id
+            WHERE qt2.question_id = q.id AND t.chapter_id = ${chapter_id}
+          )` : 
+          Prisma.sql``
+        }
+        ${question_type_id ? 
+          Prisma.sql`AND q.question_type_id = ${question_type_id}` : 
+          Prisma.sql``
+        }
+        ${board_question !== undefined ? 
+          Prisma.sql`AND q.board_question = ${board_question}` : 
+          Prisma.sql``
+        }
+        ${is_verified === true ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 
+            FROM "Question_Text" qt3 
+            JOIN "Question_Text_Topic_Medium" qttm3 ON qt3.id = qttm3.question_text_id
+            WHERE qt3.question_id = q.id 
+            AND qttm3.is_verified = true
+          )` : 
+          Prisma.sql``
+        }
+        ${translation_status ? 
+          Prisma.sql`AND EXISTS (
+            SELECT 1 
+            FROM "Question_Text" qt4 
+            JOIN "Question_Text_Topic_Medium" qttm4 ON qt4.id = qttm4.question_text_id
+            WHERE qt4.question_id = q.id 
+            AND qttm4.translation_status = ${translation_status}
+          )` : 
+          Prisma.sql``
+        }
+      `;
+
+      // Extract count value and convert to number
+      const count = parseInt(untranslatedQuestionsCount[0]?.count || '0', 10);
+
+      // Add diagnostic logging
+      this.logger.log(`Found ${count} untranslated questions for medium ${instruction_medium_id_param}`);
+      
+      return { 
+        count,
+        medium_id: instruction_medium_id_param,
+        filters: {
+          question_type_id,
+          topic_id,
+          chapter_id,
+          board_question,
+          is_verified,
+          translation_status
+        }
+      };
+    } catch (error) {
+      this.logger.error(`Error counting untranslated questions for medium ${instruction_medium_id_param}:`, error);
+      throw new InternalServerErrorException('Failed to count untranslated questions');
+    }
+  }
+
+  async countQuestions(filters: QuestionFilterDto) {
+    try {
+      const {
+        question_type_id,
+        topic_id,
+        chapter_id,
+        board_question,
+        instruction_medium_id,
+        is_verified,
+        translation_status,
+        search
+      } = filters;
+
+      // Build the where conditions
+      const whereConditions: any = {};
+
+      // Basic filters
+      if (question_type_id !== undefined) {
+        whereConditions.question_type_id = question_type_id;
+      }
+
+      if (board_question !== undefined) {
+        whereConditions.board_question = board_question;
+      }
+
+      // Handle topic filter
+      if (topic_id !== undefined) {
+        whereConditions.question_topics = {
+          some: {
+            topic_id
+          }
+        };
+      }
+
+      // Add chapter filter if specified
+      if (chapter_id !== undefined) {
+        whereConditions.question_topics = {
+          ...(whereConditions.question_topics || {}),
+          some: {
+            ...(whereConditions.question_topics?.some || {}),
+            topic: {
+              chapter_id
+            }
+          }
+        };
+      }
+
+      // Add medium filter if specified
+      if (instruction_medium_id !== undefined) {
+        whereConditions.question_texts = {
+          ...(whereConditions.question_texts || {}),
+          some: {
+            question_text_topics: {
+              some: {
+                instruction_medium_id
+              }
+            }
+          }
+        };
+      }
+
+      // Add verification status filter if specified
+      if (is_verified !== undefined) {
+        whereConditions.question_texts = {
+          ...(whereConditions.question_texts || {}),
+          some: {
+            question_text_topics: {
+              some: {
+                is_verified
+              }
+            }
+          }
+        };
+      }
+
+      // Add translation status filter if specified
+      if (translation_status !== undefined) {
+        whereConditions.question_texts = {
+          ...(whereConditions.question_texts || {}),
+          some: {
+            question_text_topics: {
+              some: {
+                translation_status
+              }
+            }
+          }
+        };
+      }
+
+      // Search filter
+      if (search) {
+        whereConditions.question_texts = {
+          ...(whereConditions.question_texts || {}),
+          some: {
+            question_text: {
+              contains: search,
+              mode: 'insensitive' as const
+            }
+          }
+        };
+      }
+
+      // Count total questions matching the criteria
+      const count = await this.prisma.question.count({
+        where: whereConditions
+      });
+
+      this.logger.log(`Counted ${count} questions with filters: ${JSON.stringify(filters)}`);
+
+      return {
+        count,
+        filters: {
+          question_type_id,
+          topic_id,
+          chapter_id,
+          board_question,
+          instruction_medium_id,
+          is_verified,
+          translation_status,
+          search
+        }
+      };
+    } catch (error) {
+      this.logger.error('Error counting questions:', error);
+      throw new InternalServerErrorException('Failed to count questions');
+    }
+  }
 } 

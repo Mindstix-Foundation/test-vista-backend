@@ -417,21 +417,10 @@ export class AuthService {
                   }
                 }
               },
-              medium_standard_subject: {
+              subject: {
                 select: {
                   id: true,
-                  subject: {
-                    select: {
-                      id: true,
-                      name: true
-                    }
-                  },
-                  instruction_medium: {
-                    select: {
-                      id: true,
-                      instruction_medium: true
-                    }
-                  }
+                  name: true
                 }
               }
             }
@@ -452,7 +441,7 @@ export class AuthService {
           if (seqDiff !== 0) return seqDiff;
           
           // Then sort by subject name alphabetically
-          return a.medium_standard_subject.subject.name.localeCompare(b.medium_standard_subject.subject.name);
+          return a.subject.name.localeCompare(b.subject.name);
         });
 
       return {
@@ -482,12 +471,8 @@ export class AuthService {
             sequence_number: ts.school_standard.standard.sequence_number
           },
           subject: {
-            id: ts.medium_standard_subject.subject.id,
-            name: ts.medium_standard_subject.subject.name
-          },
-          medium: {
-            id: ts.medium_standard_subject.instruction_medium.id,
-            name: ts.medium_standard_subject.instruction_medium.instruction_medium
+            id: ts.subject.id,
+            name: ts.subject.name
           }
         }))
       };

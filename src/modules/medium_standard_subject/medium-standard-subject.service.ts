@@ -12,19 +12,12 @@ export class MediumStandardSubjectService {
 
   private readonly mssSelect = {
     id: true,
-    instruction_medium_id: true,
-    standard_id: true,
-    subject_id: true,
+    
     instruction_medium: {
       select: {
         id: true,
         instruction_medium: true,
-        board: {
-          select: {
-            name: true,
-            abbreviation: true
-          }
-        }
+        
       }
     },
     standard: {
@@ -38,9 +31,7 @@ export class MediumStandardSubjectService {
         id: true,
         name: true
       }
-    },
-    created_at: true,
-    updated_at: true
+    }
   };
 
   async create(createDto: CreateMediumStandardSubjectDto) {
@@ -163,10 +154,34 @@ export class MediumStandardSubjectService {
         where.subject_id = parsedParams.subject_id;
       }
 
-      return await this.prisma.medium_Standard_Subject.findMany({
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
         where,
-        select: this.mssSelect
+        select: this.mssSelect,
+        orderBy: {
+          subject: {
+            name: 'asc'
+          }
+        }
       });
+
+      // Add a flag to indicate whether each standard and subject pair has chapters
+      const enrichedResults = await Promise.all(
+        mediumStandardSubjects.map(async (mss) => {
+          const hasChapters = await this.prisma.chapter.findFirst({
+            where: {
+              standard_id: mss.standard.id,
+              subject_id: mss.subject.id
+            }
+          });
+          
+          return {
+            ...mss,
+            has_chapters: !!hasChapters
+          };
+        })
+      );
+
+      return enrichedResults;
     } catch (error) {
       this.logger.error('Failed to fetch medium standard subjects:', error);
       if (error instanceof BadRequestException) {
@@ -222,10 +237,34 @@ export class MediumStandardSubjectService {
         };
       }
 
-      return await this.prisma.medium_Standard_Subject.findMany({
+      const mediumStandardSubjects = await this.prisma.medium_Standard_Subject.findMany({
         where,
-        select: this.mssSelect
+        select: this.mssSelect,
+        orderBy: {
+          subject: {
+            name: 'asc'
+          }
+        }
       });
+
+      // Add a flag to indicate whether each standard and subject pair has chapters
+      const enrichedResults = await Promise.all(
+        mediumStandardSubjects.map(async (mss) => {
+          const hasChapters = await this.prisma.chapter.findFirst({
+            where: {
+              standard_id: mss.standard.id,
+              subject_id: mss.subject.id
+            }
+          });
+          
+          return {
+            ...mss,
+            has_chapters: !!hasChapters
+          };
+        })
+      );
+
+      return enrichedResults;
     } catch (error) {
       this.logger.error(`Failed to fetch subjects for medium ${mediumId} and standard ${standardId}:`, error);
       if (error instanceof NotFoundException) {
@@ -239,10 +278,7 @@ export class MediumStandardSubjectService {
     try {
       // Check if medium standard subject exists
       const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
-        where: { id },
-        include: {
-          teacher_subjects: true
-        }
+        where: { id }
       });
 
       if (!mediumStandardSubject) {
@@ -262,14 +298,12 @@ export class MediumStandardSubjectService {
 
       // Get counts of related entities for informative message
       const relatedCounts = {
-        teacherSubjects: mediumStandardSubject.teacher_subjects.length,
         chapters: chapters.length,
         topics: chapters.reduce((sum, chapter) => sum + chapter.topics.length, 0)
       };
 
       // Log what will be deleted
       this.logger.log(`Deleting medium standard subject ${id} will also delete:
-        - ${relatedCounts.teacherSubjects} teacher subject assignments
         - ${relatedCounts.chapters} chapters
         - ${relatedCounts.topics} topics
         and all their related records`);
@@ -291,16 +325,27 @@ export class MediumStandardSubjectService {
 
   async findOne(id: number) {
     try {
-      const mediumStandardSubject = await this.prisma.medium_Standard_Subject.findUnique({
+      const mss = await this.prisma.medium_Standard_Subject.findUnique({
         where: { id },
         select: this.mssSelect
       });
 
-      if (!mediumStandardSubject) {
+      if (!mss) {
         throw new NotFoundException(`Medium standard subject with ID ${id} not found`);
       }
 
-      return mediumStandardSubject;
+      // Check if this standard and subject pair has any chapters
+      const hasChapters = await this.prisma.chapter.findFirst({
+        where: {
+          standard_id: mss.standard.id,
+          subject_id: mss.subject.id
+        }
+      });
+
+      return {
+        ...mss,
+        has_chapters: !!hasChapters
+      };
     } catch (error) {
       this.logger.error(`Failed to fetch medium standard subject ${id}:`, error);
       if (error instanceof NotFoundException) {
