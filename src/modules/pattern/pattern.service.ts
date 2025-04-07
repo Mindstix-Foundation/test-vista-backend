@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePatternDto } from './dto/create-pattern.dto';
 import { UpdatePatternDto } from './dto/update-pattern.dto';
@@ -69,48 +74,48 @@ export class PatternService {
 
   async findAll(filters: FilterOptions) {
     try {
-      const { 
-        boardId, 
-        standardId, 
-        subjectId, 
-        totalMarks, 
-        page = 1, 
-        page_size = 10, 
-        sort_by = SortField.CREATED_AT, 
+      const {
+        boardId,
+        standardId,
+        subjectId,
+        totalMarks,
+        page = 1,
+        page_size = 10,
+        sort_by = SortField.CREATED_AT,
         sort_order = SortOrder.DESC,
-        search
+        search,
       } = filters;
-      
+
       const skip = (page - 1) * page_size;
-      
+
       // Build where clause
       const where: Prisma.PatternWhereInput = {};
       if (boardId) where.board_id = boardId;
       if (standardId) where.standard_id = standardId;
       if (subjectId) where.subject_id = subjectId;
       if (totalMarks) where.total_marks = totalMarks;
-      
+
       // Add search condition
       if (search) {
         where.pattern_name = {
           contains: search,
-          mode: 'insensitive' // Case-insensitive search
+          mode: 'insensitive', // Case-insensitive search
         };
       }
-      
+
       // Get total count for pagination metadata
       const total = await this.prisma.pattern.count({ where });
-      
+
       // Build orderBy object based on sort parameters
       const orderBy: Prisma.PatternOrderByWithRelationInput = {};
-      
+
       // Handle special case for pattern_name since it's not directly a SortField enum value
       if (sort_by === SortField.NAME) {
         orderBy.pattern_name = sort_order;
       } else {
         orderBy[sort_by] = sort_order;
       }
-      
+
       // Get paginated data with sorting
       const patterns = await this.prisma.pattern.findMany({
         skip,
@@ -122,9 +127,9 @@ export class PatternService {
           standard: true,
           subject: true,
           sections: true,
-        }
+        },
       });
-      
+
       return {
         data: patterns,
         meta: {
@@ -134,8 +139,8 @@ export class PatternService {
           total_pages: Math.ceil(total / page_size),
           sort_by,
           sort_order,
-          search: search || undefined
-        }
+          search: search || undefined,
+        },
       };
     } catch (error) {
       this.logger.error('Failed to fetch all patterns:', error);
@@ -147,11 +152,60 @@ export class PatternService {
     try {
       const pattern = await this.prisma.pattern.findUnique({
         where: { id },
-        include: {
-          board: true,
-          standard: true,
-          subject: true,
-          sections: true,
+        select: {
+          id: true,
+          pattern_name: true,
+          board_id: true,
+          standard_id: true,
+          subject_id: true,
+          total_marks: true,
+          board: {
+            select: {
+              id: true,
+              name: true,
+              abbreviation: true,
+            },
+          },
+          standard: {
+            select: {
+              id: true,
+              name: true,
+              sequence_number: true,
+            },
+          },
+          subject: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          sections: {
+            select: {
+              id: true,
+              pattern_id: true,
+              sequence_number: true,
+              section_number: true,
+              sub_section: true,
+              section_name: true,
+              total_questions: true,
+              mandotory_questions: true,
+              marks_per_question: true,
+              subsection_question_types: {
+                select: {
+                  id: true,
+                  section_id: true,
+                  seqencial_subquestion_number: true,
+                  question_type_id: true,
+                  question_type: {
+                    select: {
+                      id: true,
+                      type_name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       });
 
@@ -221,43 +275,45 @@ export class PatternService {
     }
   }
 
-  async findAllWithoutPagination(filters: Omit<FilterOptions, 'page' | 'page_size'>) {
+  async findAllWithoutPagination(
+    filters: Omit<FilterOptions, 'page' | 'page_size'>,
+  ) {
     try {
-      const { 
-        boardId, 
-        standardId, 
-        subjectId, 
-        totalMarks, 
-        sort_by = SortField.CREATED_AT, 
+      const {
+        boardId,
+        standardId,
+        subjectId,
+        totalMarks,
+        sort_by = SortField.CREATED_AT,
         sort_order = SortOrder.DESC,
-        search
+        search,
       } = filters;
-      
+
       // Build where clause
       const where: Prisma.PatternWhereInput = {};
       if (boardId) where.board_id = boardId;
       if (standardId) where.standard_id = standardId;
       if (subjectId) where.subject_id = subjectId;
       if (totalMarks) where.total_marks = totalMarks;
-      
+
       // Add search condition
       if (search) {
         where.pattern_name = {
           contains: search,
-          mode: 'insensitive' // Case-insensitive search
+          mode: 'insensitive', // Case-insensitive search
         };
       }
-      
+
       // Build orderBy object based on sort parameters
       const orderBy: Prisma.PatternOrderByWithRelationInput = {};
-      
+
       // Handle special case for pattern_name since it's not directly a SortField enum value
       if (sort_by === SortField.NAME) {
         orderBy.pattern_name = sort_order;
       } else {
         orderBy[sort_by] = sort_order;
       }
-      
+
       // Get all patterns with sorting but without pagination
       const patterns = await this.prisma.pattern.findMany({
         where,
@@ -267,20 +323,20 @@ export class PatternService {
           standard: true,
           subject: true,
           sections: true,
-        }
+        },
       });
-      
+
       return {
         data: patterns,
         meta: {
           sort_by,
           sort_order,
-          search: search || undefined
-        }
+          search: search || undefined,
+        },
       };
     } catch (error) {
       this.logger.error('Failed to fetch all patterns:', error);
       throw new InternalServerErrorException('Failed to fetch all patterns');
     }
   }
-} 
+}

@@ -34,7 +34,7 @@ export class FilterPatternDto {
     if (typeof value === 'string') {
       return value.split(',').map(id => parseInt(id.trim(), 10));
     }
-    return value;
+    return Array.isArray(value) ? value : [value];
   })
   @Type(() => Number)
   @IsNumber({}, { each: true, message: 'Each chapterIds must be a number' })

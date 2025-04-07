@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ConflictException, InternalServe
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
+import { CheckQuestionTypeDto } from './dto/check-question-type.dto';
 import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
@@ -378,5 +379,117 @@ export class ChapterService {
       }
       throw new InternalServerErrorException(`Failed to reorder chapter: ${error.message}`);
     }
+  }
+
+  async checkQuestionType(checkQuestionTypeDto: CheckQuestionTypeDto) {
+    const { chapterIds, questionTypeId, mediumIds } = checkQuestionTypeDto;
+
+    // Validate chapters exist
+    const chapters = await this.prisma.chapter.findMany({
+      where: { id: { in: chapterIds } },
+    });
+
+      if (chapters.length !== chapterIds.length) {
+        const foundIds = chapters.map(chapter => chapter.id);
+        const missingIds = chapterIds.filter(id => !foundIds.includes(id));
+        throw new NotFoundException(`Chapters not found with IDs: ${missingIds.join(', ')}`);
+      }
+
+    // Validate question type exists
+    const questionType = await this.prisma.question_Type.findUnique({
+      where: { id: questionTypeId },
+    });
+
+      if (!questionType) {
+        throw new NotFoundException(`Question type not found with ID: ${questionTypeId}`);
+      }
+
+    // Validate mediums if provided
+    if (mediumIds && mediumIds.length > 0) {
+      const mediums = await this.prisma.instruction_Medium.findMany({
+        where: { id: { in: mediumIds } },
+      });
+
+        if (mediums.length !== mediumIds.length) {
+          const foundIds = mediums.map(medium => medium.id);
+          const missingIds = mediumIds.filter(id => !foundIds.includes(id));
+          throw new NotFoundException(`Instruction mediums not found with IDs: ${missingIds.join(', ')}`);
+        }
+      }
+
+    const result = await Promise.all(
+      chapterIds.map(async (chapterId) => {
+        // Get all verified questions of the specified type for this chapter
+        const questions = await this.prisma.question.findMany({
+          where: {
+            question_type_id: questionTypeId,
+            question_topics: {
+              some: {
+                topic: {
+                  chapter_id: chapterId
+                },
+                question_text_topics: {
+                  some: {
+                    is_verified: true,
+                    ...(mediumIds && mediumIds.length > 0 ? {
+                      instruction_medium_id: {
+                        in: mediumIds
+                      }
+                    } : {})
+                  }
+                }
+              }
+            }
+          },
+          include: {
+            question_topics: {
+              include: {
+                question_text_topics: {
+                  select: {
+                    instruction_medium_id: true,
+                    is_verified: true
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        // If no mediums specified, count all verified questions
+        if (!mediumIds || mediumIds.length === 0) {
+          return {
+            chapterId,
+            chapterName: chapters.find(c => c.id === chapterId)?.name || '',
+            questionCount: questions.length,
+          };
+        }
+
+        // Filter questions that exist in ALL specified mediums
+        const commonQuestions = questions.filter(question => {
+          const questionMediumIds = new Set(
+            question.question_topics.flatMap(topic => 
+              topic.question_text_topics
+                .filter(textTopic => textTopic.is_verified)
+                .map(textTopic => textTopic.instruction_medium_id)
+            )
+          );
+          return mediumIds.every(mediumId => questionMediumIds.has(mediumId));
+        });
+
+        return {
+          chapterId,
+          chapterName: chapters.find(c => c.id === chapterId)?.name || '',
+          questionCount: commonQuestions.length,
+        };
+      })
+    );
+
+    // Filter out chapters with 0 questions
+    const filteredResult = result.filter(item => item.questionCount > 0);
+
+    return {
+      count: filteredResult.length,
+      chapters: filteredResult,
+    };
   }
 } 
