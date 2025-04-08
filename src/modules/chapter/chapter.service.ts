@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, ConflictException, InternalServe
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
+import { CheckQuestionTypeDto } from './dto/check-question-type.dto';
 import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
@@ -378,5 +379,146 @@ export class ChapterService {
       }
       throw new InternalServerErrorException(`Failed to reorder chapter: ${error.message}`);
     }
+  }
+
+  async checkQuestionType(checkQuestionTypeDto: CheckQuestionTypeDto) {
+    const { chapterIds, patternId, mediumIds } = checkQuestionTypeDto;
+
+    // Validate chapters exist
+    const chapters = await this.prisma.chapter.findMany({
+      where: { id: { in: chapterIds } },
+    });
+
+    if (chapters.length !== chapterIds.length) {
+      const foundIds = chapters.map(chapter => chapter.id);
+      const missingIds = chapterIds.filter(id => !foundIds.includes(id));
+      throw new NotFoundException(`Chapters not found with IDs: ${missingIds.join(', ')}`);
+    }
+
+    // Validate pattern exists
+    const pattern = await this.prisma.pattern.findUnique({
+      where: { id: patternId },
+      include: {
+        sections: {
+          include: {
+            subsection_question_types: {
+              include: {
+                question_type: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!pattern) {
+      throw new NotFoundException(`Pattern not found with ID: ${patternId}`);
+    }
+
+    // Get all question types from the pattern's sections
+    const questionTypeIds = [...new Set(
+      pattern.sections.flatMap(section => 
+        section.subsection_question_types.map(sqt => sqt.question_type_id)
+      )
+    )];
+
+    // Validate mediums if provided
+    if (mediumIds && mediumIds.length > 0) {
+      const mediums = await this.prisma.instruction_Medium.findMany({
+        where: { id: { in: mediumIds } },
+      });
+
+      if (mediums.length !== mediumIds.length) {
+        const foundIds = mediums.map(medium => medium.id);
+        const missingIds = mediumIds.filter(id => !foundIds.includes(id));
+        throw new NotFoundException(`Instruction mediums not found with IDs: ${missingIds.join(', ')}`);
+      }
+    }
+
+    // Get all topics for the chapters
+    const topics = await this.prisma.topic.findMany({
+      where: {
+        chapter_id: { in: chapterIds }
+      }
+    });
+
+    const topicIds = topics.map(topic => topic.id);
+
+    // Get questions for these topics and question types
+    const questions = await this.prisma.question.findMany({
+      where: {
+        question_type_id: { in: questionTypeIds },
+        question_topics: {
+          some: {
+            topic_id: { in: topicIds }
+          }
+        }
+      },
+      include: {
+        question_type: true,
+        question_topics: {
+          include: {
+            topic: true,
+            question_text_topics: {
+              where: mediumIds?.length > 0 ? {
+                instruction_medium_id: { in: mediumIds }
+              } : undefined
+            }
+          }
+        }
+      }
+    });
+
+    // Process the results
+    const questionTypes = [...new Set(
+      pattern.sections.flatMap(section => 
+        section.subsection_question_types.map(sqt => ({
+          type: sqt.question_type_id,
+          name: sqt.question_type.type_name
+        }))
+      )
+    )];
+
+    // Restructure the data to be grouped by question type
+    const questionTypeResults = questionTypes.map(qt => {
+      const chaptersWithType = chapters.map(chapter => {
+        const chapterTopicIds = topics
+          .filter(topic => topic.chapter_id === chapter.id)
+          .map(topic => topic.id);
+
+        const count = questions.filter(q => 
+          q.question_type_id === qt.type &&
+          q.question_topics.some(qt => chapterTopicIds.includes(qt.topic_id)) &&
+          (!mediumIds?.length || q.question_topics.some(qt => 
+            qt.question_text_topics.length === mediumIds.length
+          ))
+        ).length;
+
+        return {
+          id: chapter.id,
+          name: chapter.name,
+          count
+        };
+      }).filter(chapter => chapter.count > 0); // Only include chapters that have questions of this type
+
+      return {
+        type: qt.type,
+        name: qt.name,
+        chapters: chaptersWithType
+      };
+    });
+
+    // Calculate total by summing up all chapter counts
+    const total = questionTypeResults.reduce((sum, qt) => 
+      sum + qt.chapters.reduce((chapterSum, chapter) => chapterSum + chapter.count, 0)
+    , 0);
+
+    return {
+      success: true,
+      data: {
+        questionTypes: questionTypeResults,
+        total // This will now be the sum of all chapter counts
+      }
+    };
   }
 } 

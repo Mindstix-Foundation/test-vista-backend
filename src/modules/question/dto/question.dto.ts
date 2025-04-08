@@ -620,4 +620,40 @@ export class AddTranslationDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateMatchPairDto)
   match_pairs?: UpdateMatchPairDto[];
+}
+
+export class QuestionCountFilterDto {
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by chapter ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'chapter_id must be an integer' })
+  chapter_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by instruction medium ID'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'instruction_medium_id must be an integer' })
+  instruction_medium_id?: number;
+  
+  @ApiProperty({
+    required: false,
+    example: true,
+    description: 'Filter by verification status'
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'is_verified must be a boolean' })
+  is_verified?: boolean;
 } 

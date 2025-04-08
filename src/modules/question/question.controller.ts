@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Patch, DefaultValuePipe, Logger } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, QuestionSortField, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, QuestionSortField, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto, QuestionCountFilterDto } from './dto/question.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -219,32 +219,14 @@ export class QuestionController {
   @Get('count')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
-    summary: 'Count questions with optional filters',
-    description: 'Returns the total count of questions matching the specified filters, without retrieving the full question data'
-  })
-  @ApiQuery({ 
-    name: 'question_type_id', 
-    required: false, 
-    type: Number,
-    description: 'Filter questions by specific question type ID (e.g., MCQ, Match Pairs, etc.)' 
-  })
-  @ApiQuery({ 
-    name: 'topic_id', 
-    required: false, 
-    type: Number,
-    description: 'Filter questions by specific topic ID' 
+    summary: 'Count questions with essential filters',
+    description: 'Returns the total count of questions matching the specified filters (chapter_id, instruction_medium_id, is_verified), without retrieving the full question data'
   })
   @ApiQuery({ 
     name: 'chapter_id', 
     required: false, 
     type: Number,
     description: 'Filter questions by chapter ID' 
-  })
-  @ApiQuery({ 
-    name: 'board_question', 
-    required: false, 
-    type: Boolean,
-    description: 'Filter questions by board question status (true/false)' 
   })
   @ApiQuery({ 
     name: 'instruction_medium_id', 
@@ -257,18 +239,6 @@ export class QuestionController {
     required: false, 
     type: Boolean, 
     description: 'Filter by verification status of questions (true/false)' 
-  })
-  @ApiQuery({ 
-    name: 'translation_status', 
-    required: false, 
-    type: String,
-    description: 'Filter questions by translation status (e.g., "original", "translated")' 
-  })
-  @ApiQuery({ 
-    name: 'search', 
-    required: false, 
-    type: String,
-    description: 'Search term to filter questions by text content (case-insensitive)' 
   })
   @ApiResponse({ 
     status: 200, 
@@ -285,20 +255,15 @@ export class QuestionController {
           type: 'object',
           description: 'The filters that were applied to the count',
           properties: {
-            question_type_id: { type: 'number', nullable: true },
-            topic_id: { type: 'number', nullable: true },
             chapter_id: { type: 'number', nullable: true },
-            board_question: { type: 'boolean', nullable: true },
             instruction_medium_id: { type: 'number', nullable: true },
-            is_verified: { type: 'boolean', nullable: true },
-            translation_status: { type: 'string', nullable: true },
-            search: { type: 'string', nullable: true }
+            is_verified: { type: 'boolean', nullable: true }
           }
         }
       }
     }
   })
-  async countQuestions(@Query() filters: QuestionFilterDto) {
+  async countQuestions(@Query() filters: QuestionCountFilterDto) {
     this.logger.log(`countQuestions called with filters: ${JSON.stringify(filters)}`);
     
     return await this.questionService.countQuestions(filters);

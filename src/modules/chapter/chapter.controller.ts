@@ -11,12 +11,14 @@ import {
   HttpCode,
   Query,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { ChapterService } from './chapter.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
 import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { ReorderChapterDto } from './dto/reorder-chapter.dto';
+import { CheckQuestionTypeDto } from './dto/check-question-type.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -39,6 +41,87 @@ export class ChapterController {
   @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })
   async create(@Body() createChapterDto: CreateChapterDto) {
     return await this.chapterService.create(createChapterDto);
+  }
+
+  @Get('checkQuestionType')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Check question types availability in chapters',
+    description: 'Checks for available question types in the provided chapter IDs and returns counts for each chapter. When multiple instruction mediums are provided, only questions that exist in ALL of the specified mediums are counted (common questions).'
+  })
+  @ApiQuery({ 
+    name: 'chapterIds', 
+    required: true, 
+    type: String, 
+    description: 'Comma-separated array of chapter IDs',
+    example: '1,2,3'
+  })
+  @ApiQuery({ 
+    name: 'patternId', 
+    required: true, 
+    type: Number, 
+    description: 'Pattern ID to get question types from',
+    example: 1
+  })
+  @ApiQuery({ 
+    name: 'mediumIds', 
+    required: true, 
+    type: String, 
+    description: 'Comma-separated array of medium IDs. If multiple mediums are provided, only questions available in ALL specified mediums will be counted.',
+    example: '1,2,3'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns question types and their availability in chapters',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            questionTypes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'number' },
+                  name: { type: 'string' }
+                }
+              }
+            },
+            chapters: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'number' },
+                  name: { type: 'string' },
+                  questionTypeAvailability: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: { type: 'number' },
+                        count: { type: 'number' }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            total: { type: 'number' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 404, description: 'One or more chapters or pattern not found' })
+  async checkQuestionType(
+    @Query() checkQuestionTypeDto: CheckQuestionTypeDto,
+  ): Promise<any> {
+    return this.chapterService.checkQuestionType(checkQuestionTypeDto);
   }
 
   @Get()
