@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, ComplexCreateQuestionDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, ComplexCreateQuestionDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto, QuestionCountFilterDto } from './dto/question.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import { Prisma } from '@prisma/client';
 import { AwsS3Service } from '../aws/aws-s3.service';
@@ -3291,46 +3291,21 @@ export class QuestionService {
     }
   }
 
-  async countQuestions(filters: QuestionFilterDto) {
+  async countQuestions(filters: QuestionCountFilterDto) {
     try {
       const {
-        question_type_id,
-        topic_id,
         chapter_id,
-        board_question,
         instruction_medium_id,
-        is_verified,
-        translation_status,
-        search
+        is_verified
       } = filters;
 
       // Build the where conditions
       const whereConditions: any = {};
 
-      // Basic filters
-      if (question_type_id !== undefined) {
-        whereConditions.question_type_id = question_type_id;
-      }
-
-      if (board_question !== undefined) {
-        whereConditions.board_question = board_question;
-      }
-
-      // Handle topic filter
-      if (topic_id !== undefined) {
-        whereConditions.question_topics = {
-          some: {
-            topic_id
-          }
-        };
-      }
-
       // Add chapter filter if specified
       if (chapter_id !== undefined) {
         whereConditions.question_topics = {
-          ...(whereConditions.question_topics || {}),
           some: {
-            ...(whereConditions.question_topics?.some || {}),
             topic: {
               chapter_id
             }
@@ -3338,60 +3313,45 @@ export class QuestionService {
         };
       }
 
-      // Add medium filter if specified
-      if (instruction_medium_id !== undefined) {
-        whereConditions.question_texts = {
-          ...(whereConditions.question_texts || {}),
-          some: {
-            question_text_topics: {
-              some: {
-                instruction_medium_id
-              }
-            }
+      // Handle medium and verification filters together
+      if (instruction_medium_id !== undefined || is_verified !== undefined) {
+        const topicCondition = {
+          question_text_topics: {
+            some: {} as Record<string, any>
           }
         };
+        
+        // Add medium filter if specified
+        if (instruction_medium_id !== undefined) {
+          topicCondition.question_text_topics.some.instruction_medium_id = instruction_medium_id;
+        }
+        
+        // Add verification status filter if specified
+        if (is_verified !== undefined) {
+          topicCondition.question_text_topics.some.is_verified = is_verified;
+        }
+        
+        // Add to existing question_texts condition or create a new one
+        if (whereConditions.question_texts) {
+          // If we already have a question_texts condition, we need to combine them
+          whereConditions.question_texts = {
+            some: {
+              AND: [
+                whereConditions.question_texts.some,
+                topicCondition
+              ]
+            }
+          };
+        } else {
+          // Create new question_texts condition
+          whereConditions.question_texts = {
+            some: topicCondition
+          };
+        }
       }
 
-      // Add verification status filter if specified
-      if (is_verified !== undefined) {
-        whereConditions.question_texts = {
-          ...(whereConditions.question_texts || {}),
-          some: {
-            question_text_topics: {
-              some: {
-                is_verified
-              }
-            }
-          }
-        };
-      }
-
-      // Add translation status filter if specified
-      if (translation_status !== undefined) {
-        whereConditions.question_texts = {
-          ...(whereConditions.question_texts || {}),
-          some: {
-            question_text_topics: {
-              some: {
-                translation_status
-              }
-            }
-          }
-        };
-      }
-
-      // Search filter
-      if (search) {
-        whereConditions.question_texts = {
-          ...(whereConditions.question_texts || {}),
-          some: {
-            question_text: {
-              contains: search,
-              mode: 'insensitive' as const
-            }
-          }
-        };
-      }
+      // Log the constructed where conditions for debugging
+      this.logger.log(`Constructed where conditions for count: ${JSON.stringify(whereConditions)}`);
 
       // Count total questions matching the criteria
       const count = await this.prisma.question.count({
@@ -3403,14 +3363,9 @@ export class QuestionService {
       return {
         count,
         filters: {
-          question_type_id,
-          topic_id,
           chapter_id,
-          board_question,
           instruction_medium_id,
-          is_verified,
-          translation_status,
-          search
+          is_verified
         }
       };
     } catch (error) {

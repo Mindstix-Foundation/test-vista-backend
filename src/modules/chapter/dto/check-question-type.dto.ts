@@ -30,7 +30,7 @@ export class CheckQuestionTypeDto {
   chapterIds: number[];
 
   @ApiProperty({ 
-    description: 'Question type ID', 
+    description: 'Pattern ID to get question types from', 
     required: true,
     type: Number,
     example: 1
@@ -40,8 +40,8 @@ export class CheckQuestionTypeDto {
     const parsed = typeof value === 'string' ? parseInt(value.trim(), 10) : value;
     return isNaN(parsed) ? 0 : parsed;
   })
-  @IsNumber({}, { message: 'questionTypeId must be a number' })
-  questionTypeId: number;
+  @IsNumber({}, { message: 'patternId must be a number' })
+  patternId: number;
 
   @ApiProperty({ 
     description: 'Array of medium IDs. If multiple mediums are provided, only questions available in ALL specified mediums will be counted.', 

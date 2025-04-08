@@ -46,44 +46,82 @@ export class ChapterController {
   @Get('checkQuestionType')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
-    summary: 'Check available question type for specific chapters',
-    description: 'Checks for an available question type in the provided chapter IDs and returns counts for each chapter. When multiple instruction mediums are provided, only questions that exist in ALL of the specified mediums are counted (common questions).'
+    summary: 'Check question types availability in chapters',
+    description: 'Checks for available question types in the provided chapter IDs and returns counts for each chapter. When multiple instruction mediums are provided, only questions that exist in ALL of the specified mediums are counted (common questions).'
   })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Returns counts of available question type for each chapter' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'One or more chapters or question type not found' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input' 
-  })
-  @ApiQuery({
-    name: 'chapterIds',
-    required: true,
-    type: String,
+  @ApiQuery({ 
+    name: 'chapterIds', 
+    required: true, 
+    type: String, 
     description: 'Comma-separated array of chapter IDs',
     example: '1,2,3'
   })
-  @ApiQuery({
-    name: 'questionTypeId',
-    required: true,
-    type: Number,
-    description: 'Question type ID',
-    example: '1'
+  @ApiQuery({ 
+    name: 'patternId', 
+    required: true, 
+    type: Number, 
+    description: 'Pattern ID to get question types from',
+    example: 1
   })
-  @ApiQuery({
-    name: 'mediumIds',
-    required: true,
-    type: String,
+  @ApiQuery({ 
+    name: 'mediumIds', 
+    required: true, 
+    type: String, 
     description: 'Comma-separated array of medium IDs. If multiple mediums are provided, only questions available in ALL specified mediums will be counted.',
     example: '1,2,3'
   })
-  async checkQuestionType(@Query() checkQuestionTypeDto: CheckQuestionTypeDto) {
-    return await this.chapterService.checkQuestionType(checkQuestionTypeDto);
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns question types and their availability in chapters',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        data: {
+          type: 'object',
+          properties: {
+            questionTypes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'number' },
+                  name: { type: 'string' }
+                }
+              }
+            },
+            chapters: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'number' },
+                  name: { type: 'string' },
+                  questionTypeAvailability: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: { type: 'number' },
+                        count: { type: 'number' }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            total: { type: 'number' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 404, description: 'One or more chapters or pattern not found' })
+  async checkQuestionType(
+    @Query() checkQuestionTypeDto: CheckQuestionTypeDto,
+  ): Promise<any> {
+    return this.chapterService.checkQuestionType(checkQuestionTypeDto);
   }
 
   @Get()
