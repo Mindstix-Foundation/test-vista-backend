@@ -36,6 +36,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { AwsModule } from './modules/aws/aws.module';
 import { QuestionTextTopicMediumModule } from './modules/question_text_topic_medium/question-text-topic-medium.module';
 import { PatternFilterModule } from './modules/pattern-filter/pattern-filter.module';
+import { CreateTestPaperModule } from './modules/create_test_paper/create-test-paper.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { PatternFilterModule } from './modules/pattern-filter/pattern-filter.mod
     McqOptionModule,
     QuestionTextTopicMediumModule,
     PatternFilterModule,
+    CreateTestPaperModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB

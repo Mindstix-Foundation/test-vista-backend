@@ -450,7 +450,15 @@ export class ChapterService {
         question_type_id: { in: questionTypeIds },
         question_topics: {
           some: {
-            topic_id: { in: topicIds }
+            topic_id: { in: topicIds },
+            question_text_topics: {
+              some: {
+                is_verified: true,
+                ...(mediumIds?.length > 0 ? {
+                  instruction_medium_id: { in: mediumIds }
+                } : {})
+              }
+            }
           }
         }
       },
