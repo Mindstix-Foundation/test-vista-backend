@@ -1,9 +1,14 @@
-import { Controller, Get, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body, BadRequestException, UseInterceptors, ClassSerializerInterceptor, SerializeOptions } from '@nestjs/common';
 import { ChapterMarksDistributionService } from './chapter-marks-distribution.service';
-import { ChapterMarksRequestDto, ChapterMarksDistributionResponseDto } from './dto/chapter-marks-distribution.dto';
-import { ApiQuery, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { 
+  ChapterMarksRequestDto, 
+  ChapterMarksDistributionResponseDto,
+  FinalQuestionsDistributionBodyDto
+} from './dto/chapter-marks-distribution.dto';
+import { ApiQuery, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
 @Controller('chapter-marks-distribution')
+@UseInterceptors(ClassSerializerInterceptor)
 export class ChapterMarksDistributionController {
   constructor(private readonly chapterMarksDistributionService: ChapterMarksDistributionService) {}
 
@@ -55,5 +60,22 @@ export class ChapterMarksDistributionController {
     };
     
     return this.chapterMarksDistributionService.distributeChapterMarks(filter);
+  }
+
+  @Post('final-questions-distribution')
+  @SerializeOptions({
+    strategy: 'exposeAll'
+  })
+  @ApiOperation({ summary: 'Process final questions distribution for test paper' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns the processed final questions distribution with actual questions',
+    type: ChapterMarksDistributionResponseDto 
+  })
+  @ApiBody({ type: FinalQuestionsDistributionBodyDto })
+  async processFinalQuestionsDistribution(
+    @Body() requestBody: FinalQuestionsDistributionBodyDto
+  ): Promise<ChapterMarksDistributionResponseDto> {
+    return this.chapterMarksDistributionService.processFinalQuestionsDistribution(requestBody);
   }
 } 
