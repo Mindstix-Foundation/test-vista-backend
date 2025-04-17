@@ -37,6 +37,8 @@ import { AwsModule } from './modules/aws/aws.module';
 import { QuestionTextTopicMediumModule } from './modules/question_text_topic_medium/question-text-topic-medium.module';
 import { PatternFilterModule } from './modules/pattern-filter/pattern-filter.module';
 import { CreateTestPaperModule } from './modules/create_test_paper/create-test-paper.module';
+import { ChapterMarksDistributionModule } from './modules/chapter-marks-distribution/chapter-marks-distribution.module';
+import { ChapterMarksRangeModule } from './modules/chapter-marks-range/chapter-marks-range.module';
 
 @Module({
   imports: [
@@ -76,6 +78,8 @@ import { CreateTestPaperModule } from './modules/create_test_paper/create-test-p
     QuestionTextTopicMediumModule,
     PatternFilterModule,
     CreateTestPaperModule,
+    ChapterMarksDistributionModule,
+    ChapterMarksRangeModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB
