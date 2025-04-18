@@ -653,17 +653,27 @@ export class ChapterMarksDistributionService {
     const sectionAllocations: SectionAllocationDto[] = pattern.sections.map(section => {
       const sectionAlloc = this.ensureSectionProperties({
         sectionId: section.id,
+        pattern_id: section.pattern_id,
         sectionName: section.section_name,
         sequentialNumber: section.sequence_number,
+        section_number: section.section_number,
         subSection: section.sub_section,
         totalQuestions: section.total_questions,
+        mandotory_questions: section.mandotory_questions,
+        marks_per_question: section.marks_per_question,
         absoluteMarks: section.marks_per_question * section.total_questions,
-        totalMarks: section.marks_per_question * section.total_questions,
+        totalMarks: section.marks_per_question * section.mandotory_questions,
         subsectionAllocations: section.subsection_question_types.map(sqt => 
           this.ensureSubsectionProperties({
             subsectionQuestionTypeId: sqt.id,
+            section_id: sqt.section_id,
             questionTypeName: sqt.question_type.type_name,
             sequentialNumber: sqt.seqencial_subquestion_number,
+            question_type_id: sqt.question_type_id,
+            question_type: {
+              id: sqt.question_type.id,
+              type_name: sqt.question_type.type_name
+            },
             allocatedChapters: []
           })
         )
@@ -1171,7 +1181,7 @@ export class ChapterMarksDistributionService {
     return {
       patternId: pattern.id,
       patternName: pattern.pattern_name,
-      totalMarks,
+      totalMarks: pattern.total_marks,
       absoluteMarks: totalMarks,
       sectionAllocations: sectionAllocations.map(section => {
         // Apply the section helper
@@ -1228,106 +1238,79 @@ export class ChapterMarksDistributionService {
         return chapterMark;
       });
 
-      // Keep track of used questions to avoid repetition
-      const usedQuestionIds = new Map<number, Set<number>>(); // Map<QuestionTypeId, Set<QuestionId>>
-
       // Process each section and its allocations
       for (const section of requestBody.sectionAllocations) {
         this.logger.log(`Processing section ${section.sectionId}: ${section.sectionName}`);
         
+        // Find the section in the pattern to get additional details
+        const patternSection = pattern.sections.find(s => s.id === section.sectionId);
+        if (!patternSection) {
+          this.logger.warn(`Section ${section.sectionId} not found in pattern`);
+          continue;
+        }
+        
         const sectionAllocation = new SectionAllocationDto();
         sectionAllocation.sectionId = section.sectionId;
+        sectionAllocation.pattern_id = patternSection.pattern_id;
         sectionAllocation.sectionName = section.sectionName;
         sectionAllocation.sequentialNumber = section.sequentialNumber;
+        sectionAllocation.section_number = patternSection.section_number;
         sectionAllocation.subSection = section.subSection;
         sectionAllocation.totalQuestions = section.totalQuestions;
+        sectionAllocation.mandotory_questions = patternSection.mandotory_questions;
+        sectionAllocation.marks_per_question = patternSection.marks_per_question;
         sectionAllocation.absoluteMarks = section.absoluteMarks;
-        sectionAllocation.totalMarks = section.totalMarks;
+        sectionAllocation.totalMarks = patternSection.marks_per_question * patternSection.mandotory_questions;
         sectionAllocation.subsectionAllocations = [];
 
         // Process each subsection and its allocations
         for (const subsection of section.subsectionAllocations) {
           this.logger.log(`Processing subsection ${subsection.subsectionQuestionTypeId}: ${subsection.questionTypeName}`);
           
-          // First try to get the question type ID from the pattern
-          let questionTypeId = this.findQuestionTypeIdFromPattern(pattern, section.sectionId, subsection.subsectionQuestionTypeId);
+          // Find the subsection in the pattern to get additional details
+          const patternSubsection = patternSection.subsection_question_types.find(
+            s => s.id === subsection.subsectionQuestionTypeId
+          );
           
-          // If not found in pattern, try to get from database directly by name
-          if (!questionTypeId) {
-            this.logger.log(`Question type ID not found in pattern. Trying to look up by name: ${subsection.questionTypeName}`);
-            
-            try {
-              const questionType = await this.prisma.question_Type.findFirst({
-                where: {
-                  type_name: subsection.questionTypeName
-                }
-              });
-              
-              if (questionType) {
-                questionTypeId = questionType.id;
-                this.logger.log(`Found question type ID ${questionTypeId} by name: ${subsection.questionTypeName}`);
-              }
-            } catch (err) {
-              this.logger.error(`Error looking up question type by name: ${err.message}`);
-            }
-          }
-          
-          if (!questionTypeId) {
-            this.logger.warn(`Could not find question type ID for section ${section.sectionId}, subsection ${subsection.subsectionQuestionTypeId}, name: ${subsection.questionTypeName}`);
-            // Still keep the structure even without questions
-            const subsectionAlloc = new SubsectionAllocationDto();
-            subsectionAlloc.subsectionQuestionTypeId = subsection.subsectionQuestionTypeId;
-            subsectionAlloc.questionTypeName = subsection.questionTypeName;
-            subsectionAlloc.sequentialNumber = subsection.sequentialNumber;
-            subsectionAlloc.allocatedChapters = subsection.allocatedChapters.map(chapter => {
-              const chapterAlloc = new AllocatedChapterDto();
-              chapterAlloc.chapterId = chapter.chapterId;
-              chapterAlloc.chapterName = chapter.chapterName;
-              return chapterAlloc;
-            });
-            sectionAllocation.subsectionAllocations.push(subsectionAlloc);
+          if (!patternSubsection) {
+            this.logger.warn(`Subsection ${subsection.subsectionQuestionTypeId} not found in pattern section ${section.sectionId}`);
             continue;
-          }
-
-          // Initialize tracking for this question type if not exists
-          if (!usedQuestionIds.has(questionTypeId)) {
-            usedQuestionIds.set(questionTypeId, new Set<number>());
           }
 
           const subsectionAllocation = new SubsectionAllocationDto();
           subsectionAllocation.subsectionQuestionTypeId = subsection.subsectionQuestionTypeId;
+          subsectionAllocation.section_id = patternSection.id;
           subsectionAllocation.questionTypeName = subsection.questionTypeName;
           subsectionAllocation.sequentialNumber = subsection.sequentialNumber;
+          subsectionAllocation.question_type_id = patternSubsection.question_type_id;
+          subsectionAllocation.question_type = {
+            id: patternSubsection.question_type.id,
+            type_name: patternSubsection.question_type.type_name
+          };
           subsectionAllocation.allocatedChapters = [];
 
           // Process each allocated chapter
           for (const allocatedChapter of subsection.allocatedChapters) {
-            this.logger.log(`Finding question for chapter ${allocatedChapter.chapterId}: ${allocatedChapter.chapterName}`);
-            
-            // Fetch a random question for this chapter and question type
-            const question = await this.getRandomQuestion(
-              allocatedChapter.chapterId,
-              questionTypeId,
-              usedQuestionIds.get(questionTypeId),
-              mediumIds
-            );
-
             const chapterAllocation = new AllocatedChapterDto();
             chapterAllocation.chapterId = allocatedChapter.chapterId;
             chapterAllocation.chapterName = allocatedChapter.chapterName;
-
-            if (question) {
-              // Track this question as used
-              usedQuestionIds.get(questionTypeId).add(question.id);
-              this.logger.log(`Allocated question ID ${question.id} to chapter ${allocatedChapter.chapterId}`);
-
-              // Set the question directly on the allocatedChapter
-              chapterAllocation.question = question;
+            
+            // Get question if available
+            if (allocatedChapter.question) {
+              chapterAllocation.question = allocatedChapter.question;
             } else {
-              // If no question found, still include the chapter but without question data
-              this.logger.warn(`No available question found for chapter ${allocatedChapter.chapterId}, question type ${questionTypeId}`);
+              // Get a random question for this chapter and question type if not provided
+              const question = await this.getRandomQuestion(
+                allocatedChapter.chapterId,
+                patternSubsection.question_type_id,
+                new Set(), // Used question IDs - empty since we're getting fresh questions
+                mediumIds
+              );
+              if (question) {
+                chapterAllocation.question = question;
+              }
             }
-
+            
             subsectionAllocation.allocatedChapters.push(chapterAllocation);
           }
 
@@ -1690,20 +1673,41 @@ export class ChapterMarksDistributionService {
   }
 
   // Helper method to ensure a SubsectionAllocationDto has all required properties
-  private ensureSubsectionProperties(subsection: any): any {
+  private ensureSubsectionProperties(subsection: any): SubsectionAllocationDto {
     if (!subsection.sequentialNumber && subsection.sequentialNumber !== 0) {
       subsection.sequentialNumber = 0; // Default value
+    }
+    if (!subsection.section_id) {
+      subsection.section_id = 0;
+    }
+    if (!subsection.question_type_id) {
+      subsection.question_type_id = 0;
+    }
+    if (!subsection.question_type) {
+      subsection.question_type = { id: 0, type_name: '' };
     }
     return subsection;
   }
 
   // Helper method to ensure a SectionAllocationDto has all required properties
-  private ensureSectionProperties(section: any): any {
+  private ensureSectionProperties(section: any): SectionAllocationDto {
     if (!section.sequentialNumber && section.sequentialNumber !== 0) {
       section.sequentialNumber = 0; // Default value
     }
     if (!section.subSection) {
       section.subSection = ''; // Default value
+    }
+    if (!section.pattern_id) {
+      section.pattern_id = 0;
+    }
+    if (!section.section_number) {
+      section.section_number = 0;
+    }
+    if (!section.mandotory_questions) {
+      section.mandotory_questions = 0;
+    }
+    if (!section.marks_per_question) {
+      section.marks_per_question = 0;
     }
     return section;
   }

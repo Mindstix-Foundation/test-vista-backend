@@ -132,6 +132,21 @@ export class CreateTestPaperService {
       throw new NotFoundException('Pattern not found');
     }
 
+    // Fetch chapter names first
+    const chapters = await this.prisma.chapter.findMany({
+      where: {
+        id: {
+          in: filter.chapterIds
+        }
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    const chapterNameMap = new Map(chapters.map(ch => [ch.id, ch.name]));
+
     console.log('Found pattern:', {
       id: pattern.id,
       name: pattern.pattern_name,
@@ -214,7 +229,7 @@ export class CreateTestPaperService {
                 console.log(`✓ Allocated Chapter ID: ${currentChapterId} for ${sqt.question_type.type_name}`);
                 allocatedChapters.push({
                   chapterId: currentChapterId,
-                  chapterName: `Chapter ${currentChapterId}`
+                  chapterName: chapterNameMap.get(currentChapterId) || `Chapter ${currentChapterId}`
                 });
 
                 const currentMarks = chapterMarksMap.get(currentChapterId) || 0;
@@ -274,7 +289,7 @@ export class CreateTestPaperService {
     // 6. Format chapter marks
     const chapterMarks: ChapterMarksDto[] = Array.from(chapterMarksMap.entries()).map(([chapterId, absoluteMarks]) => ({
       chapterId,
-      chapterName: `Chapter ${chapterId}`,
+      chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
       absoluteMarks
     }));
 

@@ -40,17 +40,35 @@ export class AllocatedChapterDto {
 }
 
 export class SubsectionAllocationDto {
-  @ApiProperty({ description: 'Subsection question type ID', example: 1 })
+  @ApiProperty({ description: 'Subsection question type ID', example: 16 })
   @Expose()
   subsectionQuestionTypeId: number;
 
-  @ApiProperty({ description: 'Question type name', example: 'MCQ' })
+  @ApiProperty({ description: 'Section ID', example: 8 })
+  @Expose()
+  section_id: number;
+
+  @ApiProperty({ description: 'Question type name', example: 'Fill in the Blanks' })
   @Expose()
   questionTypeName: string;
 
   @ApiProperty({ description: 'Sequential number of the subsection', example: 1 })
   @Expose()
   sequentialNumber: number;
+
+  @ApiProperty({ description: 'Question type ID', example: 6 })
+  @Expose()
+  question_type_id: number;
+
+  @ApiProperty({
+    description: 'Question type details',
+    example: { id: 6, type_name: 'Fill in the Blanks' }
+  })
+  @Expose()
+  question_type: {
+    id: number;
+    type_name: string;
+  };
 
   @ApiProperty({ description: 'Allocated chapters', type: [AllocatedChapterDto] })
   @Expose()
@@ -59,11 +77,15 @@ export class SubsectionAllocationDto {
 }
 
 export class SectionAllocationDto {
-  @ApiProperty({ description: 'Section ID', example: 1 })
+  @ApiProperty({ description: 'Section ID', example: 8 })
   @Expose()
   sectionId: number;
 
-  @ApiProperty({ description: 'Section name', example: 'Section A' })
+  @ApiProperty({ description: 'Pattern ID', example: 6 })
+  @Expose()
+  pattern_id: number;
+
+  @ApiProperty({ description: 'Section name', example: 'Fill in the blanks' })
   @Expose()
   sectionName: string;
 
@@ -71,19 +93,31 @@ export class SectionAllocationDto {
   @Expose()
   sequentialNumber: number;
 
+  @ApiProperty({ description: 'Section number', example: 1 })
+  @Expose()
+  section_number: number;
+
   @ApiProperty({ description: 'Sub section identifier', example: 'A' })
   @Expose()
   subSection: string;
 
-  @ApiProperty({ description: 'Total questions in section', example: 5 })
+  @ApiProperty({ description: 'Total questions in section', example: 7 })
   @Expose()
   totalQuestions: number;
 
-  @ApiProperty({ description: 'Absolute marks for section', example: 10 })
+  @ApiProperty({ description: 'Mandatory questions count', example: 5 })
+  @Expose()
+  mandotory_questions: number;
+
+  @ApiProperty({ description: 'Marks per question', example: 1 })
+  @Expose()
+  marks_per_question: number;
+
+  @ApiProperty({ description: 'Absolute marks for section', example: 7 })
   @Expose()
   absoluteMarks: number;
 
-  @ApiProperty({ description: 'Total marks for section', example: 10 })
+  @ApiProperty({ description: 'Total marks for section', example: 7 })
   @Expose()
   totalMarks: number;
 
@@ -105,6 +139,58 @@ export class ChapterMarksDto {
   @ApiProperty({ description: 'Absolute marks allocated to chapter', example: 10 })
   @Expose()
   absoluteMarks: number;
+}
+
+export class SectionDto {
+  @ApiProperty()
+  id: number;
+
+  @ApiProperty()
+  pattern_id: number;
+
+  @ApiProperty()
+  sequence_number: number;
+
+  @ApiProperty()
+  section_number: number;
+
+  @ApiProperty()
+  sub_section: string;
+
+  @ApiProperty()
+  section_name: string;
+
+  @ApiProperty()
+  total_questions: number;
+
+  @ApiProperty()
+  mandotory_questions: number;
+
+  @ApiProperty()
+  marks_per_question: number;
+
+  @ApiProperty({ type: 'array', isArray: true })
+  subsection_question_types: SubsectionQuestionTypeDto[];
+}
+
+export class SubsectionQuestionTypeDto {
+  @ApiProperty()
+  id: number;
+
+  @ApiProperty()
+  section_id: number;
+
+  @ApiProperty()
+  seqencial_subquestion_number: number;
+
+  @ApiProperty()
+  question_type_id: number;
+
+  @ApiProperty()
+  question_type: {
+    id: number;
+    type_name: string;
+  };
 }
 
 export class ChapterMarksDistributionResponseDto {
@@ -159,6 +245,11 @@ export class FinalQuestionsSubsectionDto {
   @Expose()
   subsectionQuestionTypeId: number;
 
+  @ApiProperty({ description: 'Section ID', example: 8 })
+  @IsNumber()
+  @Expose()
+  section_id: number;
+
   @ApiProperty({ description: 'Question type name', example: 'Fill in the Blanks' })
   @Expose()
   questionTypeName: string;
@@ -167,6 +258,21 @@ export class FinalQuestionsSubsectionDto {
   @IsNumber()
   @Expose()
   sequentialNumber: number;
+
+  @ApiProperty({ description: 'Question type ID', example: 6 })
+  @IsNumber()
+  @Expose()
+  question_type_id: number;
+
+  @ApiProperty({ 
+    description: 'Question type details',
+    example: { id: 6, type_name: 'Fill in the Blanks' }
+  })
+  @Expose()
+  question_type: {
+    id: number;
+    type_name: string;
+  };
 
   @ApiProperty({ description: 'Allocated chapters', type: [FinalQuestionsChapterDto] })
   @IsArray()
@@ -181,6 +287,11 @@ export class FinalQuestionsSectionDto {
   @Expose()
   sectionId: number;
 
+  @ApiProperty({ description: 'Pattern ID', example: 6 })
+  @IsNumber()
+  @Expose()
+  pattern_id: number;
+
   @ApiProperty({ description: 'Section name', example: 'Fill in the blanks' })
   @Expose()
   sectionName: string;
@@ -189,6 +300,11 @@ export class FinalQuestionsSectionDto {
   @IsNumber()
   @Expose()
   sequentialNumber: number;
+
+  @ApiProperty({ description: 'Section number', example: 1 })
+  @IsNumber()
+  @Expose()
+  section_number: number;
 
   @ApiProperty({ description: 'Sub section identifier', example: 'A' })
   @IsString()
@@ -199,6 +315,16 @@ export class FinalQuestionsSectionDto {
   @IsNumber()
   @Expose()
   totalQuestions: number;
+
+  @ApiProperty({ description: 'Mandatory questions count', example: 5 })
+  @IsNumber()
+  @Expose()
+  mandotory_questions: number;
+
+  @ApiProperty({ description: 'Marks per question', example: 1 })
+  @IsNumber()
+  @Expose()
+  marks_per_question: number;
 
   @ApiProperty({ description: 'Absolute marks for section', example: 7 })
   @IsNumber()
