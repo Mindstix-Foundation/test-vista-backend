@@ -268,15 +268,28 @@ export class CreateTestPaperService {
 
         subsectionAllocations.push({
           subsectionQuestionTypeId: sqt.id,
+          section_id: section.id,
           questionTypeName: sqt.question_type.type_name,
+          sequentialNumber: sqt.seqencial_subquestion_number,
+          question_type_id: sqt.question_type_id,
+          question_type: {
+            id: sqt.question_type.id,
+            type_name: sqt.question_type.type_name
+          },
           allocatedChapters
         });
       }
 
       sectionAllocations.push({
         sectionId: section.id,
+        pattern_id: section.pattern_id,
         sectionName: section.section_name,
+        sequentialNumber: section.sequence_number,
+        section_number: section.section_number,
+        subSection: section.sub_section,
         totalQuestions: section.total_questions,
+        mandotory_questions: section.mandotory_questions,
+        marks_per_question: section.marks_per_question,
         absoluteMarks: sectionAbsoluteMarks,
         totalMarks: sectionTotalMarks,
         subsectionAllocations
@@ -690,25 +703,53 @@ export class CreateTestPaperService {
       targetMarks
     );
 
+    // Get chapter names
+    const chapters = await this.prisma.chapter.findMany({
+      where: {
+        id: {
+          in: filter.chapterIds
+        }
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    const chapterNameMap = new Map(chapters.map(ch => [ch.id, ch.name]));
+
     // 5. Format response
     const sectionAllocations: SectionAllocationDto[] = pattern.sections.map(section => {
       const sectionAllocation = allocationMap.get(section.id);
       const subsectionAllocations: SubsectionAllocationDto[] = section.subsection_question_types.map(sqt => ({
         subsectionQuestionTypeId: sqt.id,
+        section_id: section.id,
         questionTypeName: sqt.question_type.type_name,
+        sequentialNumber: sqt.seqencial_subquestion_number,
+        question_type_id: sqt.question_type_id,
+        question_type: {
+          id: sqt.question_type.id,
+          type_name: sqt.question_type.type_name
+        },
         allocatedChapters: Array.from(sectionAllocation.entries())
           .filter(([_, marks]) => marks.length > 0)
           .map(([chapterId, marks]) => ({
             chapterId,
-            chapterName: `Chapter ${chapterId}`, // You'll need to get actual chapter names
+            chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
             marks: marks.reduce((a, b) => a + b, 0)
           }))
       }));
 
       return {
         sectionId: section.id,
+        pattern_id: pattern.id,
         sectionName: section.section_name,
+        sequentialNumber: section.sequence_number,
+        section_number: section.section_number,
+        subSection: section.sub_section,
         totalQuestions: section.total_questions,
+        mandotory_questions: section.mandotory_questions,
+        marks_per_question: section.marks_per_question,
         absoluteMarks: section.total_questions * section.marks_per_question,
         totalMarks: section.mandotory_questions * section.marks_per_question,
         subsectionAllocations
@@ -723,7 +764,7 @@ export class CreateTestPaperService {
       
       return {
         chapterId,
-        chapterName: `Chapter ${chapterId}`, // You'll need to get actual chapter names
+        chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
         absoluteMarks: allocatedMarks
       };
     });
