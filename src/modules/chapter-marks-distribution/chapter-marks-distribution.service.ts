@@ -10,12 +10,47 @@ import {
   FinalQuestionsDistributionBodyDto
 } from './dto/chapter-marks-distribution.dto';
 import { Pattern } from '@prisma/client';
+import { AwsS3Service } from '../aws/aws-s3.service';
 
 @Injectable()
 export class ChapterMarksDistributionService {
   private readonly logger = new Logger(ChapterMarksDistributionService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly awsS3Service: AwsS3Service
+  ) {}
+
+  // Helper method to transform image data with presigned URLs
+  private async transformImageData(image) {
+    if (!image) return null;
+    
+    // Deep clone to avoid mutation
+    const imageData = { ...image };
+    
+    // Check for either url or image_url field
+    const imageUrl = imageData.url || imageData.image_url;
+    
+    // If no url found, return the image data as is
+    if (!imageUrl) {
+      this.logger.warn(`Image ${imageData.id} has no url or image_url`);
+      return imageData;
+    }
+    
+    try {
+      // Generate presigned URL with 1-hour expiration
+      const presignedUrl = await this.awsS3Service.generatePresignedUrl(imageUrl, 3600);
+      
+      // Add the presigned URL but keep the original data
+      return {
+        ...imageData,
+        presigned_url: presignedUrl
+      };
+    } catch (error) {
+      this.logger.error(`Failed to generate presigned URL for image ${imageData.id}:`, error);
+      return imageData;
+    }
+  }
 
   private generateRandomSequence<T>(items: T[]): T[] {
     const sequence = [...items];
@@ -113,7 +148,6 @@ export class ChapterMarksDistributionService {
       marksSet.add(section.marks_per_question);
     });
     const uniqueMarks = Array.from(marksSet).sort((a, b) => a - b);
-    this.logger.debug(`Unique marks per question: ${uniqueMarks.join(', ')}`);
     return uniqueMarks;
   }
 
@@ -141,7 +175,6 @@ export class ChapterMarksDistributionService {
     });
 
     const priorityList = chaptersWithInfo.map(chapter => chapter.chapterId);
-    this.logger.debug(`Chapter priority list: ${priorityList.join(' -> ')}`);
     return priorityList;
   }
 
@@ -214,7 +247,6 @@ export class ChapterMarksDistributionService {
     const chapterIndex = subsection.allocatedChapters.findIndex(c => c.chapterId === chapterId);
     
     if (chapterIndex !== -1) {
-      this.logger.debug(`Removing allocation of chapter ${chapterId} from section ${replacement.sectionId}, subsection ${replacement.subsectionId}`);
       subsection.allocatedChapters.splice(chapterIndex, 1);
       
       // Look for a section with the target mark that can accept more questions
@@ -246,7 +278,6 @@ export class ChapterMarksDistributionService {
         const currentCount = chapterQuestionTypes.get(selectedTypeId) || 0;
         
         if (currentCount <= 0) {
-          this.logger.debug(`Not enough questions available for type ${selectedTypeId} (count: ${currentCount})`);
           continue;
         }
         
@@ -287,9 +318,7 @@ export class ChapterMarksDistributionService {
         // Add code to update the question count
         const newCount = Math.max(0, currentCount - 3);
         chapterQuestionTypes.set(selectedTypeId, newCount);
-        this.logger.debug(`Updated question count for type ${selectedTypeId}: ${currentCount} -> ${newCount}`);
 
-        this.logger.debug(`Successfully replaced ${currentMark} mark question with ${targetMark} mark question`);
       return true;
     }
     }
@@ -419,12 +448,6 @@ export class ChapterMarksDistributionService {
     // Get question types usage for this chapter by their underlying question_type_id
     const chapterTypeUsage = this.getChapterQuestionTypeUsage(sectionAllocations, chapterId, pattern);
     
-    this.logger.debug(`Question type usage for chapter ${chapterId}: ${
-      Array.from(chapterTypeUsage.entries())
-        .map(([typeId, count]) => `type ${typeId}: ${count}`)
-        .join(', ')
-    }`);
-    
     // Check each question type in the section
     for (const sqt of section.subsection_question_types) {
       const questionTypeId = sqt.question_type_id;
@@ -450,14 +473,6 @@ export class ChapterMarksDistributionService {
         usedTypes.push({ subsectionId: sqt.id, typeId: questionTypeId, usageCount: typeUsage });
       }
     }
-    
-    // Log available types
-    this.logger.debug(`Available unused types: ${
-      unusedTypes.map(t => `subsection ${t.subsectionId} (type ${t.typeId})`).join(', ')
-    }`);
-    this.logger.debug(`Available used types: ${
-      usedTypes.map(t => `subsection ${t.subsectionId} (type ${t.typeId}, used ${t.usageCount})`).join(', ')
-    }`);
     
     // Sort used types by usage count (ascending)
     const sortedUsedTypes = usedTypes.sort((a, b) => a.usageCount - b.usageCount);
@@ -521,7 +536,6 @@ export class ChapterMarksDistributionService {
       // Skip if section is full
       const allocatedQuestions = this.getSectionAllocatedQuestions(sectionAllocations, section.id);
       if (allocatedQuestions >= section.total_questions) {
-        this.logger.debug(`Section ${section.id} (${section.section_name}) is full (${allocatedQuestions}/${section.total_questions})`);
         continue;
       }
       
@@ -532,7 +546,6 @@ export class ChapterMarksDistributionService {
         // Skip if no questions available for this type
         const availableCount = chapterQuestionTypes.get(questionTypeId) || 0;
         if (availableCount <= 0) {
-          this.logger.debug(`No available questions for type ${questionTypeId} (count: ${availableCount})`);
           continue;
         }
         
@@ -569,7 +582,6 @@ export class ChapterMarksDistributionService {
       // Randomly select from unused types
       const randomIndex = Math.floor(Math.random() * unusedTypes.length);
       const selected = unusedTypes[randomIndex];
-      this.logger.debug(`Selected unused question type ${selected.questionTypeId} in section ${selected.sectionId}`);
       return selected;
     }
     
@@ -580,16 +592,10 @@ export class ChapterMarksDistributionService {
     // Randomly select from least used types
     const randomIndex = Math.floor(Math.random() * leastUsedTypes.length);
     const selected = leastUsedTypes[randomIndex];
-    this.logger.debug(`Selected least used question type ${selected.questionTypeId} in section ${selected.sectionId} (used ${selected.usage} times)`);
     return selected;
   }
 
   async distributeChapterMarks(filter: ChapterMarksRequestDto): Promise<ChapterMarksDistributionResponseDto> {
-    this.logger.log('Starting chapter marks distribution');
-    this.logger.debug(`Pattern ID: ${filter.patternId}`);
-    this.logger.debug(`Chapter IDs: ${filter.chapterIds.join(', ')}`);
-    this.logger.debug(`Requested marks: ${filter.requestedMarks.join(', ')}`);
-
     // 1. Get pattern details with explicit include structure
     const pattern = await this.prisma.pattern.findUnique({
       where: { id: filter.patternId },
@@ -612,9 +618,6 @@ export class ChapterMarksDistributionService {
     if (!pattern) {
       throw new NotFoundException(`Pattern with ID ${filter.patternId} not found`);
     }
-
-    this.logger.debug(`Pattern found: ${pattern.pattern_name}`);
-    this.logger.debug(`Sections: ${pattern.sections.map(s => `${s.section_name} (${s.marks_per_question} marks)`).join(', ')}`);
 
     // 2. Calculate total marks
     const totalMarks = pattern.sections.reduce((sum, section) => 
@@ -645,8 +648,6 @@ export class ChapterMarksDistributionService {
     const chapterPriorityList = Array.from(chapterQuestionTypeMap.entries())
       .sort((a, b) => a[1].size - b[1].size)
       .map(([chapterId]) => chapterId);
-
-    this.logger.debug(`Chapter priority list: ${chapterPriorityList.join(' -> ')}`);
 
     // 6. Initialize tracking variables
     const chapterMarksMap = new Map<number, number>();
@@ -683,7 +684,6 @@ export class ChapterMarksDistributionService {
 
     // 7. Get unique marks per question
     const uniqueMarks = [...new Set(pattern.sections.map(s => s.marks_per_question))].sort((a, b) => a - b);
-    this.logger.debug(`Unique marks: ${uniqueMarks.join(', ')}`);
 
     // 8. Initialize question type usage tracking
     const usedQuestionTypes = new Map<number, Set<number>>();
@@ -706,31 +706,11 @@ export class ChapterMarksDistributionService {
       let remainingMarks = requestedMarks;
       const chapterQuestionTypes = chapterQuestionTypeMap.get(chapterId) || new Map();
 
-      this.logger.debug(`\nProcessing chapter ${chapterId} with requested marks: ${requestedMarks}`);
-      this.logger.debug(`Available question types: ${Array.from(chapterQuestionTypes.entries())
-        .map(([typeId, count]) => `type ${typeId}: ${count} questions`)
-        .join(', ')}`);
-
-      // Log section structure for better debugging
-      this.logger.debug('Section structure:');
-      for (const section of pattern.sections) {
-        const maxQuestionsPerSubsection = this.getMaxQuestionsPerSubsection(section, 0);
-        const multipleQuestionsAllowed = section.subsection_question_types.length === 1;
-        
-        this.logger.debug(`Section ${section.id} (${section.section_name}): ${section.total_questions} total questions, ${section.marks_per_question} marks each`);
-        this.logger.debug(`  Has ${section.subsection_question_types.length} question types, ${multipleQuestionsAllowed ? 'allows multiple questions per type' : 'only 1 question per type'}`);
-        for (const sqt of section.subsection_question_types) {
-          this.logger.debug(`  - Type ${sqt.question_type.id} (${sqt.question_type.type_name})`);
-        }
-      }
-
       // Randomly decide if we'll fill marks in ascending or descending order for this chapter
       const isAscendingMarkOrder = Math.random() < 0.5;
-      this.logger.debug(`Base mark order for chapter ${chapterId}: ${isAscendingMarkOrder ? 'ascending' : 'descending'}`);
 
       // If we still have unallocated marks from previous chapters, try to add them to this chapter's request
       if (unallocatedMarks > 0) {
-        this.logger.debug(`Adding ${unallocatedMarks} unallocated marks from previous chapters to this chapter's request`);
         remainingMarks += unallocatedMarks;
         unallocatedMarks = 0;
       }
@@ -747,22 +727,15 @@ export class ChapterMarksDistributionService {
         let marksToTry = isAscendingOrder ? [...uniqueMarks] : [...uniqueMarks].reverse();
         if (randomizeCompletely) {
           marksToTry = this.generateRandomSequence(marksToTry);
-          this.logger.debug(`Using completely randomized marks order for this iteration: ${marksToTry.join(' -> ')}`);
         }
         
         let currentMarkIndex = 0;
 
-        this.logger.debug(`\nStarting new iteration for chapter ${chapterId}`);
-        this.logger.debug(`Remaining marks: ${remainingMarks}`);
-        this.logger.debug(`Using marks order: ${marksToTry.join(' -> ')}`);
-
         // Try to allocate one question of each mark type in sequence
         while (currentMarkIndex < marksToTry.length) {
           const mark = marksToTry[currentMarkIndex];
-          this.logger.debug(`\nTrying mark ${mark} (index ${currentMarkIndex})`);
 
           if (mark > remainingMarks) {
-            this.logger.debug(`Skipping mark ${mark} as it's greater than remaining marks ${remainingMarks}`);
             currentMarkIndex++;
             continue;
           }
@@ -777,23 +750,14 @@ export class ChapterMarksDistributionService {
           );
 
           if (availableQuestionTypes.length === 0) {
-            this.logger.debug(`No available question types for mark ${mark}`);
             currentMarkIndex++;
             continue;
           }
-
-          this.logger.debug(`Found ${availableQuestionTypes.length} available question types for mark ${mark}:`);
-          availableQuestionTypes.forEach(type => {
-            const section = pattern.sections.find(s => s.id === type.sectionId);
-            const sqt = section.subsection_question_types.find(s => s.id === type.subsectionId);
-            this.logger.debug(`  - Section ${type.sectionId} (${section.section_name}), Type ${type.questionTypeId} (${sqt.question_type.type_name}), Usage: ${type.usage}`);
-          });
 
           // Select the best question type to use (prioritizing unused types)
           const selectedType = this.selectBestQuestionType(availableQuestionTypes);
           
           if (!selectedType) {
-            this.logger.debug(`Could not select a question type for mark ${mark}`);
             currentMarkIndex++;
               continue;
             }
@@ -810,13 +774,9 @@ export class ChapterMarksDistributionService {
           
           // Skip if we don't have enough questions of this type
           if (currentCount <= 0) {
-            this.logger.debug(`Not enough questions available for type ${questionTypeId} (count: ${currentCount})`);
             currentMarkIndex++;
                 continue;
               }
-
-          this.logger.debug(`Allocating question type ${questionTypeId} (${selectedSqt.question_type.type_name}) in section ${section.id} (${section.section_name}) to chapter ${chapterId}`);
-          this.logger.debug(`Question type usage before: ${currentCount}/${originalCount}`);
 
               // Allocate the question
           let subsectionAllocation = sectionAllocations
@@ -855,23 +815,17 @@ export class ChapterMarksDistributionService {
               iterationMarks += mark;
               marksAllocatedInIteration = true;
 
-              this.logger.debug(`Allocated ${mark} marks. Remaining marks: ${remainingMarks}`);
-          this.logger.debug(`Question type usage after: ${currentCount - 1}/${originalCount}`);
-
-          // Add decrement of question type count by 3 here
-          const newCount = Math.max(0, currentCount - 3);
-          chapterQuestionTypes.set(questionTypeId, newCount);
-          this.logger.debug(`Updated question count for type ${questionTypeId}: ${currentCount} -> ${newCount}`);
+              // Add decrement of question type count by 3 here
+              const newCount = Math.max(0, currentCount - 3);
+              chapterQuestionTypes.set(questionTypeId, newCount);
 
             currentMarkIndex++;
         }
 
         // If we couldn't allocate any marks in this iteration, try to handle remaining marks
         if (!marksAllocatedInIteration && remainingMarks > 0) {
-          this.logger.debug(`\nNo marks allocated in iteration, handling remaining marks: ${remainingMarks}`);
           
           // Try to allocate sections that exactly match the remaining marks first
-            this.logger.debug(`Trying direct allocation for remaining marks: ${remainingMarks}`);
           
           // Get all sections with exactly matching marks per question
           const exactMatchSections = pattern.sections
@@ -883,15 +837,12 @@ export class ChapterMarksDistributionService {
               return (aAllocated / a.total_questions) - (bAllocated / b.total_questions);
             });
           
-          this.logger.debug(`Found ${exactMatchSections.length} sections with marks_per_question = ${remainingMarks}`);
-          
           let exactMatchAllocated = false;
           
           // Try to allocate to each section
           for (const section of exactMatchSections) {
               const allocatedQuestions = this.getSectionAllocatedQuestions(sectionAllocations, section.id);
             if (allocatedQuestions >= section.total_questions) {
-              this.logger.debug(`Section ${section.id} (${section.section_name}) is full (${allocatedQuestions}/${section.total_questions})`);
               continue;
             }
             
@@ -907,7 +858,6 @@ export class ChapterMarksDistributionService {
             // Get the best question type to use
             const selectedTypeId = this.getLeastUsedQuestionType(availableTypes, chapterQuestionTypes);
             if (!selectedTypeId) {
-              this.logger.debug(`No suitable question type found for section ${section.id}`);
               continue;
             }
             
@@ -917,7 +867,6 @@ export class ChapterMarksDistributionService {
             );
             
             if (!selectedSqt) {
-              this.logger.debug(`Couldn't find subsection for question type ${selectedTypeId}`);
               continue;
             }
             
@@ -925,7 +874,6 @@ export class ChapterMarksDistributionService {
             
             // Skip if we don't have enough questions of this type
             if (currentCount <= 0) {
-              this.logger.debug(`Not enough questions available for type ${selectedTypeId} (count: ${currentCount})`);
               continue;
             }
 
@@ -963,13 +911,11 @@ export class ChapterMarksDistributionService {
             usedQuestionTypes.get(section.id)!.add(selectedTypeId);
             questionTypeUsage.set(selectedTypeId, currentCount - 1);
                 remainingMarks -= remainingMarks;
-            this.logger.debug(`Directly allocated ${remainingMarks} marks to section ${section.id}. Remaining marks: 0`);
             exactMatchAllocated = true;
 
             // Add decrement of question type count by 3 here
             const newCount = Math.max(0, currentCount - 3);
             chapterQuestionTypes.set(selectedTypeId, newCount);
-            this.logger.debug(`Updated question count for type ${selectedTypeId}: ${currentCount} -> ${newCount}`);
 
                 break;
           }
@@ -977,7 +923,6 @@ export class ChapterMarksDistributionService {
           // Skip the old direct allocation and go to the replacement logic if we couldn't do exact match
           if (!exactMatchAllocated && remainingMarks > 0) {
             // Try to replace existing allocations
-            this.logger.debug(`Trying to replace existing allocations for remaining marks: ${remainingMarks}`);
             for (const mark of marksToTry) {
               if (mark <= remainingMarks) continue;
 
@@ -998,7 +943,6 @@ export class ChapterMarksDistributionService {
 
                 if (success) {
                   remainingMarks += lowerMark - mark;
-                  this.logger.debug(`Replaced ${lowerMark} mark question with ${mark} mark question. New remaining marks: ${remainingMarks}`);
                   break;
                 }
               }
@@ -1007,7 +951,6 @@ export class ChapterMarksDistributionService {
           }
 
           if (remainingMarks > 0) {
-            this.logger.debug(`Could not allocate any more marks for chapter ${chapterId}. Remaining marks: ${remainingMarks}`);
             break;
           }
         }
@@ -1015,19 +958,16 @@ export class ChapterMarksDistributionService {
 
       // If we still have unallocated marks after all attempts, store them for redistribution
       if (remainingMarks > 0) {
-        this.logger.debug(`Could not allocate ${remainingMarks} marks for chapter ${chapterId}, saving for redistribution`);
         unallocatedMarks += remainingMarks;
         remainingMarks = 0;
       }
 
       // Update chapter marks
       chapterMarksMap.set(chapterId, requestedMarks - remainingMarks);
-      this.logger.debug(`Final marks for chapter ${chapterId}: ${requestedMarks - remainingMarks}`);
     }
 
     // Handle any remaining unallocated marks after processing all chapters
     if (unallocatedMarks > 0) {
-      this.logger.debug(`Still have ${unallocatedMarks} unallocated marks after processing all chapters`);
       
       // Try to distribute unallocated marks to any chapter that can accept them
       let redistributed = false;
@@ -1049,7 +989,6 @@ export class ChapterMarksDistributionService {
         }
         
         if (availableQuestionTypes.length > 0) {
-          this.logger.debug(`Found ${availableQuestionTypes.length} available question types for chapter ${chapterId} to redistribute marks`);
           
           // Sort by mark value to prioritize higher marks
           availableQuestionTypes.sort((a, b) => {
@@ -1083,7 +1022,6 @@ export class ChapterMarksDistributionService {
             
             // Skip if we don't have enough questions of this type
             if (currentCount <= 0) {
-              this.logger.debug(`Not enough questions available for type ${questionTypeId} (count: ${currentCount})`);
               // Remove this type from the available types
               availableQuestionTypes = availableQuestionTypes.filter(t => 
                 !(t.sectionId === selectedType.sectionId && t.questionTypeId === questionTypeId)
@@ -1092,7 +1030,6 @@ export class ChapterMarksDistributionService {
             }
             
             // Allocate the question
-            this.logger.debug(`Redistributing ${markValue} marks to chapter ${chapterId} with question type ${selectedType.questionTypeId}`);
             
             let subsectionAllocation = sectionAllocations
               .find(sa => sa.sectionId === section.id)!
@@ -1131,13 +1068,10 @@ export class ChapterMarksDistributionService {
             unallocatedMarks -= markValue;
             const currentMarks = chapterMarksMap.get(chapterId) || 0;
             chapterMarksMap.set(chapterId, currentMarks + markValue);
-            this.logger.debug(`Chapter ${chapterId} marks updated to ${currentMarks + markValue}`);
             
             // Update the question count for this type directly in the existing map
             const newCount = Math.max(0, currentCount - 3);
             chapterTypes.set(questionTypeId, newCount);
-            
-            this.logger.debug(`Updated question count for type ${questionTypeId}: ${currentCount} -> ${newCount}`);
             
             // Update the available question types with the updated map
             availableQuestionTypes = this.getAllAvailableQuestionTypesByMark(
@@ -1157,9 +1091,6 @@ export class ChapterMarksDistributionService {
       
       // If we still couldn't allocate all marks, warn about it
       if (unallocatedMarks > 0) {
-        this.logger.warn(`Could not allocate all marks. ${unallocatedMarks} marks remain unallocated.`);
-      } else if (redistributed) {
-        this.logger.debug(`Successfully redistributed all unallocated marks`);
       }
     }
 
@@ -1188,9 +1119,13 @@ export class ChapterMarksDistributionService {
         this.ensureSectionProperties(section);
         
         // Apply the subsection helper to all subsections
-        section.subsectionAllocations = section.subsectionAllocations.map(subsection => 
-          this.ensureSubsectionProperties(subsection)
-        );
+        section.subsectionAllocations = section.subsectionAllocations.map(subsection => {
+          // Randomize the allocated chapters order
+          if (subsection.allocatedChapters && subsection.allocatedChapters.length > 1) {
+            subsection.allocatedChapters = this.generateRandomSequence(subsection.allocatedChapters);
+          }
+          return this.ensureSubsectionProperties(subsection);
+        });
         
         return section;
       }),
@@ -1200,30 +1135,10 @@ export class ChapterMarksDistributionService {
 
   async processFinalQuestionsDistribution(requestBody: FinalQuestionsDistributionBodyDto): Promise<ChapterMarksDistributionResponseDto> {
     const { patternId, mediumIds = [] } = requestBody;
-    this.logger.log(`Processing final questions distribution for pattern ID ${patternId}`);
+    const usedQuestionIds = new Set<number>();
 
     try {
-      // Validate that the pattern exists
-      const pattern = await this.prisma.pattern.findUnique({
-        where: { id: patternId },
-        include: {
-          sections: {
-            include: {
-              subsection_question_types: {
-                include: {
-                  question_type: true,
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (!pattern) {
-        throw new NotFoundException(`Pattern with ID ${patternId} not found`);
-      }
-
-      // Create new response DTO
+      // Create new response DTO using data from request
       const responseDto = new ChapterMarksDistributionResponseDto();
       responseDto.patternId = requestBody.patternId;
       responseDto.patternName = requestBody.patternName;
@@ -1238,56 +1153,35 @@ export class ChapterMarksDistributionService {
         return chapterMark;
       });
 
-      // Process each section and its allocations
+      // Process each section and its allocations from the request body
       for (const section of requestBody.sectionAllocations) {
-        this.logger.log(`Processing section ${section.sectionId}: ${section.sectionName}`);
-        
-        // Find the section in the pattern to get additional details
-        const patternSection = pattern.sections.find(s => s.id === section.sectionId);
-        if (!patternSection) {
-          this.logger.warn(`Section ${section.sectionId} not found in pattern`);
-          continue;
-        }
-        
         const sectionAllocation = new SectionAllocationDto();
         sectionAllocation.sectionId = section.sectionId;
-        sectionAllocation.pattern_id = patternSection.pattern_id;
+        sectionAllocation.pattern_id = section.pattern_id;
         sectionAllocation.sectionName = section.sectionName;
         sectionAllocation.sequentialNumber = section.sequentialNumber;
-        sectionAllocation.section_number = patternSection.section_number;
+        sectionAllocation.section_number = section.section_number;
         sectionAllocation.subSection = section.subSection;
         sectionAllocation.totalQuestions = section.totalQuestions;
-        sectionAllocation.mandotory_questions = patternSection.mandotory_questions;
-        sectionAllocation.marks_per_question = patternSection.marks_per_question;
+        sectionAllocation.mandotory_questions = section.mandotory_questions;
+        sectionAllocation.marks_per_question = section.marks_per_question;
         sectionAllocation.absoluteMarks = section.absoluteMarks;
-        sectionAllocation.totalMarks = patternSection.marks_per_question * patternSection.mandotory_questions;
+        sectionAllocation.totalMarks = section.totalMarks;
         sectionAllocation.subsectionAllocations = [];
 
-        // Process each subsection and its allocations
+        // Process each subsection from the request
         for (const subsection of section.subsectionAllocations) {
-          this.logger.log(`Processing subsection ${subsection.subsectionQuestionTypeId}: ${subsection.questionTypeName}`);
-          
-          // Find the subsection in the pattern to get additional details
-          const patternSubsection = patternSection.subsection_question_types.find(
-            s => s.id === subsection.subsectionQuestionTypeId
-          );
-          
-          if (!patternSubsection) {
-            this.logger.warn(`Subsection ${subsection.subsectionQuestionTypeId} not found in pattern section ${section.sectionId}`);
-            continue;
-          }
-
           const subsectionAllocation = new SubsectionAllocationDto();
           subsectionAllocation.subsectionQuestionTypeId = subsection.subsectionQuestionTypeId;
-          subsectionAllocation.section_id = patternSection.id;
+          subsectionAllocation.section_id = section.sectionId;
           subsectionAllocation.questionTypeName = subsection.questionTypeName;
           subsectionAllocation.sequentialNumber = subsection.sequentialNumber;
-          subsectionAllocation.question_type_id = patternSubsection.question_type_id;
-          subsectionAllocation.question_type = {
-            id: patternSubsection.question_type.id,
-            type_name: patternSubsection.question_type.type_name
-          };
+          subsectionAllocation.question_type_id = subsection.question_type_id;
+          subsectionAllocation.question_type = subsection.question_type;
           subsectionAllocation.allocatedChapters = [];
+
+          // Track question IDs used per chapter and question type to avoid repetition
+          const chapterQuestionTypeUsed = new Map<number, Set<number>>();
 
           // Process each allocated chapter
           for (const allocatedChapter of subsection.allocatedChapters) {
@@ -1295,19 +1189,38 @@ export class ChapterMarksDistributionService {
             chapterAllocation.chapterId = allocatedChapter.chapterId;
             chapterAllocation.chapterName = allocatedChapter.chapterName;
             
-            // Get question if available
+            // Track used questions for this chapter and question type
+            if (!chapterQuestionTypeUsed.has(allocatedChapter.chapterId)) {
+              chapterQuestionTypeUsed.set(allocatedChapter.chapterId, new Set<number>());
+            }
+            
+            // If question is already provided in request, use it but transform its images
             if (allocatedChapter.question) {
-              chapterAllocation.question = allocatedChapter.question;
+              // Process the existing question to add presigned URLs to images
+              chapterAllocation.question = await this.processExistingQuestion(allocatedChapter.question);
+              
+              // Track the question ID to avoid repetition
+              if (allocatedChapter.question.id) {
+                chapterQuestionTypeUsed.get(allocatedChapter.chapterId).add(allocatedChapter.question.id);
+                usedQuestionIds.add(allocatedChapter.question.id);
+              }
             } else {
-              // Get a random question for this chapter and question type if not provided
+              // Get a random question for this chapter and question type
               const question = await this.getRandomQuestion(
                 allocatedChapter.chapterId,
-                patternSubsection.question_type_id,
-                new Set(), // Used question IDs - empty since we're getting fresh questions
+                subsection.question_type_id,
+                chapterQuestionTypeUsed.get(allocatedChapter.chapterId), // Used questions for this chapter and question type
                 mediumIds
               );
+              
               if (question) {
                 chapterAllocation.question = question;
+                
+                // Track the question ID
+                if (question.id) {
+                  chapterQuestionTypeUsed.get(allocatedChapter.chapterId).add(question.id);
+                  usedQuestionIds.add(question.id);
+                }
               }
             }
             
@@ -1322,92 +1235,74 @@ export class ChapterMarksDistributionService {
 
       return responseDto;
     } catch (error) {
-      this.logger.error(`Error processing final questions distribution: ${error.message}`, error.stack);
+      this.logger.error(`Error in processFinalQuestionsDistribution: ${error.message}`, error.stack);
       throw error;
     }
   }
 
-  // Helper method to find question type ID from pattern data
-  private findQuestionTypeIdFromPattern(pattern: any, sectionId: number, subsectionQuestionTypeId: number): number {
-    try {
-      this.logger.log(`Looking for question type ID in pattern for section ${sectionId}, subsection ${subsectionQuestionTypeId}`);
-      
-      // Check if pattern has sections
-      if (!pattern.sections || !Array.isArray(pattern.sections)) {
-        this.logger.warn(`Pattern has no sections or sections is not an array`);
-        return null;
-      }
-      
-      // Find the section
-      const section = pattern.sections.find(s => s.id === sectionId);
-      if (!section) {
-        this.logger.warn(`Section ${sectionId} not found in pattern`);
+  // Helper method to process an existing question (add presigned URLs to images)
+  private async processExistingQuestion(question: any): Promise<any> {
+    if (!question) return null;
+    
+    // Clone to avoid mutation
+    const processedQuestion = { ...question };
+    
+    // Process question texts and their images
+    if (processedQuestion.question_texts && processedQuestion.question_texts.length > 0) {
+      processedQuestion.question_texts = await Promise.all(processedQuestion.question_texts.map(async (text) => {
+        if (!text) return null;
         
-        // Log available sections for debugging
-        const availableSections = pattern.sections.map(s => s.id);
-        this.logger.warn(`Available sections: ${availableSections.join(', ')}`);
+        // Clone text to avoid mutation
+        const textResult = { ...text };
         
-        return null;
-      }
-      
-      // Check if section has subsection_question_types
-      if (!section.subsection_question_types || !Array.isArray(section.subsection_question_types)) {
-        this.logger.warn(`Section ${sectionId} has no subsection_question_types or it's not an array`);
-        return null;
-      }
-      
-      // Find the subsection
-      const subsection = section.subsection_question_types.find(s => s.id === subsectionQuestionTypeId);
-      if (!subsection) {
-        this.logger.warn(`Subsection ${subsectionQuestionTypeId} not found in section ${sectionId}`);
-        
-        // Log available subsections for debugging
-        const availableSubsections = section.subsection_question_types.map(s => s.id);
-        this.logger.warn(`Available subsections: ${availableSubsections.join(', ')}`);
-        
-        // Try to find by seqencial_subquestion_number as fallback
-        const subsectionBySequence = section.subsection_question_types.find(s => s.seqencial_subquestion_number === subsectionQuestionTypeId);
-        if (subsectionBySequence) {
-          this.logger.log(`Found subsection by sequence number instead: ${subsectionBySequence.id}`);
-          return subsectionBySequence.question_type_id;
+        // Process main image
+        if (textResult.image) {
+          textResult.image = await this.transformImageData(textResult.image);
+          textResult.image_url = textResult.image?.presigned_url || textResult.image?.url || null;
         }
         
-        return null;
-      }
-      
-      this.logger.log(`Found question type ID: ${subsection.question_type_id} for subsection ${subsectionQuestionTypeId}`);
-      return subsection.question_type_id;
-    } catch (error) {
-      this.logger.error(`Error finding question type ID: ${error.message}`, error.stack);
-      return null;
+        // Process MCQ option images
+        if (textResult.mcq_options && textResult.mcq_options.length > 0) {
+          textResult.mcq_options = await Promise.all(textResult.mcq_options.map(async (option) => {
+            if (!option) return null;
+            
+            const optionResult = { ...option };
+            if (optionResult.image) {
+              optionResult.image = await this.transformImageData(optionResult.image);
+              optionResult.image_url = optionResult.image?.presigned_url || optionResult.image?.url || null;
+            }
+            return optionResult;
+          }));
+        }
+        
+        // Process match pair images
+        if (textResult.match_pairs && textResult.match_pairs.length > 0) {
+          textResult.match_pairs = await Promise.all(textResult.match_pairs.map(async (pair) => {
+            if (!pair) return null;
+            
+            const pairResult = { ...pair };
+            if (pairResult.left_image) {
+              pairResult.left_image = await this.transformImageData(pairResult.left_image);
+              pairResult.left_image_url = pairResult.left_image?.presigned_url || pairResult.left_image?.url || null;
+            }
+            if (pairResult.right_image) {
+              pairResult.right_image = await this.transformImageData(pairResult.right_image);
+              pairResult.right_image_url = pairResult.right_image?.presigned_url || pairResult.right_image?.url || null;
+            }
+            return pairResult;
+          }));
+        }
+        
+        return textResult;
+      }));
     }
+    
+    return processedQuestion;
   }
 
   // Helper method to get a random question for a chapter and question type
   private async getRandomQuestion(chapterId: number, questionTypeId: number, usedQuestionIds: Set<number>, mediumIds: number[] = []): Promise<any> {
     try {
-      this.logger.log(`Finding questions for chapter ${chapterId}, question type ${questionTypeId}`);
-      
-      // Count available questions for error logging
-      const totalAvailable = await this.prisma.question.count({
-        where: { question_type_id: questionTypeId }
-      });
-      
-      const totalForChapter = await this.prisma.question.count({
-        where: {
-          question_type_id: questionTypeId,
-          question_topics: {
-            some: {
-              topic: {
-                chapter_id: chapterId
-              }
-            }
-          }
-        }
-      });
-      
-      this.logger.log(`Available questions stats: total for type: ${totalAvailable}, for chapter: ${totalForChapter}`);
-
       // Build the where clause for Prisma
       const whereClause: any = {
         question_type_id: questionTypeId,
@@ -1433,16 +1328,14 @@ export class ChapterMarksDistributionService {
         };
       }
 
-      // Exclude already used questions
+      // Exclude already used questions for this chapter and question type
       if (usedQuestionIds && usedQuestionIds.size > 0) {
         whereClause.id = {
           notIn: Array.from(usedQuestionIds)
         };
       }
 
-      this.logger.log(`Searching with where clause: ${JSON.stringify(whereClause, null, 2)}`);
-
-      // Find all eligible questions
+      // Find all eligible questions for this chapter and question type
       const eligibleQuestions = await this.prisma.question.findMany({
         where: whereClause,
         include: {
@@ -1480,14 +1373,10 @@ export class ChapterMarksDistributionService {
         }
       });
 
-      // If no questions found with all criteria, try a more relaxed search without medium filter
-      if (!eligibleQuestions.length && mediumIds && mediumIds.length > 0) {
-        this.logger.log(`No questions found with medium filter. Trying without medium filter.`);
-        
-        // Remove the medium filter from the where clause
+      // If no questions found with specified criteria, try without medium filter
+      if (eligibleQuestions.length === 0 && mediumIds && mediumIds.length > 0) {
         delete whereClause.question_texts;
         
-        // Try again without medium filter
         const relaxedQuestions = await this.prisma.question.findMany({
           where: whereClause,
           include: {
@@ -1525,151 +1414,137 @@ export class ChapterMarksDistributionService {
           }
         });
         
-        // Use relaxed results if available
         if (relaxedQuestions.length) {
-          this.logger.log(`Found ${relaxedQuestions.length} questions without medium filter.`);
-          eligibleQuestions.push(...relaxedQuestions);
+          return this.processQuestionData(relaxedQuestions);
         }
       }
 
-      // If still no questions found, try a simple fallback search just by question type
-      if (!eligibleQuestions.length) {
-        this.logger.log(`No questions found for chapter. Trying fallback with just question type.`);
-        
-        // Simplified where clause with just question type
-        const fallbackWhereClause = {
-          question_type_id: questionTypeId
-        };
-        
-        // Add used questions filter if available
-        if (usedQuestionIds && usedQuestionIds.size > 0) {
-          fallbackWhereClause['id'] = {
-            notIn: Array.from(usedQuestionIds)
-          };
-        }
-        
-        // Try fallback search
-        const fallbackQuestions = await this.prisma.question.findMany({
-          where: fallbackWhereClause,
-          take: 5, // Limit to 5 results
-          include: {
-            question_type: true,
-            question_texts: {
-              include: {
-                image: true,
-                mcq_options: {
-                  include: {
-                    image: true
-                  }
-                },
-                match_pairs: {
-                  include: {
-                    left_image: true,
-                    right_image: true
-                  }
-                },
-                question_text_topics: {
-                  include: {
-                    question_topic: {
-                      include: {
-                        topic: true
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            question_topics: {
-              include: {
-                topic: true
-              }
-            }
-          }
-        });
-        
-        // Use fallback results if available
-        if (fallbackQuestions.length) {
-          this.logger.log(`Found ${fallbackQuestions.length} questions with fallback search.`);
-          eligibleQuestions.push(...fallbackQuestions);
-        }
+      if (eligibleQuestions.length) {
+        return this.processQuestionData(eligibleQuestions);
       }
 
-      // If no questions found at all, return null
-      if (!eligibleQuestions.length) {
-        this.logger.warn(`No questions found for chapter ${chapterId}, question type ${questionTypeId} with any search method.`);
-        return null;
-      }
-
-      this.logger.log(`Found ${eligibleQuestions.length} eligible questions`);
-
-      // Transform question data to include topic information and break circular references
-      const processedQuestions = eligibleQuestions.map(q => {
-        // Create a clean object instead of using JSON.stringify/parse to avoid serialization issues
-        const processedQuestion = {
-          id: q.id,
-          question_type_id: q.question_type_id,
-          board_question: q.board_question,
-          question_type: q.question_type ? {
-            id: q.question_type.id,
-            type_name: q.question_type.type_name
-          } : null,
-          question_texts: []
-        };
-        
-        // Process each question text to add topic information
-        if (q.question_texts && q.question_texts.length > 0) {
-          processedQuestion.question_texts = q.question_texts.map(text => {
-            const processedText = {
-              id: text.id,
-              question_id: text.question_id,
-              image_id: text.image_id,
-              question_text: text.question_text,
-              image: text.image,
-              mcq_options: text.mcq_options || [],
-              match_pairs: text.match_pairs || [],
-              topic: null
-            };
-            
-            // Try to get topic from question_text_topics
-            if (text.question_text_topics && text.question_text_topics.length > 0) {
-              const topicInfo = text.question_text_topics[0]?.question_topic?.topic;
-              if (topicInfo) {
-                processedText.topic = {
-                  id: topicInfo.id,
-                  name: topicInfo.name,
-                  chapter_id: topicInfo.chapter_id
-                };
-              }
-            } 
-            // If no topic from question_text_topics, try from question_topics
-            else if (q.question_topics && q.question_topics.length > 0) {
-              const topicInfo = q.question_topics[0]?.topic;
-              if (topicInfo) {
-                processedText.topic = {
-                  id: topicInfo.id,
-                  name: topicInfo.name,
-                  chapter_id: topicInfo.chapter_id
-                };
-              }
-            }
-            
-            return processedText;
-          });
-        }
-        
-        return processedQuestion;
-      });
-
-      // Return a random question from the eligible ones
-      const randomIndex = Math.floor(Math.random() * processedQuestions.length);
-      const selectedQuestion = processedQuestions[randomIndex];
-      this.logger.log(`Selected question ID: ${selectedQuestion.id}`);
-      
-      return selectedQuestion;
+      return null;
     } catch (error) {
-      this.logger.error(`Error fetching random question: ${error.message}`, error.stack);
+      this.logger.error(`Error getting random question: ${error.message}`, error.stack);
       return null;
     }
+  }
+
+  // Helper method to process question data
+  private async processQuestionData(questions: any[]): Promise<any> {
+    if (!questions.length) return null;
+    
+    // Select a random question from the eligible ones
+    const randomIndex = Math.floor(Math.random() * questions.length);
+    const selectedQuestion = questions[randomIndex];
+    
+    // Transform question data to include topic information and break circular references
+    const processedQuestion = {
+      id: selectedQuestion.id,
+      question_type_id: selectedQuestion.question_type_id,
+      board_question: selectedQuestion.board_question,
+      question_type: selectedQuestion.question_type ? {
+        id: selectedQuestion.question_type.id,
+        type_name: selectedQuestion.question_type.type_name
+      } : null,
+      question_texts: []
+    };
+    
+    // Process each question text to add topic information
+    if (selectedQuestion.question_texts && selectedQuestion.question_texts.length > 0) {
+      processedQuestion.question_texts = await Promise.all(selectedQuestion.question_texts.map(async text => {
+        // Process main image
+        let processedImage = null;
+        let imageUrl = null;
+        
+        if (text.image) {
+          processedImage = await this.transformImageData(text.image);
+          imageUrl = processedImage?.presigned_url || text.image?.url || null;
+        }
+        
+        // Process mcq options and their images
+        const processedMcqOptions = text.mcq_options ? await Promise.all(text.mcq_options.map(async option => {
+          let optionImage = null;
+          let optionImageUrl = null;
+          
+          if (option.image) {
+            optionImage = await this.transformImageData(option.image);
+            optionImageUrl = optionImage?.presigned_url || option.image?.url || null;
+          }
+          
+          return {
+            ...option,
+            image: optionImage,
+            image_url: optionImageUrl
+          };
+        })) : [];
+        
+        // Process match pairs and their images
+        const processedMatchPairs = text.match_pairs ? await Promise.all(text.match_pairs.map(async pair => {
+          let leftImage = null;
+          let leftImageUrl = null;
+          let rightImage = null;
+          let rightImageUrl = null;
+          
+          if (pair.left_image) {
+            leftImage = await this.transformImageData(pair.left_image);
+            leftImageUrl = leftImage?.presigned_url || pair.left_image?.url || null;
+          }
+          
+          if (pair.right_image) {
+            rightImage = await this.transformImageData(pair.right_image);
+            rightImageUrl = rightImage?.presigned_url || pair.right_image?.url || null;
+          }
+          
+          return {
+            ...pair,
+            left_image: leftImage,
+            left_image_url: leftImageUrl,
+            right_image: rightImage,
+            right_image_url: rightImageUrl
+          };
+        })) : [];
+        
+        const processedText = {
+          id: text.id,
+          question_id: text.question_id,
+          image_id: text.image_id,
+          question_text: text.question_text,
+          image: processedImage,
+          image_url: imageUrl,
+          mcq_options: processedMcqOptions,
+          match_pairs: processedMatchPairs,
+          topic: null
+        };
+        
+        // Try to get topic from question_text_topics
+        if (text.question_text_topics && text.question_text_topics.length > 0) {
+          const topicInfo = text.question_text_topics[0]?.question_topic?.topic;
+          if (topicInfo) {
+            processedText.topic = {
+              id: topicInfo.id,
+              name: topicInfo.name,
+              chapter_id: topicInfo.chapter_id
+            };
+          }
+        } 
+        // If no topic from question_text_topics, try from question_topics
+        else if (selectedQuestion.question_topics && selectedQuestion.question_topics.length > 0) {
+          const topicInfo = selectedQuestion.question_topics[0]?.topic;
+          if (topicInfo) {
+            processedText.topic = {
+              id: topicInfo.id,
+              name: topicInfo.name,
+              chapter_id: topicInfo.chapter_id
+            };
+          }
+        }
+        
+        return processedText;
+      }));
+    }
+    
+    return processedQuestion;
   }
 
   // Helper method to ensure a SubsectionAllocationDto has all required properties
