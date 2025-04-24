@@ -403,4 +403,67 @@ export class FinalQuestionsDistributionBodyDto {
   @IsNumber({}, { each: true })
   @Expose()
   mediumIds?: number[];
+}
+
+export class ChangeQuestionRequestDto {
+  @ApiProperty({ description: 'ID of the question to be changed', example: 123 })
+  @IsNotEmpty()
+  @IsNumber()
+  @Expose()
+  questionId: number;
+
+  @ApiProperty({ description: 'Question type ID to filter replacement questions', example: 2 })
+  @IsNotEmpty()
+  @IsNumber()
+  @Expose()
+  questionTypeId: number;
+
+  @ApiProperty({ description: 'Chapter ID to find replacement questions from', example: 5 })
+  @IsNotEmpty()
+  @IsNumber()
+  @Expose()
+  chapterId: number;
+
+  @ApiProperty({ description: 'Medium ID to get questions in specific language', example: 1 })
+  @IsNotEmpty()
+  @IsNumber()
+  @Expose()
+  mediumId: number;
+
+  @ApiProperty({ 
+    description: 'Array of question IDs already in the test paper (to avoid duplicates)', 
+    example: [123, 456, 789], 
+    type: [Number] 
+  })
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @Expose()
+  existingQuestionIds: number[];
+}
+
+export class ChangeQuestionResponseDto {
+  @ApiProperty({ description: 'The replacement question data' })
+  @Expose()
+  question: any;
+
+  @ApiProperty({ description: 'Question type details' })
+  @Expose()
+  questionType: {
+    id: number;
+    type_name: string;
+  };
+
+  @ApiProperty({ description: 'Chapter details' })
+  @Expose()
+  chapter: {
+    id: number;
+    name: string;
+  };
+
+  @ApiProperty({ description: 'Medium details' })
+  @Expose()
+  medium: {
+    id: number;
+    instruction_medium: string;
+  };
 } 

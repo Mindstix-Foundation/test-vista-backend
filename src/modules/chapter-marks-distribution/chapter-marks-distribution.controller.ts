@@ -3,7 +3,9 @@ import { ChapterMarksDistributionService } from './chapter-marks-distribution.se
 import { 
   ChapterMarksRequestDto, 
   ChapterMarksDistributionResponseDto,
-  FinalQuestionsDistributionBodyDto
+  FinalQuestionsDistributionBodyDto,
+  ChangeQuestionRequestDto,
+  ChangeQuestionResponseDto
 } from './dto/chapter-marks-distribution.dto';
 import { ApiQuery, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
@@ -77,5 +79,63 @@ export class ChapterMarksDistributionController {
     @Body() requestBody: FinalQuestionsDistributionBodyDto
   ): Promise<ChapterMarksDistributionResponseDto> {
     return this.chapterMarksDistributionService.processFinalQuestionsDistribution(requestBody);
+  }
+
+  @Get('change-question')
+  @ApiOperation({ summary: 'Get a replacement question for a test paper' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns a new question to replace the existing one',
+    type: ChangeQuestionResponseDto
+  })
+  @ApiQuery({ name: 'questionId', type: 'number', required: true })
+  @ApiQuery({ name: 'questionTypeId', type: 'number', required: true })
+  @ApiQuery({ name: 'chapterId', type: 'number', required: true })
+  @ApiQuery({ name: 'mediumId', type: 'number', required: true })
+  @ApiQuery({ 
+    name: 'existingQuestionIds', 
+    type: 'array', 
+    isArray: true,
+    required: true, 
+    description: 'Array of question IDs already in the test paper',
+    items: { type: 'number' }
+  })
+  async changeQuestion(
+    @Query('questionId') questionId: number,
+    @Query('questionTypeId') questionTypeId: number,
+    @Query('chapterId') chapterId: number,
+    @Query('mediumId') mediumId: number,
+    @Query('existingQuestionIds') existingQuestionIds: string
+  ): Promise<ChangeQuestionResponseDto> {
+    // Parse the query parameter - it will come as comma-separated string
+    // but now documented properly in Swagger as an array
+    const parsedExistingQuestionIds = existingQuestionIds.split(',').map(id => +id);
+    
+    // Validate input parameters
+    if (isNaN(+questionId) || +questionId <= 0) {
+      throw new BadRequestException('Question ID must be a valid positive number');
+    }
+    if (isNaN(+questionTypeId) || +questionTypeId <= 0) {
+      throw new BadRequestException('Question type ID must be a valid positive number');
+    }
+    if (isNaN(+chapterId) || +chapterId <= 0) {
+      throw new BadRequestException('Chapter ID must be a valid positive number');
+    }
+    if (isNaN(+mediumId) || +mediumId <= 0) {
+      throw new BadRequestException('Medium ID must be a valid positive number');
+    }
+    if (parsedExistingQuestionIds.some(id => isNaN(id) || id <= 0)) {
+      throw new BadRequestException('All existing question IDs must be valid positive numbers');
+    }
+
+    const request: ChangeQuestionRequestDto = {
+      questionId: +questionId,
+      questionTypeId: +questionTypeId,
+      chapterId: +chapterId,
+      mediumId: +mediumId,
+      existingQuestionIds: parsedExistingQuestionIds
+    };
+    
+    return this.chapterMarksDistributionService.changeQuestion(request);
   }
 } 
