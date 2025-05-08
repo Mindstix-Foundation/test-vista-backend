@@ -3,7 +3,9 @@ import { ChapterMarksDistributionService } from './chapter-marks-distribution.se
 import { 
   ChapterMarksRequestDto, 
   ChapterMarksDistributionResponseDto,
-  FinalQuestionsDistributionBodyDto
+  FinalQuestionsDistributionBodyDto,
+  ChangeQuestionRequestDto,
+  ChangeQuestionResponseDto
 } from './dto/chapter-marks-distribution.dto';
 import { ApiQuery, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
@@ -23,11 +25,18 @@ export class ChapterMarksDistributionController {
   @ApiQuery({ name: 'chapterIds', type: 'number', isArray: true, required: true })
   @ApiQuery({ name: 'mediumIds', type: 'number', isArray: true, required: true })
   @ApiQuery({ name: 'requestedMarks', type: 'number', isArray: true, required: true })
+  @ApiQuery({ 
+    name: 'questionOrigin', 
+    enum: ['board', 'other', 'both'], 
+    required: false, 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)'
+  })
   async distributeChapterMarks(
     @Query('patternId') patternId: number,
     @Query('chapterIds') chapterIds: string,
     @Query('mediumIds') mediumIds: string,
-    @Query('requestedMarks') requestedMarks: string
+    @Query('requestedMarks') requestedMarks: string,
+    @Query('questionOrigin') questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<ChapterMarksDistributionResponseDto> {
     // Parse arrays from query strings
     const parsedChapterIds = chapterIds.split(',').map(id => +id);
@@ -56,7 +65,8 @@ export class ChapterMarksDistributionController {
       patternId: +patternId,
       chapterIds: parsedChapterIds,
       mediumIds: parsedMediumIds,
-      requestedMarks: parsedRequestedMarks
+      requestedMarks: parsedRequestedMarks,
+      questionOrigin: questionOrigin || 'both'
     };
     
     return this.chapterMarksDistributionService.distributeChapterMarks(filter);
@@ -77,5 +87,71 @@ export class ChapterMarksDistributionController {
     @Body() requestBody: FinalQuestionsDistributionBodyDto
   ): Promise<ChapterMarksDistributionResponseDto> {
     return this.chapterMarksDistributionService.processFinalQuestionsDistribution(requestBody);
+  }
+
+  @Get('change-question')
+  @ApiOperation({ summary: 'Get a replacement question for a test paper' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns a new question to replace the existing one',
+    type: ChangeQuestionResponseDto
+  })
+  @ApiQuery({ 
+    name: 'questionTextIds', 
+    type: 'array', 
+    isArray: true,
+    required: true, 
+    description: 'Array of question text IDs to be changed',
+    items: { type: 'number' }
+  })
+  @ApiQuery({ 
+    name: 'mediumIds', 
+    type: 'array', 
+    isArray: true,
+    required: true, 
+    description: 'Array of medium IDs to get questions in specific languages',
+    items: { type: 'number' }
+  })
+  @ApiQuery({ 
+    name: 'chapterId', 
+    type: 'number',
+    required: true, 
+    description: 'Chapter ID to find replacement questions from'
+  })
+  @ApiQuery({ 
+    name: 'questionOrigin', 
+    enum: ['board', 'other', 'both'], 
+    required: false, 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)'
+  })
+  async changeQuestion(
+    @Query('questionTextIds') questionTextIds: string,
+    @Query('mediumIds') mediumIds: string,
+    @Query('chapterId') chapterId: number,
+    @Query('questionOrigin') questionOrigin?: 'board' | 'other' | 'both'
+  ): Promise<ChangeQuestionResponseDto> {
+    // Parse the query parameters - they will come as comma-separated strings
+    const parsedQuestionTextIds = questionTextIds.split(',').map(id => +id);
+    const parsedMediumIds = mediumIds.split(',').map(id => +id);
+    
+    // Validate input parameters
+    if (parsedQuestionTextIds.some(id => isNaN(id) || id <= 0)) {
+      throw new BadRequestException('All question text IDs must be valid positive numbers');
+    }
+    if (parsedMediumIds.some(id => isNaN(id) || id <= 0)) {
+      throw new BadRequestException('All medium IDs must be valid positive numbers');
+    }
+    if (isNaN(+chapterId) || +chapterId <= 0) {
+      throw new BadRequestException('Chapter ID must be a valid positive number');
+    }
+
+    const request: ChangeQuestionRequestDto = {
+      questionTextIds: parsedQuestionTextIds,
+      mediumIds: parsedMediumIds,
+      chapterId: +chapterId,
+      questionOrigin: questionOrigin || 'both'
+    };
+    
+    return this.chapterMarksDistributionService.changeQuestion(request);
   }
 } 

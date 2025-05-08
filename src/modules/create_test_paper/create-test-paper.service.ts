@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTestPaperFilterDto, CreateTestPaperResponseDto, SectionAllocationDto, SubsectionAllocationDto, ChapterMarksDto, ChapterInfoDto } from './dto/create-test-paper.dto';
 import { FilterChaptersDto } from './dto/filter-chapters.dto';
 import { ChapterMarksResponseDto } from './dto/chapter-marks-response.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class CreateTestPaperService {
@@ -58,34 +59,95 @@ export class CreateTestPaperService {
 
   private async getChapterQuestionTypeCounts(
     chapterIds: number[],
-    mediumIds: number[]
+    mediumIds: number[],
+    questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<Map<number, Map<number, number>>> {
     console.log('Getting chapter question type counts for chapters:', chapterIds);
     console.log('Medium IDs:', mediumIds);
+    console.log('Question Origin:', questionOrigin || 'both');
+
+    // Ensure mediumIds array is not empty to avoid SQL errors
+    if (mediumIds.length === 0) {
+      console.warn('No medium IDs provided. Returning empty map.');
+      return new Map();
+    }
+
+    const requiredMediumCount = mediumIds.length;
+
+    // Build the board_question condition based on questionOrigin
+    let boardQuestionCondition = '';
+    if (questionOrigin === 'board') {
+      boardQuestionCondition = 'AND q.board_question = true';
+    } else if (questionOrigin === 'other') {
+      boardQuestionCondition = 'AND q.board_question = false';
+    }
+    // For 'both', we don't add any condition
+
+    const boardQuestionSql = Prisma.sql([boardQuestionCondition]);
 
     const result = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
       SELECT 
-        c.id as chapter_id,
-        qt.id as question_type_id,
-        COUNT(DISTINCT q.id) as count
-      FROM "Chapter" c
-      JOIN "Topic" t ON t.chapter_id = c.id
-      JOIN "Question_Topic" qtopic ON qtopic.topic_id = t.id
-      JOIN "Question" q ON q.id = qtopic.question_id
-      JOIN "Question_Type" qt ON qt.id = q.question_type_id
-      JOIN "Question_Text" qtext ON qtext.question_id = q.id
-      JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id
-      WHERE c.id = ANY(${chapterIds})
-      AND qttm.instruction_medium_id = ANY(${mediumIds})
-      AND qttm.is_verified = true
-      GROUP BY c.id, qt.id
+        q.chapter_id,
+        q.question_type_id,
+        COUNT(DISTINCT q.question_id) as count
+      FROM (
+        SELECT 
+          t.chapter_id,
+          q.question_type_id,
+          q.id as question_id,
+          qttm.instruction_medium_id
+        FROM "Question" q
+        JOIN "Question_Type" qt ON qt.id = q.question_type_id
+        JOIN "Question_Topic" qtopic ON qtopic.question_id = q.id
+        JOIN "Topic" t ON t.id = qtopic.topic_id
+        JOIN "Question_Text" qtext ON qtext.question_id = q.id
+        JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id AND qttm.question_topic_id = qtopic.id
+        WHERE t.chapter_id = ANY(${chapterIds})
+          AND qttm.instruction_medium_id = ANY(${mediumIds})
+          AND qttm.is_verified = true
+          ${boardQuestionSql}
+      ) AS q
+      GROUP BY q.chapter_id, q.question_type_id, q.question_id
+      HAVING COUNT(DISTINCT q.instruction_medium_id) = ${requiredMediumCount}
+    `;
+    
+    // Since the above query counts questions that exist across all mediums, 
+    // we need to re-aggregate the counts per chapter and question type.
+    const aggregatedResult = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
+      SELECT 
+        sub.chapter_id,
+        sub.question_type_id,
+        COUNT(sub.question_id) as count
+      FROM (
+          SELECT 
+            t.chapter_id,
+            q.question_type_id,
+            q.id as question_id
+          FROM "Question" q
+          JOIN "Question_Topic" qtopic ON qtopic.question_id = q.id
+          JOIN "Topic" t ON t.id = qtopic.topic_id
+          WHERE t.chapter_id = ANY(${chapterIds})
+          ${boardQuestionSql}
+          AND EXISTS (
+              SELECT 1
+              FROM "Question_Text" qtext
+              JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id AND qttm.question_topic_id = qtopic.id
+              WHERE qtext.question_id = q.id
+              AND qttm.instruction_medium_id = ANY(${mediumIds})
+              AND qttm.is_verified = true
+              GROUP BY qtext.question_id
+              HAVING COUNT(DISTINCT qttm.instruction_medium_id) = ${requiredMediumCount}
+          )
+      ) AS sub
+      GROUP BY sub.chapter_id, sub.question_type_id
     `;
 
-    console.log('Raw SQL result:', result);
+
+    console.log('Raw SQL result (aggregated):', aggregatedResult);
 
     const chapterQuestionTypeMap = new Map<number, Map<number, number>>();
     
-    for (const row of result) {
+    for (const row of aggregatedResult) {
       const chapterId = Number(row.chapter_id);
       const questionTypeId = Number(row.question_type_id);
       const count = Number(row.count);
@@ -132,6 +194,21 @@ export class CreateTestPaperService {
       throw new NotFoundException('Pattern not found');
     }
 
+    // Fetch Medium details
+    let mediumDetails: { id: number; instruction_medium: string }[] = [];
+    if (filter.mediumIds && filter.mediumIds.length > 0) {
+      try {
+        mediumDetails = await this.prisma.instruction_Medium.findMany({
+          where: { id: { in: filter.mediumIds } },
+          select: { id: true, instruction_medium: true },
+        });
+      } catch (error) {
+        // console.error is better for backend logs than logger.warn
+        console.error(`Could not fetch medium details for IDs: ${filter.mediumIds}`, error);
+        // Continue without medium details if fetch fails
+      }
+    }
+
     // Fetch chapter names first
     const chapters = await this.prisma.chapter.findMany({
       where: {
@@ -166,7 +243,8 @@ export class CreateTestPaperService {
     // 2. Get chapter question type counts
     const chapterQuestionTypeMap = await this.getChapterQuestionTypeCounts(
       filter.chapterIds,
-      filter.mediumIds
+      filter.mediumIds,
+      filter.questionOrigin
     );
 
     // 3. Initialize chapter marks tracking
@@ -236,8 +314,8 @@ export class CreateTestPaperService {
                 chapterMarksMap.set(currentChapterId, currentMarks + section.marks_per_question);
                 console.log(`Updated marks for Chapter ${currentChapterId}: ${currentMarks} -> ${currentMarks + section.marks_per_question}`);
 
-                chapterQuestionTypes.set(sqt.question_type_id, questionCount - 3);
-                console.log(`Updated question count for Chapter ${currentChapterId}: ${questionCount} -> ${questionCount - 3}`);
+                chapterQuestionTypes.set(sqt.question_type_id, questionCount - 2);
+                console.log(`Updated question count for Chapter ${currentChapterId}: ${questionCount} -> ${questionCount - 2}`);
                 
                 remainingQuestions--;
                 chapterAllocated = true;
@@ -255,9 +333,26 @@ export class CreateTestPaperService {
             }
           }
 
-          // If we reached the end of array without allocating, regenerate it
+          // If we reached the end of array without allocating, check if it's possible to allocate at all
           if (!chapterAllocated) {
-            console.log('Reached end of array without allocating. Regenerating array.');
+            console.log('Attempted all chapters, none suitable or available for:', sqt.question_type.type_name);
+
+            // Check if *any* chapter has remaining questions of this type
+            const isAnyQuestionAvailable = filter.chapterIds.some(chapterId => {
+              const types = chapterQuestionTypeMap.get(chapterId);
+              return types && (types.get(sqt.question_type_id) || 0) > 0;
+            });
+
+            if (!isAnyQuestionAvailable) {
+              console.error(`Allocation failed: No chapter has enough verified questions for type '${sqt.question_type.type_name}' (ID: ${sqt.question_type_id}) across all specified mediums.`);
+              throw new BadRequestException(
+                `Insufficient verified questions for type '${sqt.question_type.type_name}' ` +
+                `available across all selected mediums (${filter.mediumIds.join(', ')}) ` +
+                `in the chosen chapters (${filter.chapterIds.join(', ')}). Cannot generate test paper.`
+              );
+            }
+
+            console.log('Regenerating random chapters array as some chapters might still have questions.');
             randomChapters = this.getRandomChaptersByMarks(chapterMarksMap);
             console.log('New random chapters:', randomChapters);
           }
@@ -268,15 +363,28 @@ export class CreateTestPaperService {
 
         subsectionAllocations.push({
           subsectionQuestionTypeId: sqt.id,
+          section_id: section.id,
           questionTypeName: sqt.question_type.type_name,
+          sequentialNumber: sqt.seqencial_subquestion_number,
+          question_type_id: sqt.question_type_id,
+          question_type: {
+            id: sqt.question_type.id,
+            type_name: sqt.question_type.type_name
+          },
           allocatedChapters
         });
       }
 
       sectionAllocations.push({
         sectionId: section.id,
+        pattern_id: section.pattern_id,
         sectionName: section.section_name,
+        sequentialNumber: section.sequence_number,
+        section_number: section.section_number,
+        subSection: section.sub_section,
         totalQuestions: section.total_questions,
+        mandotory_questions: section.mandotory_questions,
+        marks_per_question: section.marks_per_question,
         absoluteMarks: sectionAbsoluteMarks,
         totalMarks: sectionTotalMarks,
         subsectionAllocations
@@ -302,6 +410,8 @@ export class CreateTestPaperService {
       patternName: pattern.pattern_name,
       totalMarks: pattern.total_marks,
       absoluteMarks: patternAbsoluteMarks,
+      questionOrigin: filter.questionOrigin,
+      mediums: mediumDetails,
       sectionAllocations: sectionAllocations.map(sa => ({
         sectionName: sa.sectionName,
         subsectionAllocations: sa.subsectionAllocations.map(suba => ({
@@ -319,13 +429,15 @@ export class CreateTestPaperService {
       patternName: pattern.pattern_name,
       totalMarks: pattern.total_marks,
       absoluteMarks: patternAbsoluteMarks,
+      questionOrigin: filter.questionOrigin,
+      mediums: mediumDetails,
       sectionAllocations,
       chapterMarks
     };
   }
 
   async getChaptersWithPossibleMarks(filterDto: FilterChaptersDto): Promise<ChapterMarksResponseDto[]> {
-    const { patternId, chapterIds, mediumIds } = filterDto;
+    const { patternId, chapterIds, mediumIds, questionOrigin = 'both' } = filterDto;
 
     // Get pattern details with sections
     const pattern = await this.prisma.pattern.findUnique({
@@ -356,6 +468,17 @@ export class CreateTestPaperService {
 
     const result: ChapterMarksResponseDto[] = [];
 
+    // Build the board_question condition based on questionOrigin
+    let boardQuestionCondition = '';
+    if (questionOrigin === 'board') {
+      boardQuestionCondition = 'AND q.board_question = true';
+    } else if (questionOrigin === 'other') {
+      boardQuestionCondition = 'AND q.board_question = false';
+    }
+    // For 'both', we don't add any condition
+
+    const boardQuestionSql = Prisma.sql([boardQuestionCondition]);
+    
     // Get question counts for each chapter and question type
     const questionCounts = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
       SELECT 
@@ -372,6 +495,7 @@ export class CreateTestPaperService {
       WHERE c.id = ANY(${chapterIds})
       AND qttm.instruction_medium_id = ANY(${mediumIds})
       AND qttm.is_verified = true
+      ${boardQuestionSql}
       GROUP BY c.id, qt.id
     `;
 
@@ -405,7 +529,7 @@ export class CreateTestPaperService {
           const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
 
           // Calculate how many questions can be allocated
-          const canAllocate = Math.floor(questionCount / 3) + (questionCount % 3 > 0 ? 1 : 0);
+          const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
           
           if (canAllocate >= totalQuestions) {
             absoluteMarks += totalQuestions * marksPerQuestion;
@@ -423,11 +547,11 @@ export class CreateTestPaperService {
             const questionTypeId = sqt.question_type_id;
             const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
 
-            if (questionCount >= 3) {
-              // Subtract 3 questions and add marks
+            if (questionCount >= 2) {
+              // Subtract 2 questions and add marks
               sectionMarks += marksPerQuestion;
               remainingQuestions--;
-              chapterQuestionTypes.set(questionTypeId, questionCount - 3);
+              chapterQuestionTypes.set(questionTypeId, questionCount - 2);
             }
           }
 
@@ -438,7 +562,8 @@ export class CreateTestPaperService {
       result.push({
         chapterId: chapter.id,
         chapterName: chapter.name,
-        absoluteMarks
+        absoluteMarks,
+        questionOrigin
       });
     }
 
@@ -448,7 +573,8 @@ export class CreateTestPaperService {
   private async calculatePossibleMarksPerChapter(
     pattern: any,
     chapterIds: number[],
-    mediumIds: number[]
+    mediumIds: number[],
+    questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<Map<number, number>> {
     const possibleMarksMap = new Map<number, number>();
     
@@ -458,6 +584,17 @@ export class CreateTestPaperService {
       question_type_id: number;
       question_count: number;
     }
+
+    // Build the board_question condition based on questionOrigin
+    let boardQuestionCondition = '';
+    if (questionOrigin === 'board') {
+      boardQuestionCondition = 'AND q.board_question = true';
+    } else if (questionOrigin === 'other') {
+      boardQuestionCondition = 'AND q.board_question = false';
+    }
+    // For 'both', we don't add any condition
+
+    const boardQuestionSql = Prisma.sql([boardQuestionCondition]);
 
     const questionAvailability = await this.prisma.$queryRaw<QuestionAvailability[]>`
       SELECT 
@@ -474,6 +611,7 @@ export class CreateTestPaperService {
       WHERE c.id = ANY(${chapterIds})
       AND qttm.instruction_medium_id = ANY(${mediumIds})
       AND qttm.is_verified = true
+      ${boardQuestionSql}
       GROUP BY c.id, qt.id
     `;
 
@@ -513,7 +651,8 @@ export class CreateTestPaperService {
     pattern: any,
     chapterIds: number[],
     mediumIds: number[],
-    targetMarks: Map<number, number>
+    targetMarks: Map<number, number>,
+    questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<Map<number, Map<number, number[]>>> {
     const allocationMap = new Map<number, Map<number, number[]>>();
     
@@ -532,7 +671,7 @@ export class CreateTestPaperService {
     );
     
     // Sort chapters by possible marks (ascending)
-    const possibleMarks = await this.calculatePossibleMarksPerChapter(pattern, chapterIds, mediumIds);
+    const possibleMarks = await this.calculatePossibleMarksPerChapter(pattern, chapterIds, mediumIds, questionOrigin);
     const sortedChapters = [...chapterIds].sort((a, b) => 
       possibleMarks.get(a) - possibleMarks.get(b)
     );
@@ -555,7 +694,8 @@ export class CreateTestPaperService {
           const hasQuestions = await this.hasVerifiedQuestions(
             chapterId,
             section.subsection_question_types.map(sqt => sqt.question_type_id),
-            mediumIds
+            mediumIds,
+            questionOrigin
           );
           
           if (hasQuestions) {
@@ -615,8 +755,17 @@ export class CreateTestPaperService {
   private async hasVerifiedQuestions(
     chapterId: number,
     questionTypeIds: number[],
-    mediumIds: number[]
+    mediumIds: number[],
+    questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<boolean> {
+    // Build where condition based on question origin
+    let boardQuestionCondition = {};
+    if (questionOrigin === 'board') {
+      boardQuestionCondition = { board_question: true };
+    } else if (questionOrigin === 'other') {
+      boardQuestionCondition = { board_question: false };
+    }
+
     const count = await this.prisma.question.count({
       where: {
         question_topics: {
@@ -640,7 +789,8 @@ export class CreateTestPaperService {
               }
             }
           }
-        }
+        },
+        ...boardQuestionCondition
       }
     });
     
@@ -668,6 +818,19 @@ export class CreateTestPaperService {
       throw new NotFoundException('Pattern not found');
     }
 
+    // Fetch Medium details (Need to fetch here too)
+    let mediumDetails: { id: number; instruction_medium: string }[] = [];
+    if (filter.mediumIds && filter.mediumIds.length > 0) {
+      try {
+        mediumDetails = await this.prisma.instruction_Medium.findMany({
+          where: { id: { in: filter.mediumIds } },
+          select: { id: true, instruction_medium: true },
+        });
+      } catch (error) {
+        console.error(`Could not fetch medium details for IDs: ${filter.mediumIds}`, error);
+      }
+    }
+
     // 2. Calculate absolute marks
     const patternAbsoluteMarks = pattern.sections.reduce((total, section) => 
       total + (section.total_questions * section.marks_per_question), 0);
@@ -687,28 +850,57 @@ export class CreateTestPaperService {
       pattern,
       filter.chapterIds,
       filter.mediumIds,
-      targetMarks
+      targetMarks,
+      filter.questionOrigin
     );
+
+    // Get chapter names
+    const chapters = await this.prisma.chapter.findMany({
+      where: {
+        id: {
+          in: filter.chapterIds
+        }
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    const chapterNameMap = new Map(chapters.map(ch => [ch.id, ch.name]));
 
     // 5. Format response
     const sectionAllocations: SectionAllocationDto[] = pattern.sections.map(section => {
       const sectionAllocation = allocationMap.get(section.id);
       const subsectionAllocations: SubsectionAllocationDto[] = section.subsection_question_types.map(sqt => ({
         subsectionQuestionTypeId: sqt.id,
+        section_id: section.id,
         questionTypeName: sqt.question_type.type_name,
+        sequentialNumber: sqt.seqencial_subquestion_number,
+        question_type_id: sqt.question_type_id,
+        question_type: {
+          id: sqt.question_type.id,
+          type_name: sqt.question_type.type_name
+        },
         allocatedChapters: Array.from(sectionAllocation.entries())
           .filter(([_, marks]) => marks.length > 0)
           .map(([chapterId, marks]) => ({
             chapterId,
-            chapterName: `Chapter ${chapterId}`, // You'll need to get actual chapter names
+            chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
             marks: marks.reduce((a, b) => a + b, 0)
           }))
       }));
 
       return {
         sectionId: section.id,
+        pattern_id: pattern.id,
         sectionName: section.section_name,
+        sequentialNumber: section.sequence_number,
+        section_number: section.section_number,
+        subSection: section.sub_section,
         totalQuestions: section.total_questions,
+        mandotory_questions: section.mandotory_questions,
+        marks_per_question: section.marks_per_question,
         absoluteMarks: section.total_questions * section.marks_per_question,
         totalMarks: section.mandotory_questions * section.marks_per_question,
         subsectionAllocations
@@ -723,7 +915,7 @@ export class CreateTestPaperService {
       
       return {
         chapterId,
-        chapterName: `Chapter ${chapterId}`, // You'll need to get actual chapter names
+        chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
         absoluteMarks: allocatedMarks
       };
     });
@@ -733,6 +925,8 @@ export class CreateTestPaperService {
       patternName: pattern.pattern_name,
       totalMarks: pattern.total_marks,
       absoluteMarks: patternAbsoluteMarks,
+      questionOrigin: filter.questionOrigin,
+      mediums: mediumDetails,
       sectionAllocations,
       chapterMarks
     };

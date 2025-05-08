@@ -1,4 +1,4 @@
-import { IsArray, IsNotEmpty, IsNumber } from 'class-validator';
+import { IsArray, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class FilterChaptersDto {
@@ -29,4 +29,13 @@ export class FilterChaptersDto {
   @IsArray()
   @IsNumber({}, { each: true })
   mediumIds: number[];
+  
+  @ApiProperty({ 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    default: 'both',
+    required: false
+  })
+  @IsOptional()
+  questionOrigin?: 'board' | 'other' | 'both';
 } 

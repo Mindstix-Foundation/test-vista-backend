@@ -144,4 +144,59 @@ export class AwsS3Service {
       throw new InternalServerErrorException('Failed to generate pre-signed URL for image');
     }
   }
+
+  async uploadTestPaperContent(
+    content: Buffer, 
+    filename: string, 
+    contentType: string
+  ): Promise<{
+    url: string;
+    metadata: {
+      originalFilename: string;
+      fileSize: number;
+      fileType: string;
+    };
+  }> {
+    try {
+      // Validate content type
+      const allowedContentTypes = ['text/html', 'application/pdf'];
+      if (!allowedContentTypes.includes(contentType)) {
+        throw new BadRequestException(
+          `Invalid content type. Allowed types: ${allowedContentTypes.join(', ')}`,
+        );
+      }
+
+      // Generate a unique filename
+      const timestamp = Date.now();
+      const key = `test-papers/${timestamp}-${filename.replace(/\s/g, '_')}`;
+
+      // Upload to S3
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Body: content,
+        Key: key,
+        ContentType: contentType,
+      });
+
+      await this.s3Client.send(command);
+      
+      // Construct the URL
+      const region = this.configService.get<string>('AWS_REGION');
+      const url = `https://${this.bucketName}.s3.${region}.amazonaws.com/${key}`;
+      
+      this.logger.log(`Test paper content uploaded successfully to ${url}`);
+
+      return {
+        url,
+        metadata: {
+          originalFilename: filename,
+          fileSize: content.length,
+          fileType: contentType,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error uploading test paper content to S3:', error);
+      throw error;
+    }
+  }
 } 

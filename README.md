@@ -1,4 +1,98 @@
+# Test Vista Question Import
 
+This directory contains scripts to help you add multiple questions to the Test Vista system using the `/questions/add` endpoint.
+
+## Files Overview
+
+1. `generate_questions.js` - Script that generates JSON for all questions
+2. `question_requests.json` - Output file containing all question JSON requests
+3. `add_questions.js` - Script to automatically send all questions to the API
+4. `individual_question_requests.js` - Script to extract individual question files
+5. `question_requests/` - Directory containing individual question files:
+   - `question_X.json` - JSON file for each question
+   - `question_X_curl.sh` - Curl command to add each question
+
+## Methods to Add Questions
+
+### Method 1: Run the Automated Script
+
+The `add_questions.js` script will send all questions to the API sequentially.
+
+1. Update the API URL and authentication token in `add_questions.js`:
+   ```javascript
+   const API_URL = 'http://localhost:3000/questions/add'; // Replace with your actual API URL
+   
+   // In the sendQuestion function:
+   headers: {
+     'Content-Type': 'application/json',
+     'Authorization': 'Bearer YOUR_TOKEN_HERE' // Replace with your actual token
+   }
+   ```
+
+2. Run the script:
+   ```bash
+   node add_questions.js
+   ```
+
+### Method 2: Use Individual Curl Commands
+
+1. Go to the `question_requests` directory:
+   ```bash
+   cd question_requests
+   ```
+
+2. Edit any of the `question_X_curl.sh` files to update:
+   - The API URL
+   - Your authentication token
+
+3. Make the curl script executable and run it:
+   ```bash
+   chmod +x question_1_curl.sh
+   ./question_1_curl.sh
+   ```
+
+### Method 3: Use Postman or Another API Testing Tool
+
+1. Import the individual JSON files from the `question_requests` directory into your API testing tool
+2. Set the request method to POST
+3. Set the URL to your API endpoint (e.g., `http://localhost:3000/questions/add`)
+4. Add appropriate headers:
+   - Content-Type: application/json
+   - Authorization: Bearer YOUR_TOKEN_HERE
+5. Send the request
+
+## Question Data Structure
+
+Each question follows this structure:
+
+```json
+{
+  "question_type_id": 1,
+  "board_question": true,
+  "question_text_data": {
+    "question_text": "QUESTION TEXT HERE",
+    "mcq_options": [
+      {
+        "option_text": "OPTION TEXT",
+        "is_correct": true/false
+      },
+      // More options...
+    ]
+  },
+  "question_topic_data": {
+    "topic_id": 13
+  },
+  "question_text_topic_medium_data": {
+    "instruction_medium_id": 12
+  }
+}
+```
+
+## Notes
+
+- All questions use the same `topic_id` (13) and `instruction_medium_id` (12)
+- All questions are of type MCQ (`question_type_id: 1`)
+- If you need to modify these values, edit the original `generate_questions.js` file and regenerate the files
 
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
@@ -99,4 +193,3 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
->>>>>>> b722f9f (Initial commit REST APIs for country,state,city,address,board)

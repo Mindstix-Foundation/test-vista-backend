@@ -1,0 +1,1 @@
+SELECT (SELECT COUNT(*) FROM "Test_Paper") as test_paper_count, (SELECT COUNT(*) FROM "Test_Paper_Question") as test_paper_question_count, (SELECT COUNT(*) FROM "Test_Paper_Chapter") as test_paper_chapter_count;

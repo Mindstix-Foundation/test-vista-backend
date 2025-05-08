@@ -107,6 +107,7 @@ model Instruction_Medium {
   school_instruction_mediums School_Instruction_Medium[]
   medium_standard_subjects   Medium_Standard_Subject[]
   question_text_topics       Question_Text_Topic_Medium[]
+  html_files                 HTML_File[]
 
   @@unique([board_id, instruction_medium])
 }
@@ -128,6 +129,7 @@ model School {
   school_instruction_mediums School_Instruction_Medium[]
   school_standards           School_Standard[]
   user_schools               User_School[]
+  test_papers                Test_Paper[]
 }
 
 model School_Instruction_Medium {
@@ -172,6 +174,7 @@ model User {
   user_schools     User_School[]
   teacher_subjects Teacher_Subject[]
   password_resets  Password_Reset[]
+  test_papers      Test_Paper[]
 }
 
 model Role {
@@ -212,8 +215,6 @@ model Medium_Standard_Subject {
   subject_id            Int
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
-
-  test_papers      Test_Paper[]
 
   @@unique([instruction_medium_id, standard_id, subject_id])
 }
@@ -281,8 +282,8 @@ model Pattern {
   created_at   DateTime @default(now()) @db.Timestamptz()
   updated_at   DateTime @updatedAt @db.Timestamptz()
 
-  sections    Section[]
-  test_papers Test_Paper[]
+  sections        Section[]
+  test_papers     Test_Paper[]
 }
 
 model Section {
@@ -300,7 +301,6 @@ model Section {
   updated_at          DateTime @updatedAt @db.Timestamptz()
 
   subsection_question_types Subsection_Question_Type[]
-  test_paper_questions      Test_Paper_Question[]
 
   @@unique([pattern_id, sequence_number])
 }
@@ -361,7 +361,6 @@ model Question {
   created_at           DateTime              @default(now()) @db.Timestamptz()
   updated_at           DateTime              @updatedAt @db.Timestamptz()
   question_texts       Question_Text[]
-  test_paper_questions Test_Paper_Question[]
   question_topics      Question_Topic[]
 }
 
@@ -434,36 +433,56 @@ model Match_Pair {
   updated_at       DateTime      @updatedAt @db.Timestamptz()
 }
 
+// New enum type for Test_Paper origin
+enum TestPaperOriginType {
+  board
+  other
+  both
+}
+
 model Test_Paper {
-  id                         Int                     @id @default(autoincrement())
-  name                       String                  @db.VarChar
-  exam_time                  DateTime                @db.Time
-  medium_standard_subject    Medium_Standard_Subject @relation(fields: [medium_standard_subject_id], references: [id], onDelete: Cascade)
-  medium_standard_subject_id Int
-  pattern                    Pattern                 @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
-  pattern_id                 Int
-  test_paper_origin_id       Int
-  created_at                 DateTime                @default(now()) @db.Timestamptz()
-  test_paper_chapters        Test_Paper_Chapter[]
-  test_paper_questions       Test_Paper_Question[]
+  id                    Int                @id @default(autoincrement())
+  name                  String             @db.VarChar
+  exam_time             DateTime           @db.Time
+  user                  User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user_id               Int
+  school                School             @relation(fields: [school_id], references: [id], onDelete: Cascade)
+  school_id             Int
+  pattern               Pattern            @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
+  pattern_id            Int
+  test_paper_origin_type TestPaperOriginType?
+  created_at            DateTime           @default(now()) @db.Timestamptz()
+  updated_at            DateTime           @updatedAt @db.Timestamptz()
+  
+  test_paper_chapters   Test_Paper_Chapter[]
+  html_files            HTML_File[]
+}
+
+model HTML_File {
+  id                    Int                @id @default(autoincrement())
+  test_paper            Test_Paper         @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+  test_paper_id         Int                
+  content_url           String             @db.VarChar // URL to the HTML file stored in AWS
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
+  instruction_medium_id Int
+  is_default_medium     Boolean            @default(false) // Flag to mark this as the default/primary language version
+  version               Int                @default(1) // To track revisions of the same medium
+  file_size             Int?               // Size in bytes
+  is_pdf                Boolean            @default(false) // Flag to identify if it's stored as PDF
+  access_count          Int                @default(0) // Track how many times this has been accessed
+  last_accessed         DateTime?          // When was this file last accessed
+  created_at            DateTime           @default(now()) @db.Timestamptz()
+  updated_at            DateTime           @updatedAt @db.Timestamptz()
+  
+  @@unique([test_paper_id, instruction_medium_id])
 }
 
 model Test_Paper_Chapter {
-  id            Int        @id @default(autoincrement())
-  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
-  test_paper_id Int
-  chapter       Chapter    @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
-  chapter_id    Int
-  weightage     Int
-  created_at    DateTime   @default(now()) @db.Timestamptz()
-}
-
-model Test_Paper_Question {
-  id            Int        @id @default(autoincrement())
-  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
-  test_paper_id Int
-  section       Section    @relation(fields: [section_id], references: [id], onDelete: Cascade)
-  section_id    Int
-  question      Question   @relation(fields: [question_id], references: [id], onDelete: Cascade)
-  question_id   Int
+  id                Int        @id @default(autoincrement())
+  test_paper        Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+  test_paper_id     Int
+  chapter           Chapter    @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+  chapter_id        Int
+  weightage         Int
+  created_at        DateTime   @default(now()) @db.Timestamptz()
 }

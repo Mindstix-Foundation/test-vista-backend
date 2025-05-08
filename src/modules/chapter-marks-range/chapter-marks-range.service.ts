@@ -174,8 +174,8 @@ export class ChapterMarksRangeService {
   }
 
   async getChapterMarksRanges(filterDto: ChapterMarksRangeFilterDto): Promise<ChapterMarksRangeResponseDto[]> {
-    const { patternId, chapterIds, mediumIds } = filterDto;
-    this.logger.debug(`Processing request for patternId: ${patternId}, chapterIds: ${chapterIds}, mediumIds: ${mediumIds}`);
+    const { patternId, chapterIds, mediumIds, questionOrigin = 'both' } = filterDto;
+    this.logger.debug(`Processing request for patternId: ${patternId}, chapterIds: ${chapterIds}, mediumIds: ${mediumIds}, questionOrigin: ${questionOrigin}`);
 
     // Get pattern details with sections
     const pattern = await this.prisma.pattern.findUnique({
@@ -209,26 +209,110 @@ export class ChapterMarksRangeService {
 
     this.logger.debug(`Found ${chapters.length} chapters`);
 
-    // Get question counts for each chapter and question type
-    const questionCounts = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
-      SELECT 
-        c.id as chapter_id,
-        qt.id as question_type_id,
-        COUNT(DISTINCT q.id) as count
-      FROM "Chapter" c
-      JOIN "Topic" t ON t.chapter_id = c.id
-      JOIN "Question_Topic" qtopic ON qtopic.topic_id = t.id
-      JOIN "Question" q ON q.id = qtopic.question_id
-      JOIN "Question_Type" qt ON qt.id = q.question_type_id
-      JOIN "Question_Text" qtext ON qtext.question_id = q.id
-      JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id
-      WHERE c.id = ANY(${chapterIds})
-      AND qttm.instruction_medium_id = ANY(${mediumIds})
-      AND qttm.is_verified = true
-      GROUP BY c.id, qt.id
-    `;
+    // Get question counts for each chapter and question type, ensuring questions exist in all mediums
+    const requiredMediumCount = mediumIds.length;
+    
+    // Ensure mediumIds array is not empty to avoid SQL errors
+    if (mediumIds.length === 0) {
+      this.logger.warn('No medium IDs provided for marks range calculation. Returning empty results.');
+      return []; // Or handle as appropriate, maybe throw error or return default
+    }
 
-    this.logger.debug(`Found ${questionCounts.length} question count records`);
+    // Based on questionOrigin, execute the appropriate query
+    let questionCounts;
+    
+    if (questionOrigin === 'board') {
+      // Board questions only
+      questionCounts = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
+        SELECT
+          sub.chapter_id,
+          sub.question_type_id,
+          COUNT(sub.question_id) as count
+        FROM (
+            SELECT
+              t.chapter_id,
+              q.question_type_id,
+              q.id as question_id
+            FROM "Question" q
+            JOIN "Question_Topic" qtopic ON qtopic.question_id = q.id
+            JOIN "Topic" t ON t.id = qtopic.topic_id
+            WHERE t.chapter_id = ANY(${chapterIds})
+            AND q.board_question = true
+            AND EXISTS (
+                SELECT 1
+                FROM "Question_Text" qtext
+                JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id AND qttm.question_topic_id = qtopic.id
+                WHERE qtext.question_id = q.id
+                AND qttm.instruction_medium_id = ANY(${mediumIds})
+                AND qttm.is_verified = true
+                GROUP BY qtext.question_id
+                HAVING COUNT(DISTINCT qttm.instruction_medium_id) = ${requiredMediumCount}
+            )
+        ) AS sub
+        GROUP BY sub.chapter_id, sub.question_type_id
+      `;
+    } else if (questionOrigin === 'other') {
+      // Non-board questions only
+      questionCounts = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
+        SELECT
+          sub.chapter_id,
+          sub.question_type_id,
+          COUNT(sub.question_id) as count
+        FROM (
+            SELECT
+              t.chapter_id,
+              q.question_type_id,
+              q.id as question_id
+            FROM "Question" q
+            JOIN "Question_Topic" qtopic ON qtopic.question_id = q.id
+            JOIN "Topic" t ON t.id = qtopic.topic_id
+            WHERE t.chapter_id = ANY(${chapterIds})
+            AND q.board_question = false
+            AND EXISTS (
+                SELECT 1
+                FROM "Question_Text" qtext
+                JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id AND qttm.question_topic_id = qtopic.id
+                WHERE qtext.question_id = q.id
+                AND qttm.instruction_medium_id = ANY(${mediumIds})
+                AND qttm.is_verified = true
+                GROUP BY qtext.question_id
+                HAVING COUNT(DISTINCT qttm.instruction_medium_id) = ${requiredMediumCount}
+            )
+        ) AS sub
+        GROUP BY sub.chapter_id, sub.question_type_id
+      `;
+    } else {
+      // Both board and non-board questions
+      questionCounts = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
+        SELECT
+          sub.chapter_id,
+          sub.question_type_id,
+          COUNT(sub.question_id) as count
+        FROM (
+            SELECT
+              t.chapter_id,
+              q.question_type_id,
+              q.id as question_id
+            FROM "Question" q
+            JOIN "Question_Topic" qtopic ON qtopic.question_id = q.id
+            JOIN "Topic" t ON t.id = qtopic.topic_id
+            WHERE t.chapter_id = ANY(${chapterIds})
+            AND EXISTS (
+                SELECT 1
+                FROM "Question_Text" qtext
+                JOIN "Question_Text_Topic_Medium" qttm ON qttm.question_text_id = qtext.id AND qttm.question_topic_id = qtopic.id
+                WHERE qtext.question_id = q.id
+                AND qttm.instruction_medium_id = ANY(${mediumIds})
+                AND qttm.is_verified = true
+                GROUP BY qtext.question_id
+                HAVING COUNT(DISTINCT qttm.instruction_medium_id) = ${requiredMediumCount}
+            )
+        ) AS sub
+        GROUP BY sub.chapter_id, sub.question_type_id
+      `;
+    }
+
+    this.logger.debug(`Found ${questionCounts.length} question count records after applying filters: mediums and questionOrigin=${questionOrigin}`);
 
     // Create a map of chapter question type counts
     const chapterQuestionTypeMap = new Map<number, Map<number, number>>();
