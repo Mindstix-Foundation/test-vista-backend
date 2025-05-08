@@ -22,6 +22,14 @@ export class ChapterMarksRequestDto {
   @IsArray()
   @IsNumber({}, { each: true })
   requestedMarks: number[];
+
+  @ApiProperty({ 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    default: 'both'
+  })
+  @IsOptional()
+  questionOrigin?: 'board' | 'other' | 'both';
 }
 
 export class AllocatedChapterDto {
@@ -139,6 +147,10 @@ export class ChapterMarksDto {
   @ApiProperty({ description: 'Absolute marks allocated to chapter', example: 10 })
   @Expose()
   absoluteMarks: number;
+
+  @ApiProperty({ description: 'Marks originally requested for the chapter', example: 12 })
+  @Expose()
+  requestedMarks: number;
 }
 
 export class SectionDto {
@@ -193,6 +205,16 @@ export class SubsectionQuestionTypeDto {
   };
 }
 
+export class MediumResponseDto {
+  @ApiProperty({ description: 'Medium ID', example: 1 })
+  @Expose()
+  id: number;
+
+  @ApiProperty({ description: 'Medium name', example: 'English' })
+  @Expose()
+  instruction_medium: string;
+}
+
 export class ChapterMarksDistributionResponseDto {
   @ApiProperty({ description: 'Pattern ID', example: 1 })
   @Expose()
@@ -210,6 +232,16 @@ export class ChapterMarksDistributionResponseDto {
   @Expose()
   absoluteMarks: number;
 
+  @ApiProperty({ description: 'Question origin (board, other, or both)', example: 'board', required: false })
+  @Expose()
+  @IsOptional()
+  questionOrigin?: 'board' | 'other' | 'both';
+
+  @ApiProperty({ description: 'Instruction mediums used', type: [MediumResponseDto] })
+  @Expose()
+  @Type(() => MediumResponseDto)
+  mediums: MediumResponseDto[];
+
   @ApiProperty({ description: 'Section allocations', type: [SectionAllocationDto] })
   @Expose()
   @Type(() => SectionAllocationDto)
@@ -219,6 +251,24 @@ export class ChapterMarksDistributionResponseDto {
   @Expose()
   @Type(() => ChapterMarksDto)
   chapterMarks: ChapterMarksDto[];
+
+  @ApiProperty({ 
+    description: 'Indicates if there were insufficient questions to allocate marks as requested', 
+    example: false,
+    required: false 
+  })
+  @Expose()
+  @IsOptional()
+  insufficientQuestions?: boolean;
+
+  @ApiProperty({ 
+    description: 'Message describing any issues with question allocation', 
+    example: 'Some marks could not be allocated due to insufficient questions',
+    required: false 
+  })
+  @Expose()
+  @IsOptional()
+  allocationMessage?: string;
 }
 
 // DTOs for Final Questions Distribution with Request Body
@@ -380,6 +430,38 @@ export class FinalQuestionsDistributionBodyDto {
   @Expose()
   absoluteMarks: number;
 
+  @ApiProperty({ 
+    description: 'Medium IDs to filter questions by', 
+    example: [1, 2], 
+    type: [Number],
+    required: false 
+  })
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @Expose()
+  mediumIds?: number[];
+
+  @ApiProperty({ 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    default: 'both',
+    required: false
+  })
+  @IsOptional()
+  @Expose()
+  questionOrigin?: 'board' | 'other' | 'both';
+
+  @ApiProperty({ 
+    description: 'Medium information', 
+    type: [MediumResponseDto],
+    required: false
+  })
+  @IsOptional()
+  @Expose()
+  @Type(() => MediumResponseDto)
+  mediums?: MediumResponseDto[];
+
   @ApiProperty({ description: 'Section allocations', type: [FinalQuestionsSectionDto] })
   @IsArray()
   @Expose()
@@ -391,54 +473,46 @@ export class FinalQuestionsDistributionBodyDto {
   @Expose()
   @Type(() => FinalQuestionsChapterMarksDto)
   chapterMarks: FinalQuestionsChapterMarksDto[];
-
-  @ApiProperty({ 
-    description: 'Optional medium IDs to filter questions by', 
-    example: [1, 2], 
-    type: [Number],
-    required: false 
-  })
-  @IsOptional()
-  @IsArray()
-  @IsNumber({}, { each: true })
-  @Expose()
-  mediumIds?: number[];
 }
 
 export class ChangeQuestionRequestDto {
-  @ApiProperty({ description: 'ID of the question to be changed', example: 123 })
-  @IsNotEmpty()
-  @IsNumber()
+  @ApiProperty({ 
+    description: 'IDs of the question texts to be changed', 
+    example: [123, 456], 
+    type: [Number]
+  })
+  @IsArray()
+  @IsNumber({}, { each: true })
   @Expose()
-  questionId: number;
-
-  @ApiProperty({ description: 'Question type ID to filter replacement questions', example: 2 })
-  @IsNotEmpty()
-  @IsNumber()
-  @Expose()
-  questionTypeId: number;
-
-  @ApiProperty({ description: 'Chapter ID to find replacement questions from', example: 5 })
-  @IsNotEmpty()
-  @IsNumber()
-  @Expose()
-  chapterId: number;
-
-  @ApiProperty({ description: 'Medium ID to get questions in specific language', example: 1 })
-  @IsNotEmpty()
-  @IsNumber()
-  @Expose()
-  mediumId: number;
+  questionTextIds: number[];
 
   @ApiProperty({ 
-    description: 'Array of question IDs already in the test paper (to avoid duplicates)', 
-    example: [123, 456, 789], 
+    description: 'Medium IDs to get questions in specific languages', 
+    example: [1, 2], 
     type: [Number] 
   })
   @IsArray()
   @IsNumber({}, { each: true })
   @Expose()
-  existingQuestionIds: number[];
+  mediumIds: number[];
+
+  @ApiProperty({ 
+    description: 'Chapter ID to find replacement questions from', 
+    example: 5
+  })
+  @IsNumber()
+  @Expose()
+  chapterId: number;
+  
+  @ApiProperty({ 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    default: 'both',
+    required: false
+  })
+  @IsOptional()
+  @Expose()
+  questionOrigin?: 'board' | 'other' | 'both';
 }
 
 export class ChangeQuestionResponseDto {

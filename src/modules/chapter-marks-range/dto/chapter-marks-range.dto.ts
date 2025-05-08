@@ -23,6 +23,15 @@ export class ChapterMarksRangeFilterDto {
     type: [Number]
   })
   mediumIds: number[];
+
+  @ApiProperty({
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    example: 'both',
+    required: false,
+    default: 'both',
+    enum: ['board', 'other', 'both']
+  })
+  questionOrigin?: 'board' | 'other' | 'both';
 }
 
 export class ChapterMarksRangeResponseDto {

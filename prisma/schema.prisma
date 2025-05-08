@@ -433,6 +433,13 @@ model Match_Pair {
   updated_at       DateTime      @updatedAt @db.Timestamptz()
 }
 
+// New enum type for Test_Paper origin
+enum TestPaperOriginType {
+  board
+  other
+  both
+}
+
 model Test_Paper {
   id                    Int                @id @default(autoincrement())
   name                  String             @db.VarChar
@@ -443,7 +450,7 @@ model Test_Paper {
   school_id             Int
   pattern               Pattern            @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
   pattern_id            Int
-  test_paper_origin_id  Int?
+  test_paper_origin_type TestPaperOriginType?
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
   

@@ -9,6 +9,13 @@ export class CreateTestPaperFilterDto {
 
   @ApiProperty({ description: 'Array of instruction medium IDs', type: [Number] })
   mediumIds: number[];
+
+  @ApiProperty({ 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    default: 'both'
+  })
+  questionOrigin?: 'board' | 'other' | 'both';
 }
 
 export class ChapterInfoDto {
@@ -97,6 +104,15 @@ export class ChapterMarksDto {
   absoluteMarks: number;
 }
 
+// ADD Definition for Medium Response
+export class MediumResponseDto {
+  @ApiProperty({ description: 'Medium ID', example: 1 })
+  id: number;
+
+  @ApiProperty({ description: 'Medium name', example: 'English' })
+  instruction_medium: string;
+}
+
 export class CreateTestPaperResponseDto {
   @ApiProperty({ description: 'Pattern ID' })
   patternId: number;
@@ -109,6 +125,17 @@ export class CreateTestPaperResponseDto {
 
   @ApiProperty({ description: 'Absolute marks for the pattern' })
   absoluteMarks: number;
+
+  @ApiProperty({ 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    required: false 
+  })
+  questionOrigin?: 'board' | 'other' | 'both';
+
+  // ADD Mediums field
+  @ApiProperty({ description: 'Instruction mediums used', type: [MediumResponseDto] })
+  mediums: MediumResponseDto[];
 
   @ApiProperty({ description: 'Section allocations', type: [SectionAllocationDto] })
   sectionAllocations: SectionAllocationDto[];

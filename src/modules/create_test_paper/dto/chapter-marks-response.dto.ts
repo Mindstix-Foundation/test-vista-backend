@@ -18,4 +18,12 @@ export class ChapterMarksResponseDto {
     example: 20
   })
   absoluteMarks: number;
+  
+  @ApiProperty({ 
+    description: 'Question origin used for the calculation',
+    enum: ['board', 'other', 'both'],
+    example: 'board',
+    required: false 
+  })
+  questionOrigin?: 'board' | 'other' | 'both';
 } 

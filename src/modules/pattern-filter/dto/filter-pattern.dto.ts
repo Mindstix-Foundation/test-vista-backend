@@ -8,24 +8,20 @@ enum QuestionOrigin {
   BOTH = 'both'
 }
 
-export class FilterPatternDto {
-  @ApiProperty({ description: 'Instruction medium ID', required: false })
-  @IsOptional()
+// Base DTO with common fields for both endpoints
+export class BaseFilterPatternDto {
+  @ApiProperty({ description: 'Array of instruction medium IDs', required: true, type: [Number] })
+  @IsNotEmpty()
+  @IsArray()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.split(',').map(id => parseInt(id.trim(), 10));
+    }
+    return Array.isArray(value) ? value : value ? [value] : [];
+  })
   @Type(() => Number)
-  @IsNumber({}, { message: 'mediumId must be a number' })
-  mediumId?: number;
-
-  @ApiProperty({ description: 'Standard ID', required: false })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: 'standardId must be a number' })
-  standardId?: number;
-
-  @ApiProperty({ description: 'Subject ID', required: false })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: 'subjectId must be a number' })
-  subjectId?: number;
+  @IsNumber({}, { each: true, message: 'Each mediumIds must be a number' })
+  mediumIds: number[];
 
   @ApiProperty({ description: 'Array of chapter IDs', required: true, type: [Number] })
   @IsNotEmpty()
@@ -40,14 +36,20 @@ export class FilterPatternDto {
   @IsNumber({}, { each: true, message: 'Each chapterIds must be a number' })
   chapterIds: number[];
 
-  @ApiProperty({ description: 'Question origin type (board, other, both)', required: false, enum: QuestionOrigin, default: QuestionOrigin.BOTH })
-  @IsOptional()
+  @ApiProperty({ description: 'Question origin type (board, other, both)', required: true, enum: QuestionOrigin })
+  @IsNotEmpty()
   @IsEnum(QuestionOrigin, { message: 'questionOrigin must be one of: board, other, both' })
-  questionOrigin?: QuestionOrigin = QuestionOrigin.BOTH;
+  questionOrigin: QuestionOrigin;
+}
 
-  @ApiProperty({ description: 'Total marks filter', required: false })
-  @IsOptional()
+// Used for /pattern-filter/unique-marks
+export class FilterPatternDto extends BaseFilterPatternDto {}
+
+// Used for /pattern-filter
+export class FilterPatternsWithMarksDto extends BaseFilterPatternDto {
+  @ApiProperty({ description: 'Total marks filter', required: true })
+  @IsNotEmpty()
   @Type(() => Number)
   @IsInt({ message: 'marks must be an integer' })
-  marks?: number;
+  marks: number;
 } 

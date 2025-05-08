@@ -18,61 +18,50 @@ export class CreateTestPaperController {
   @ApiQuery({ name: 'patternId', type: Number, required: true })
   @ApiQuery({ name: 'chapterIds', type: [Number], required: true })
   @ApiQuery({ name: 'mediumIds', type: [Number], required: true })
+  @ApiQuery({ 
+    name: 'questionOrigin', 
+    enum: ['board', 'other', 'both'], 
+    required: false, 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)'
+  })
   async getTestPaperAllocation(
     @Query('patternId') patternId: number,
     @Query('chapterIds') chapterIds: string,
     @Query('mediumIds') mediumIds: string,
+    @Query('questionOrigin') questionOrigin?: 'board' | 'other' | 'both',
   ): Promise<CreateTestPaperResponseDto> {
     const filter: CreateTestPaperFilterDto = {
       patternId,
       chapterIds: chapterIds.split(',').map(Number),
       mediumIds: mediumIds.split(',').map(Number),
+      questionOrigin: questionOrigin || 'both',
     };
 
     return this.createTestPaperService.getTestPaperAllocation(filter);
   }
 
-  @Get('chapters/marks')
-  @ApiOperation({ 
-    summary: 'Get possible marks for chapters based on pattern and mediums',
-    description: 'Returns an array of chapters with their possible mark combinations based on the given pattern, chapters, and mediums. The possible marks are calculated by considering available question types and their combinations.'
-  })
+  @Get('chapters-marks')
+  @ApiOperation({ summary: 'Get possible marks for each chapter based on available questions' })
+  @ApiQuery({ name: 'patternId', type: Number, required: true })
+  @ApiQuery({ name: 'chapterIds', type: [Number], required: true })
+  @ApiQuery({ name: 'mediumIds', type: [Number], required: true })
   @ApiQuery({ 
-    name: 'patternId', 
-    required: true, 
-    type: Number,
-    description: 'ID of the pattern to use for mark calculation'
-  })
-  @ApiQuery({ 
-    name: 'chapterIds', 
-    required: true, 
-    type: String,
-    description: 'Comma-separated list of chapter IDs to get marks for'
-  })
-  @ApiQuery({ 
-    name: 'mediumIds', 
-    required: true, 
-    type: String,
-    description: 'Comma-separated list of medium IDs to filter questions by'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Successfully retrieved chapter marks',
-    type: [ChapterMarksResponseDto]
-  })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Pattern not found'
+    name: 'questionOrigin', 
+    enum: ['board', 'other', 'both'], 
+    required: false, 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)'
   })
   async getChaptersWithPossibleMarks(
     @Query('patternId') patternId: number,
     @Query('chapterIds') chapterIds: string,
     @Query('mediumIds') mediumIds: string,
+    @Query('questionOrigin') questionOrigin?: 'board' | 'other' | 'both',
   ): Promise<ChapterMarksResponseDto[]> {
     const filter: FilterChaptersDto = {
       patternId,
       chapterIds: chapterIds.split(',').map(Number),
       mediumIds: mediumIds.split(',').map(Number),
+      questionOrigin: questionOrigin || 'both',
     };
 
     return this.createTestPaperService.getChaptersWithPossibleMarks(filter);

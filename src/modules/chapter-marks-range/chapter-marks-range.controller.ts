@@ -13,52 +13,6 @@ import { ChapterMarksRangeFilterDto, ChapterMarksRangeResponseDto } from './dto/
 export class ChapterMarksRangeController {
   constructor(private readonly chapterMarksRangeService: ChapterMarksRangeService) {}
 
-  @Get('chapters/marks')
-  @ApiOperation({ 
-    summary: 'Get possible marks for chapters based on pattern and mediums',
-    description: 'Returns an array of chapters with their possible mark combinations based on the given pattern, chapters, and mediums. The possible marks are calculated by considering available question types and their combinations.'
-  })
-  @ApiQuery({ 
-    name: 'patternId', 
-    required: true, 
-    type: Number,
-    description: 'ID of the pattern to use for mark calculation'
-  })
-  @ApiQuery({ 
-    name: 'chapterIds', 
-    required: true, 
-    type: String,
-    description: 'Comma-separated list of chapter IDs to get marks for'
-  })
-  @ApiQuery({ 
-    name: 'mediumIds', 
-    required: true, 
-    type: String,
-    description: 'Comma-separated list of medium IDs to filter questions by'
-  })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'Successfully retrieved chapter marks',
-    type: [ChapterMarksResponseDto]
-  })
-  @ApiResponse({ 
-    status: 404, 
-    description: 'Pattern not found'
-  })
-  async getChaptersWithPossibleMarks(
-    @Query('patternId') patternId: number,
-    @Query('chapterIds') chapterIds: string,
-    @Query('mediumIds') mediumIds: string,
-  ): Promise<ChapterMarksResponseDto[]> {
-    const filter: FilterChaptersDto = {
-      patternId,
-      chapterIds: chapterIds.split(',').map(Number),
-      mediumIds: mediumIds.split(',').map(Number),
-    };
-
-    return this.chapterMarksRangeService.getChaptersWithPossibleMarks(filter);
-  }
-
   @Get('chapters/marks/range')
   @ApiOperation({ 
     summary: 'Get possible mark ranges for chapters',
@@ -82,6 +36,14 @@ export class ChapterMarksRangeController {
     type: String,
     description: 'Comma-separated list of medium IDs to filter questions by'
   })
+  @ApiQuery({ 
+    name: 'questionOrigin', 
+    required: false, 
+    type: String,
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)',
+    enum: ['board', 'other', 'both'],
+    example: 'both'
+  })
   @ApiResponse({ 
     status: 200, 
     description: 'Successfully retrieved chapter mark ranges',
@@ -96,11 +58,13 @@ export class ChapterMarksRangeController {
     @Query('patternId') patternId: number,
     @Query('chapterIds') chapterIds: string,
     @Query('mediumIds') mediumIds: string,
+    @Query('questionOrigin') questionOrigin: 'board' | 'other' | 'both' = 'both',
   ): Promise<ChapterMarksRangeResponseDto[]> {
     const filter: ChapterMarksRangeFilterDto = {
       patternId,
       chapterIds: chapterIds.split(',').map(Number),
       mediumIds: mediumIds.split(',').map(Number),
+      questionOrigin,
     };
 
     return this.chapterMarksRangeService.getChapterMarksRanges(filter);

@@ -25,11 +25,18 @@ export class ChapterMarksDistributionController {
   @ApiQuery({ name: 'chapterIds', type: 'number', isArray: true, required: true })
   @ApiQuery({ name: 'mediumIds', type: 'number', isArray: true, required: true })
   @ApiQuery({ name: 'requestedMarks', type: 'number', isArray: true, required: true })
+  @ApiQuery({ 
+    name: 'questionOrigin', 
+    enum: ['board', 'other', 'both'], 
+    required: false, 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)'
+  })
   async distributeChapterMarks(
     @Query('patternId') patternId: number,
     @Query('chapterIds') chapterIds: string,
     @Query('mediumIds') mediumIds: string,
-    @Query('requestedMarks') requestedMarks: string
+    @Query('requestedMarks') requestedMarks: string,
+    @Query('questionOrigin') questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<ChapterMarksDistributionResponseDto> {
     // Parse arrays from query strings
     const parsedChapterIds = chapterIds.split(',').map(id => +id);
@@ -58,7 +65,8 @@ export class ChapterMarksDistributionController {
       patternId: +patternId,
       chapterIds: parsedChapterIds,
       mediumIds: parsedMediumIds,
-      requestedMarks: parsedRequestedMarks
+      requestedMarks: parsedRequestedMarks,
+      questionOrigin: questionOrigin || 'both'
     };
     
     return this.chapterMarksDistributionService.distributeChapterMarks(filter);
@@ -88,52 +96,60 @@ export class ChapterMarksDistributionController {
     description: 'Returns a new question to replace the existing one',
     type: ChangeQuestionResponseDto
   })
-  @ApiQuery({ name: 'questionId', type: 'number', required: true })
-  @ApiQuery({ name: 'questionTypeId', type: 'number', required: true })
-  @ApiQuery({ name: 'chapterId', type: 'number', required: true })
-  @ApiQuery({ name: 'mediumId', type: 'number', required: true })
   @ApiQuery({ 
-    name: 'existingQuestionIds', 
+    name: 'questionTextIds', 
     type: 'array', 
     isArray: true,
     required: true, 
-    description: 'Array of question IDs already in the test paper',
+    description: 'Array of question text IDs to be changed',
     items: { type: 'number' }
   })
+  @ApiQuery({ 
+    name: 'mediumIds', 
+    type: 'array', 
+    isArray: true,
+    required: true, 
+    description: 'Array of medium IDs to get questions in specific languages',
+    items: { type: 'number' }
+  })
+  @ApiQuery({ 
+    name: 'chapterId', 
+    type: 'number',
+    required: true, 
+    description: 'Chapter ID to find replacement questions from'
+  })
+  @ApiQuery({ 
+    name: 'questionOrigin', 
+    enum: ['board', 'other', 'both'], 
+    required: false, 
+    description: 'Filter by question origin: "board" (only board questions), "other" (only non-board questions), or "both" (all questions)'
+  })
   async changeQuestion(
-    @Query('questionId') questionId: number,
-    @Query('questionTypeId') questionTypeId: number,
+    @Query('questionTextIds') questionTextIds: string,
+    @Query('mediumIds') mediumIds: string,
     @Query('chapterId') chapterId: number,
-    @Query('mediumId') mediumId: number,
-    @Query('existingQuestionIds') existingQuestionIds: string
+    @Query('questionOrigin') questionOrigin?: 'board' | 'other' | 'both'
   ): Promise<ChangeQuestionResponseDto> {
-    // Parse the query parameter - it will come as comma-separated string
-    // but now documented properly in Swagger as an array
-    const parsedExistingQuestionIds = existingQuestionIds.split(',').map(id => +id);
+    // Parse the query parameters - they will come as comma-separated strings
+    const parsedQuestionTextIds = questionTextIds.split(',').map(id => +id);
+    const parsedMediumIds = mediumIds.split(',').map(id => +id);
     
     // Validate input parameters
-    if (isNaN(+questionId) || +questionId <= 0) {
-      throw new BadRequestException('Question ID must be a valid positive number');
+    if (parsedQuestionTextIds.some(id => isNaN(id) || id <= 0)) {
+      throw new BadRequestException('All question text IDs must be valid positive numbers');
     }
-    if (isNaN(+questionTypeId) || +questionTypeId <= 0) {
-      throw new BadRequestException('Question type ID must be a valid positive number');
+    if (parsedMediumIds.some(id => isNaN(id) || id <= 0)) {
+      throw new BadRequestException('All medium IDs must be valid positive numbers');
     }
     if (isNaN(+chapterId) || +chapterId <= 0) {
       throw new BadRequestException('Chapter ID must be a valid positive number');
     }
-    if (isNaN(+mediumId) || +mediumId <= 0) {
-      throw new BadRequestException('Medium ID must be a valid positive number');
-    }
-    if (parsedExistingQuestionIds.some(id => isNaN(id) || id <= 0)) {
-      throw new BadRequestException('All existing question IDs must be valid positive numbers');
-    }
 
     const request: ChangeQuestionRequestDto = {
-      questionId: +questionId,
-      questionTypeId: +questionTypeId,
+      questionTextIds: parsedQuestionTextIds,
+      mediumIds: parsedMediumIds,
       chapterId: +chapterId,
-      mediumId: +mediumId,
-      existingQuestionIds: parsedExistingQuestionIds
+      questionOrigin: questionOrigin || 'both'
     };
     
     return this.chapterMarksDistributionService.changeQuestion(request);
