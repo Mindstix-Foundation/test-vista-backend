@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
 import { ReorderStandardDto } from './dto/reorder-standard.dto';
@@ -336,6 +336,324 @@ export class StandardService {
 
       return updatedStandard;
     });
+  }
+
+  /**
+   * Find common standards across multiple instruction mediums
+   * @param instructionMediumIds Array of instruction medium IDs
+   * @returns Array of common standards
+   */
+  async findCommonStandards(instructionMediumIds: number[]): Promise<Standard[]> {
+    try {
+      if (instructionMediumIds.length === 0) {
+        throw new BadRequestException('At least one instruction medium ID is required');
+      }
+
+      // First, validate that all instruction mediums exist
+      const instructionMediums = await this.prisma.instruction_Medium.findMany({
+        where: {
+          id: {
+            in: instructionMediumIds
+          }
+        }
+      });
+
+      if (instructionMediums.length !== instructionMediumIds.length) {
+        const foundIds = instructionMediums.map(medium => medium.id);
+        const missingIds = instructionMediumIds.filter(id => !foundIds.includes(id));
+        throw new NotFoundException(`Instruction medium(s) with ID(s) ${missingIds.join(', ')} not found`);
+      }
+
+      // If only one instruction medium, return all standards associated with it
+      if (instructionMediumIds.length === 1) {
+        const mediumId = instructionMediumIds[0];
+        this.logger.log(`Finding standards for a single instruction medium: ${mediumId}`);
+        
+        // Get all standard IDs for this medium
+        const standardsInMedium = await this.prisma.medium_Standard_Subject.findMany({
+          where: { instruction_medium_id: mediumId },
+          distinct: ['standard_id'],
+          select: { standard_id: true }
+        });
+        
+        const standardIds = standardsInMedium.map(item => item.standard_id);
+        
+        if (standardIds.length === 0) {
+          return [];
+        }
+        
+        // Fetch and return the standard objects
+        return await this.prisma.standard.findMany({
+          where: {
+            id: {
+              in: standardIds
+            }
+          },
+          orderBy: [
+            { sequence_number: 'asc' },
+            { name: 'asc' }
+          ],
+          include: {
+            board: true
+          }
+        });
+      }
+
+      // For multiple instruction mediums, find common standards
+      const standardsInMediums = await Promise.all(
+        instructionMediumIds.map(mediumId => 
+          this.prisma.medium_Standard_Subject.findMany({
+            where: { instruction_medium_id: mediumId },
+            distinct: ['standard_id'],
+            select: { standard_id: true }
+          })
+        )
+      );
+
+      // Extract standard IDs from each medium
+      const standardIdSets = standardsInMediums.map(mediumStandards => 
+        new Set(mediumStandards.map(item => item.standard_id))
+      );
+
+      // Find intersection of all standard ID sets (standards common to all mediums)
+      if (standardIdSets.length === 0) {
+        return [];
+      }
+      
+      // Start with first set
+      let commonStandardIds = [...standardIdSets[0]];
+      
+      // Intersect with remaining sets
+      for (let i = 1; i < standardIdSets.length; i++) {
+        commonStandardIds = commonStandardIds.filter(id => standardIdSets[i].has(id));
+      }
+
+      // If no common standards, return empty array
+      if (commonStandardIds.length === 0) {
+        return [];
+      }
+
+      // Fetch the actual standard objects
+      const commonStandards = await this.prisma.standard.findMany({
+        where: {
+          id: {
+            in: commonStandardIds
+          }
+        },
+        orderBy: [
+          { sequence_number: 'asc' },
+          { name: 'asc' }
+        ],
+        include: {
+          board: true
+        }
+      });
+
+      return commonStandards;
+    } catch (error) {
+      this.logger.error(`Failed to find common standards: ${error.message}`);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to find common standards');
+    }
+  }
+
+  /**
+   * Get standards assigned to a specific user
+   * @param userId The ID of the user
+   * @returns Array of standards assigned to the user
+   */
+  async findStandardsByUserId(userId: number): Promise<Standard[]> {
+    try {
+      // Check if user exists
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId }
+      });
+
+      if (!user) {
+        throw new NotFoundException(`User with ID ${userId} not found`);
+      }
+
+      // Find teacher-subject assignments for this user
+      const teacherSubjects = await this.prisma.teacher_Subject.findMany({
+        where: { user_id: userId },
+        include: {
+          school_standard: {
+            include: {
+              standard: true
+            }
+          }
+        }
+      });
+
+      if (teacherSubjects.length === 0) {
+        return []; // User has no assigned standards
+      }
+
+      // Extract unique standards from teacher-subject assignments
+      const standardMap = new Map<number, Standard>();
+      teacherSubjects.forEach(ts => {
+        const standard = ts.school_standard.standard;
+        if (!standardMap.has(standard.id)) {
+          standardMap.set(standard.id, standard);
+        }
+      });
+
+      // Convert map values to array and sort
+      const standards = Array.from(standardMap.values());
+      return standards.sort((a, b) => {
+        // Sort by sequence_number first, then by name
+        if (a.sequence_number !== b.sequence_number) {
+          return a.sequence_number - b.sequence_number;
+        }
+        return a.name.localeCompare(b.name);
+      });
+    } catch (error) {
+      this.logger.error(`Failed to find standards for user ${userId}: ${error.message}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to find user standards');
+    }
+  }
+
+  /**
+   * Find common standards across multiple instruction mediums that are also assigned to the user
+   * @param instructionMediumIds Array of instruction medium IDs
+   * @param userId ID of the user making the request
+   * @returns Array of common standards assigned to the user
+   */
+  async findCommonStandardsForUser(instructionMediumIds: number[], userId: number): Promise<Standard[]> {
+    try {
+      if (instructionMediumIds.length === 0) {
+        throw new BadRequestException('At least one instruction medium ID is required');
+      }
+
+      // First, get standards assigned to the user
+      const userStandards = await this.findStandardsByUserId(userId);
+      
+      if (userStandards.length === 0) {
+        return []; // User has no assigned standards, so no common standards possible
+      }
+      
+      // Create a set of user standard IDs for quick lookup
+      const userStandardIds = new Set(userStandards.map(s => s.id));
+
+      // Validate that all instruction mediums exist
+      const instructionMediums = await this.prisma.instruction_Medium.findMany({
+        where: {
+          id: {
+            in: instructionMediumIds
+          }
+        }
+      });
+
+      if (instructionMediums.length !== instructionMediumIds.length) {
+        const foundIds = instructionMediums.map(medium => medium.id);
+        const missingIds = instructionMediumIds.filter(id => !foundIds.includes(id));
+        throw new NotFoundException(`Instruction medium(s) with ID(s) ${missingIds.join(', ')} not found`);
+      }
+
+      // If only one instruction medium, return standards for that medium that are also assigned to user
+      if (instructionMediumIds.length === 1) {
+        const mediumId = instructionMediumIds[0];
+        this.logger.log(`Finding standards for a single instruction medium: ${mediumId} for user: ${userId}`);
+        
+        // Get all standard IDs for this medium
+        const standardsInMedium = await this.prisma.medium_Standard_Subject.findMany({
+          where: { instruction_medium_id: mediumId },
+          distinct: ['standard_id'],
+          select: { standard_id: true }
+        });
+        
+        // Filter for standards that are also assigned to the user
+        const standardIds = standardsInMedium
+          .map(item => item.standard_id)
+          .filter(id => userStandardIds.has(id));
+        
+        if (standardIds.length === 0) {
+          return [];
+        }
+        
+        // Fetch and return the standard objects
+        return await this.prisma.standard.findMany({
+          where: {
+            id: {
+              in: standardIds
+            }
+          },
+          orderBy: [
+            { sequence_number: 'asc' },
+            { name: 'asc' }
+          ],
+          include: {
+            board: true
+          }
+        });
+      }
+
+      // For multiple instruction mediums, find common standards
+      const standardsInMediums = await Promise.all(
+        instructionMediumIds.map(mediumId => 
+          this.prisma.medium_Standard_Subject.findMany({
+            where: { instruction_medium_id: mediumId },
+            distinct: ['standard_id'],
+            select: { standard_id: true }
+          })
+        )
+      );
+
+      // Extract standard IDs from each medium
+      const standardIdSets = standardsInMediums.map(mediumStandards => 
+        new Set(mediumStandards.map(item => item.standard_id))
+      );
+
+      // Find intersection of all standard ID sets (standards common to all mediums)
+      if (standardIdSets.length === 0) {
+        return [];
+      }
+      
+      // Start with first set
+      let commonStandardIds = [...standardIdSets[0]];
+      
+      // Intersect with remaining sets
+      for (let i = 1; i < standardIdSets.length; i++) {
+        commonStandardIds = commonStandardIds.filter(id => standardIdSets[i].has(id));
+      }
+      
+      // Further filter to only include standards assigned to the user
+      commonStandardIds = commonStandardIds.filter(id => userStandardIds.has(id));
+
+      // If no common standards, return empty array
+      if (commonStandardIds.length === 0) {
+        return [];
+      }
+
+      // Fetch the actual standard objects
+      const commonStandards = await this.prisma.standard.findMany({
+        where: {
+          id: {
+            in: commonStandardIds
+          }
+        },
+        orderBy: [
+          { sequence_number: 'asc' },
+          { name: 'asc' }
+        ],
+        include: {
+          board: true
+        }
+      });
+
+      return commonStandards;
+    } catch (error) {
+      this.logger.error(`Failed to find common standards for user ${userId}: ${error.message}`);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to find common standards for user');
+    }
   }
 
   /**

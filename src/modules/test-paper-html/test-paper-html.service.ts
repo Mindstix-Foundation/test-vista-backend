@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AwsS3Service } from '../aws/aws-s3.service';
-import { TestPaperDto, ChapterWeightageDto, InstructionMediumHtmlDto } from './dto/create-test-paper.dto';
+import { TestPaperDto, ChapterWeightageDto, InstructionMediumPdfDto } from './dto/create-test-paper.dto';
 
 @Injectable()
 export class TestPaperHtmlService {
@@ -487,12 +487,12 @@ export class TestPaperHtmlService {
           }
 
           // Validate file content type
-          if (!file.mimetype.includes('text/html') && !file.originalname.endsWith('.html')) {
-            throw new BadRequestException(`File for instruction medium ID ${mediumId} must be HTML`);
+          if (!file.mimetype.includes('application/pdf') && !file.originalname.endsWith('.pdf')) {
+            throw new BadRequestException(`File for instruction medium ID ${mediumId} must be PDF`);
           }
 
           // Generate filename
-          const finalFilename = `test-paper-${testPaper.id}-medium-${mediumId}.html`;
+          const finalFilename = `test-paper-${testPaper.id}-medium-${mediumId}.pdf`;
 
           // First medium is always the default
           const isDefault = index === 0;
@@ -532,7 +532,7 @@ export class TestPaperHtmlService {
     const uploadResult = await this.awsS3Service.uploadTestPaperContent(
       fileBuffer,
       filename,
-      'text/html',
+      'application/pdf',
     );
 
     // Check if there are existing HTML files for this test paper
@@ -547,7 +547,7 @@ export class TestPaperHtmlService {
         instruction_medium: { connect: { id: instructionMediumId } },
         content_url: uploadResult.url,
         file_size: uploadResult.metadata.fileSize,
-        is_pdf: false,
+        is_pdf: true,
         is_default_medium: isDefaultMedium !== undefined ? isDefaultMedium : htmlFilesCount === 0, // Mark as default if specified or if it's the first one
       },
     });

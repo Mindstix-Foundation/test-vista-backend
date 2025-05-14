@@ -133,7 +133,7 @@ export class ChapterMarksRangeService {
           const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
 
           // Calculate how many questions can be allocated
-          const canAllocate = Math.floor(questionCount / 3) + (questionCount % 3 > 0 ? 1 : 0);
+          const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
           
           if (canAllocate >= totalQuestions) {
             absoluteMarks += totalQuestions * marksPerQuestion;
@@ -151,11 +151,11 @@ export class ChapterMarksRangeService {
             const questionTypeId = sqt.question_type_id;
             const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
 
-            if (questionCount >= 3) {
-              // Subtract 3 questions and add marks
+            if (questionCount >= 2) {
+              // Subtract 2 questions and add marks
               sectionMarks += marksPerQuestion;
               remainingQuestions--;
-              chapterQuestionTypes.set(questionTypeId, questionCount - 3);
+              chapterQuestionTypes.set(questionTypeId, questionCount - 2);
             }
           }
 
@@ -351,7 +351,7 @@ export class ChapterMarksRangeService {
           // Single question type section
           const questionTypeId = subsectionQuestionTypes[0].question_type_id;
           const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
-          const canAllocate = Math.floor(questionCount / 3) + (questionCount % 3 > 0 ? 1 : 0);
+          const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
           
           this.logger.debug(`Single question type - QuestionTypeId: ${questionTypeId}, Count: ${questionCount}, CanAllocate: ${canAllocate}`);
           
@@ -371,11 +371,11 @@ export class ChapterMarksRangeService {
             const questionTypeId = sqt.question_type_id;
             const questionCount = tempQuestionTypes.get(questionTypeId) || 0;
 
-            if (questionCount >= 3) {
-              // Subtract 3 questions and add marks
+            if (questionCount >= 2) {
+              // Subtract 2 questions and add marks
               totalAllocatable++;
               remainingQuestions--;
-              tempQuestionTypes.set(questionTypeId, questionCount - 3);
+              tempQuestionTypes.set(questionTypeId, questionCount - 2);
             }
           }
           

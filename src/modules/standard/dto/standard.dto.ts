@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsNotEmpty } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsNotEmpty, IsArray, ArrayMinSize, ArrayNotEmpty } from 'class-validator';
 
 export class StandardDto {
   @ApiProperty({ example: 1 })
@@ -59,4 +59,15 @@ export class UpdateStandardDto {
   @IsOptional()
   @IsNumber({}, { message: 'Sequence number must be a number' })
   sequence_number?: number;
+}
+
+export class CommonStandardsDto {
+  @ApiProperty({ 
+    example: [1, 2], 
+    description: 'IDs of instruction mediums to find common standards for', 
+    type: [Number]
+  })
+  @IsArray({ message: 'instruction_medium_ids must be an array' })
+  @ArrayNotEmpty({ message: 'At least one instruction medium ID is required' })
+  instruction_medium_ids: number[];
 } 

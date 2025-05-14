@@ -79,12 +79,12 @@ export class TestPaperHtmlController {
   @Post('create')
   @ApiOperation({ 
     summary: 'Create a new test paper with content',
-    description: `Creates a new test paper with chapters weightages and uploads HTML files for multiple instruction mediums.
+    description: `Creates a new test paper with chapters weightages and uploads PDF files for multiple instruction mediums.
     
     This endpoint allows you to:
     1. Create a new test paper record with metadata
     2. Add multiple chapters with their weightages
-    3. Upload HTML files for multiple instruction mediums
+    3. Upload PDF files for multiple instruction mediums
     
     Use multipart/form-data to upload files and include all fields in the form data.
     
@@ -95,13 +95,14 @@ export class TestPaperHtmlController {
     - Upload files in the same order as the instruction_mediums
     - The first medium in the array will be set as the default medium
     - Each file should be uploaded with the field name 'files'
+    - Only PDF files are supported
     
     Example request:
     - chapters: [1, 2, 3, 4]               (Chapter IDs)
     - weightages: [30, 25, 25, 20]        (Percentage weightage for each chapter)
     - instruction_mediums: [1, 2]          (Medium IDs, first one is default)
-    - files[0]: English HTML file
-    - files[1]: Hindi HTML file`
+    - files[0]: English PDF file
+    - files[1]: Hindi PDF file`
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -152,7 +153,7 @@ export class TestPaperHtmlController {
             type: 'number'
           },
           example: [1, 2],
-          description: 'Array of instruction medium IDs (first is default)'
+          description: 'Array of instruction medium IDs (must match with uploaded files by position, first medium is default)'
         },
         'files': {
           type: 'array',
@@ -160,7 +161,7 @@ export class TestPaperHtmlController {
             type: 'string',
             format: 'binary',
           },
-          description: 'Multiple HTML files to upload, one for each instruction medium'
+          description: 'Multiple PDF files to upload, one for each instruction medium'
         },
       },
     },
@@ -323,7 +324,7 @@ export class TestPaperHtmlController {
     // Validate that files are provided
     if (!files || files.length === 0) {
       this.logger.debug('No files provided - throwing BadRequestException');
-      throw new BadRequestException('At least one HTML file is required');
+      throw new BadRequestException('At least one PDF file is required');
     }
     
     // Validate that the number of files matches the number of instruction mediums

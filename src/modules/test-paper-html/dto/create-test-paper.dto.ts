@@ -36,9 +36,9 @@ export class ChapterWeightageDto {
 }
 
 /**
- * DTO for instruction medium with HTML content mapping
+ * DTO for instruction medium with PDF content mapping
  */
-export class InstructionMediumHtmlDto {
+export class InstructionMediumPdfDto {
   @ApiProperty({
     description: 'ID of the instruction medium (language)',
     example: 1,
@@ -59,7 +59,7 @@ export class InstructionMediumHtmlDto {
 
   @ApiProperty({
     description: 'Custom filename for the stored file. If not provided, a default name will be generated.',
-    example: 'math-test-q1-2025.html',
+    example: 'math-test-q1-2025.pdf',
     required: false,
   })
   @IsString()
@@ -68,7 +68,7 @@ export class InstructionMediumHtmlDto {
 }
 
 /**
- * DTO for creating a test paper with content (HTML files for multiple mediums)
+ * DTO for creating a test paper with content (PDF files for multiple mediums)
  */
 export class TestPaperDto {
   @ApiProperty({
