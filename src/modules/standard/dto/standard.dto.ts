@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsNotEmpty, IsArray, ArrayMinSize, ArrayNotEmpty } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsNotEmpty, IsArray, ArrayNotEmpty } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class StandardDto {
   @ApiProperty({ example: 1 })
@@ -69,5 +70,27 @@ export class CommonStandardsDto {
   })
   @IsArray({ message: 'instruction_medium_ids must be an array' })
   @ArrayNotEmpty({ message: 'At least one instruction medium ID is required' })
+  instruction_medium_ids: number[];
+}
+
+export class CommonStandardsQueryDto {
+  @ApiProperty({ 
+    example: '1,2,3', 
+    description: 'Comma-separated IDs of instruction mediums to find common standards for',
+    type: [Number]
+  })
+  @IsArray({ message: 'instruction_medium_ids must be an array of numbers' })
+  @ArrayNotEmpty({ message: 'At least one instruction medium ID is required' })
+  @Type(() => Number)
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      // Split the comma-separated string into an array and convert to numbers
+      return value.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id));
+    } else if (Array.isArray(value)) {
+      // If it's already an array, make sure all elements are numbers
+      return value.map(id => Number(id)).filter(id => !isNaN(id));
+    }
+    return [Number(value)].filter(id => !isNaN(id));
+  })
   instruction_medium_ids: number[];
 } 
