@@ -353,32 +353,25 @@ export class TestPaperHtmlController {
     }
   }
 
-  @Delete(':testPaperId/medium/:instructionMediumId')
+  @Delete(':testPaperId')
   @ApiOperation({ 
-    summary: 'Delete a specific file for a test paper by instruction medium',
-    description: 'Deletes both the database record and the associated file in storage'
+    summary: 'Delete a test paper and all associated files',
+    description: 'Deletes the test paper, all associated files across all instruction mediums, and related data'
   })
   @ApiParam({
     name: 'testPaperId',
     required: true,
-    description: 'The ID of the test paper',
-    type: Number
-  })
-  @ApiParam({
-    name: 'instructionMediumId',
-    required: true,
-    description: 'The ID of the instruction medium (language) to delete',
+    description: 'The ID of the test paper to delete',
     type: Number
   })
   @ApiResponse({
     status: 200,
-    description: 'The file has been successfully deleted',
+    description: 'The test paper and all associated files have been successfully deleted',
   })
-  @ApiResponse({ status: 404, description: 'Test paper or file not found' })
-  async deleteTestPaperFile(
-    @Param('testPaperId', ParseIntPipe) testPaperId: number,
-    @Param('instructionMediumId', ParseIntPipe) instructionMediumId: number
+  @ApiResponse({ status: 404, description: 'Test paper not found' })
+  async deleteTestPaper(
+    @Param('testPaperId', ParseIntPipe) testPaperId: number
   ) {
-    return this.testPaperHtmlService.deleteTestPaperFile(testPaperId, instructionMediumId);
+    return this.testPaperHtmlService.deleteTestPaper(testPaperId);
   }
 } 

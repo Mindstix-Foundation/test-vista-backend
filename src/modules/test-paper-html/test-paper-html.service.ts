@@ -371,6 +371,48 @@ export class TestPaperHtmlService {
     }
   }
 
+  async deleteTestPaper(testPaperId: number) {
+    try {
+      // Find the test paper to check if it exists
+      const testPaper = await this.prisma.test_Paper.findUnique({
+        where: { id: testPaperId },
+        include: {
+          html_files: true,
+          test_paper_chapters: true
+        }
+      });
+
+      if (!testPaper) {
+        throw new NotFoundException(`Test paper with ID ${testPaperId} not found`);
+      }
+
+      // Delete all associated files from S3
+      for (const htmlFile of testPaper.html_files) {
+        try {
+          await this.awsS3Service.deleteFile(htmlFile.content_url);
+        } catch (fileError) {
+          this.logger.warn(`Could not delete file ${htmlFile.content_url} from storage: ${fileError.message}`);
+          // Continue with other files even if one fails
+        }
+      }
+
+      // Delete the test paper - this will cascade delete html_files and test_paper_chapters
+      // thanks to the onDelete: Cascade relation in the Prisma schema
+      await this.prisma.test_Paper.delete({
+        where: { id: testPaperId }
+      });
+
+      return { 
+        message: 'Test paper deleted successfully',
+        deleted_files_count: testPaper.html_files.length,
+        deleted_chapters_count: testPaper.test_paper_chapters.length
+      };
+    } catch (error) {
+      this.logger.error(`Error deleting test paper: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
   async setDefaultMedium(testPaperId: number, instructionMediumId: number) {
     // First check if the file exists
     const htmlFile = await this.prisma.hTML_File.findUnique({
