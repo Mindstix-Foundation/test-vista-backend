@@ -26,7 +26,7 @@ export class ResetPasswordDto {
   })
   @IsString()
   @MinLength(8)
-  @Matches(/((?=.*\d)|(?=.*\W+))(?![.\n])(?=.*[A-Z])(?=.*[a-z]).*$/, {
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9\W]).*$/, {
     message: 'Password must contain uppercase, lowercase, number/special character',
   })
   newPassword: string;

@@ -14,14 +14,13 @@ import {
 import { PatternService } from './pattern.service';
 import { CreatePatternDto } from './dto/create-pattern.dto';
 import { UpdatePatternDto } from './dto/update-pattern.dto';
-import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { PaginationDto, SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { Type } from 'class-transformer';
 import { IsOptional, IsNumber } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
 
 class GetPatternsQueryDto extends PaginationDto {
   @ApiProperty({ required: false })

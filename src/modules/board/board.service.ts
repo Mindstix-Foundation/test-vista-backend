@@ -261,26 +261,7 @@ export class BoardService {
       await this.findOne(id); // Check if board exists
 
       if (updateBoardDto.address_id) {
-        // Check if new address exists
-        const address = await this.prisma.address.findUnique({
-          where: { id: updateBoardDto.address_id }
-        });
-
-        if (!address) {
-          throw new NotFoundException(`Address with ID ${updateBoardDto.address_id} not found`);
-        }
-
-        // Check if address is already used by another board
-        const existingBoard = await this.prisma.board.findFirst({
-          where: {
-            address_id: updateBoardDto.address_id,
-            NOT: { id }
-          }
-        });
-
-        if (existingBoard) {
-          throw new ConflictException(`Address with ID ${updateBoardDto.address_id} is already associated with another board`);
-        }
+        await this.validateAddressForBoard(updateBoardDto.address_id, id);
       }
       
       // Update the board
@@ -297,16 +278,45 @@ export class BoardService {
       return await this.findOne(id);
     } catch (error) {
       this.logger.error(`Failed to update board ${id}:`, error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('Board with this name already exists');
-        }
-      }
+      
+      this.handlePrismaErrors(error);
       throw new InternalServerErrorException('Failed to update board');
+    }
+  }
+
+  private async validateAddressForBoard(addressId: number, boardId?: number) {
+    // Check if address exists
+    const address = await this.prisma.address.findUnique({
+      where: { id: addressId }
+    });
+
+    if (!address) {
+      throw new NotFoundException(`Address with ID ${addressId} not found`);
+    }
+
+    // If boardId is provided, check if address is already used by another board
+    if (boardId) {
+      const existingBoard = await this.prisma.board.findFirst({
+        where: {
+          address_id: addressId,
+          NOT: { id: boardId }
+        }
+      });
+
+      if (existingBoard) {
+        throw new ConflictException(`Address with ID ${addressId} is already associated with another board`);
+      }
+    }
+  }
+
+  private handlePrismaErrors(error: any) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        throw new ConflictException('Board with this name already exists');
+      }
     }
   }
 

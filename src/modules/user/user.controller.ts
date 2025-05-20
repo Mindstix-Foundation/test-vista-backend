@@ -1,14 +1,13 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe, ConflictException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe, ConflictException } from '@nestjs/common';
 import { UserService } from './user.service';
-import { UserDto, CreateUserDto, UpdateUserDto, UserListDto } from './dto/user.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { CreateUserDto, UpdateUserDto, UserListDto } from './dto/user.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { PaginationDto, SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
 import { AddTeacherDto } from './dto/add-teacher.dto';
 import { UpdateTeacherDto } from './dto/update-teacher.dto';
 
@@ -72,11 +71,11 @@ export class UserController {
     
     // If page and page_size are provided, use pagination
     if (page !== undefined && page_size !== undefined) {
-      return await this.userService.findAll(schoolId, roleId, page, page_size, sort_by, sort_order, search, schoolSearch);
+      return await this.userService.findAll({ schoolId, roleId, page, page_size, sort_by, sort_order, search, schoolSearch });
     }
     
     // Otherwise, get all users without pagination
-    return await this.userService.findAllWithoutPagination(schoolId, roleId, sort_by, sort_order, search, schoolSearch);
+    return await this.userService.findAllWithoutPagination({ schoolId, roleId, sort_by, sort_order, search, schoolSearch });
   }
 
   @Get(':id')

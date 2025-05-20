@@ -118,42 +118,17 @@ export class SubsectionQuestionTypeService {
   async update(id: number, updateDto: UpdateSubsectionQuestionTypeDto) {
     try {
       const existing = await this.findOne(id);
-
-      if (updateDto.section_id) {
-        const section = await this.prisma.section.findUnique({
-          where: { id: updateDto.section_id }
-        });
-        if (!section) {
-          throw new NotFoundException('Section not found');
-        }
-      }
-
-      if (updateDto.question_type_id) {
-        const questionType = await this.prisma.question_Type.findUnique({
-          where: { id: updateDto.question_type_id }
-        });
-        if (!questionType) {
-          throw new NotFoundException('Question type not found');
-        }
-      }
-
+      
+      // Validate section and question type if provided
+      await this.validateRelations(updateDto);
+      
       // Handle sequence number changes
       if (updateDto.seqencial_subquestion_number !== undefined) {
-        const section = await this.prisma.section.findUnique({
-          where: { id: updateDto.section_id || existing.section_id }
-        });
-
-        if (updateDto.seqencial_subquestion_number === 0) {
-          // Delete all other entries for this section and create the default one
-          await this.deleteAllSectionEntriesExcept(
-            updateDto.section_id || existing.section_id,
-            id
-          );
-        } else if (updateDto.seqencial_subquestion_number > section.total_questions) {
-          throw new BadRequestException(
-            'Sequential subquestion number cannot exceed total questions in section'
-          );
-        }
+        await this.handleSequenceNumberChange(
+          id,
+          updateDto.seqencial_subquestion_number,
+          updateDto.section_id || existing.section_id
+        );
       }
 
       return await this.prisma.subsection_Question_Type.update({
@@ -170,6 +145,47 @@ export class SubsectionQuestionTypeService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to update subsection question type');
+    }
+  }
+
+  // Helper method to validate section and question type
+  private async validateRelations(dto: UpdateSubsectionQuestionTypeDto) {
+    if (dto.section_id) {
+      const section = await this.prisma.section.findUnique({
+        where: { id: dto.section_id }
+      });
+      if (!section) {
+        throw new NotFoundException('Section not found');
+      }
+    }
+
+    if (dto.question_type_id) {
+      const questionType = await this.prisma.question_Type.findUnique({
+        where: { id: dto.question_type_id }
+      });
+      if (!questionType) {
+        throw new NotFoundException('Question type not found');
+      }
+    }
+  }
+
+  // Helper method to handle sequence number changes
+  private async handleSequenceNumberChange(
+    id: number, 
+    sequenceNumber: number, 
+    sectionId: number
+  ) {
+    const section = await this.prisma.section.findUnique({
+      where: { id: sectionId }
+    });
+
+    if (sequenceNumber === 0) {
+      // Delete all other entries for this section and create the default one
+      await this.deleteAllSectionEntriesExcept(sectionId, id);
+    } else if (sequenceNumber > section.total_questions) {
+      throw new BadRequestException(
+        'Sequential subquestion number cannot exceed total questions in section'
+      );
     }
   }
 

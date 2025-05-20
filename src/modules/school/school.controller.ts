@@ -1,14 +1,13 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { SchoolService } from './school.service';
-import { SchoolDto, CreateSchoolDto, UpdateSchoolDto, SchoolListDto } from './dto/school.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { CreateSchoolDto, UpdateSchoolDto, SchoolListDto } from './dto/school.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiProperty, ApiBearerAuth } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { PaginationDto, SortField, SortOrder } from '../../common/dto/pagination.dto';
-import { ApiProperty } from '@nestjs/swagger';
 
 class GetSchoolsQueryDto extends PaginationDto {
   @ApiProperty({ required: false })

@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolStandardDto } from './dto/school-standard.dto';
-import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class SchoolStandardService {
@@ -120,10 +119,13 @@ export class SchoolStandardService {
         }
       });
 
-      // Sort standards by sequence number and transform to simpler response
-      return schoolStandards
-        .sort((a, b) => a.standard.sequence_number - b.standard.sequence_number)
-        .map(ss => ({
+      // Create a copy of the array and then sort
+      const sortedSchoolStandards = [...schoolStandards];
+      sortedSchoolStandards.sort((a, b) => 
+        a.standard.sequence_number - b.standard.sequence_number
+      );
+      
+      return sortedSchoolStandards.map(ss => ({
           id: ss.id,
           school_id: ss.school_id,
           standard: {

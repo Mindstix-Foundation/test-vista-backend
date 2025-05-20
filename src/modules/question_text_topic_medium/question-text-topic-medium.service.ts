@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateQuestionTextTopicMediumDto, UpdateQuestionTextTopicMediumDto, QuestionTextTopicMediumFilterDto } from './dto/question-text-topic-medium.dto';
 
@@ -181,9 +181,6 @@ export class QuestionTextTopicMediumService {
 
   async remove(id: number): Promise<void> {
     try {
-      // Check if the record exists
-      const record = await this.findOne(id);
-      
       // Delete the record
       await this.prisma.question_Text_Topic_Medium.delete({
         where: { id }

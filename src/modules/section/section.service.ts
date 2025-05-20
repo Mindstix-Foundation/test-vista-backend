@@ -107,43 +107,12 @@ export class SectionService {
   async update(id: number, updateSectionDto: UpdateSectionDto) {
     try {
       await this.findOne(id);
-
-      if (updateSectionDto.pattern_id) {
-        const pattern = await this.prisma.pattern.findUnique({
-          where: { id: updateSectionDto.pattern_id }
-        });
-        if (!pattern) {
-          throw new NotFoundException('Pattern not found');
-        }
-      }
-
-      // If updating questions, validate mandatory <= total
-      if (updateSectionDto.total_questions || updateSectionDto.mandotory_questions) {
-        const currentSection = await this.prisma.section.findUnique({
-          where: { id }
-        });
-        const newTotal = updateSectionDto.total_questions ?? currentSection.total_questions;
-        const newMandatory = updateSectionDto.mandotory_questions ?? currentSection.mandotory_questions;
-        
-        if (newMandatory > newTotal) {
-          throw new BadRequestException('Mandatory questions cannot exceed total questions');
-        }
-      }
-
-      // Map the DTO to match schema field names
-      const data = {
-        ...(updateSectionDto.pattern_id && { pattern_id: updateSectionDto.pattern_id }),
-        ...(updateSectionDto.sequence_number && { 
-          sequence_number: updateSectionDto.sequence_number,
-          section_number: updateSectionDto.section_number
-        }),
-        ...(updateSectionDto.sub_section && { sub_section: updateSectionDto.sub_section }),
-        ...(updateSectionDto.section_name && { section_name: updateSectionDto.section_name }),
-        ...(updateSectionDto.total_questions && { total_questions: updateSectionDto.total_questions }),
-        ...(updateSectionDto.mandotory_questions && { mandotory_questions: updateSectionDto.mandotory_questions }),
-        ...(updateSectionDto.marks_per_question && { marks_per_question: updateSectionDto.marks_per_question })
-      };
-
+      
+      await this.validatePattern(updateSectionDto.pattern_id);
+      await this.validateQuestionCounts(id, updateSectionDto);
+      
+      const data = this.mapUpdateDtoToData(updateSectionDto);
+      
       return await this.prisma.section.update({
         where: { id },
         data,
@@ -156,8 +125,10 @@ export class SectionService {
           }
         }
       });
-    } catch (error) {
+    } 
+    catch (error) {
       this.logger.error(`Failed to update section ${id}:`, error);
+      
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
@@ -165,95 +136,63 @@ export class SectionService {
     }
   }
 
+  private async validatePattern(patternId?: number): Promise<void> {
+    if (!patternId) return;
+    
+    const pattern = await this.prisma.pattern.findUnique({
+      where: { id: patternId }
+    });
+    
+    if (!pattern) {
+      throw new NotFoundException('Pattern not found');
+    }
+  }
+
+  private async validateQuestionCounts(sectionId: number, dto: UpdateSectionDto): Promise<void> {
+    if (!dto.total_questions && !dto.mandotory_questions) return;
+    
+    const currentSection = await this.prisma.section.findUnique({
+      where: { id: sectionId }
+    });
+    
+    const newTotal = dto.total_questions ?? currentSection.total_questions;
+    const newMandatory = dto.mandotory_questions ?? currentSection.mandotory_questions;
+    
+    if (newMandatory > newTotal) {
+      throw new BadRequestException('Mandatory questions cannot exceed total questions');
+    }
+  }
+
+  private mapUpdateDtoToData(dto: UpdateSectionDto): any {
+    return {
+      ...(dto.pattern_id && { pattern_id: dto.pattern_id }),
+      ...(dto.sequence_number && { 
+        sequence_number: dto.sequence_number,
+        section_number: dto.section_number
+      }),
+      ...(dto.sub_section && { sub_section: dto.sub_section }),
+      ...(dto.section_name && { section_name: dto.section_name }),
+      ...(dto.total_questions && { total_questions: dto.total_questions }),
+      ...(dto.mandotory_questions && { mandotory_questions: dto.mandotory_questions }),
+      ...(dto.marks_per_question && { marks_per_question: dto.marks_per_question })
+    };
+  }
+
   async reorderSection(sectionId: number, newPosition: number, patternId?: number) {
     try {
       this.logger.log(`Starting reorder for section ${sectionId} to position ${newPosition}`);
       
-      // Get the current section and its details
-      const currentSection = await this.prisma.section.findUnique({
-        where: { id: sectionId },
-        select: {
-          id: true,
-          pattern_id: true,
-          sequence_number: true
-        }
-      });
-
-      if (!currentSection) {
-        throw new NotFoundException(`Section with ID ${sectionId} not found`);
-      }
-
-      this.logger.log(`Found current section: ${JSON.stringify(currentSection)}`);
-
-      // If patternId is provided, verify it matches
-      if (patternId && patternId !== currentSection.pattern_id) {
-        throw new ConflictException('Section does not belong to the specified pattern');
-      }
-
-      // Get total sections count to validate newPosition
-      const totalSections = await this.prisma.section.count({
-        where: { pattern_id: currentSection.pattern_id }
-      });
-
-      this.logger.log(`Total sections in pattern: ${totalSections}`);
-
-      // Validate newPosition
-      if (newPosition < 1 || newPosition > totalSections) {
-        throw new ConflictException(`New position must be between 1 and ${totalSections}`);
-      }
-
+      const currentSection = await this.getAndValidateSection(sectionId, patternId);
       const currentPosition = currentSection.sequence_number;
-
+      await this.validateReorderPosition(currentSection, newPosition);
+      
       // If the positions are the same, no need to reorder
       if (currentPosition === newPosition) {
         return await this.findOne(sectionId);
       }
 
       try {
-        await this.prisma.$transaction(async (tx) => {
-          // First move to temporary position
-          this.logger.log(`Moving section ${sectionId} to temporary position`);
-          await tx.section.update({
-            where: { id: sectionId },
-            data: { sequence_number: 999 }
-          });
-
-          if (currentPosition < newPosition) {
-            // Moving to a later position
-            for (let i = currentPosition + 1; i <= newPosition; i++) {
-              await tx.section.updateMany({
-                where: {
-                  pattern_id: currentSection.pattern_id,
-                  sequence_number: i
-                },
-                data: {
-                  sequence_number: i - 1
-                }
-              });
-            }
-          } else {
-            // Moving to an earlier position
-            for (let i = currentPosition - 1; i >= newPosition; i--) {
-              await tx.section.updateMany({
-                where: {
-                  pattern_id: currentSection.pattern_id,
-                  sequence_number: i
-                },
-                data: {
-                  sequence_number: i + 1
-                }
-              });
-            }
-          }
-
-          // Finally, move to new position
-          this.logger.log(`Moving section to final position ${newPosition}`);
-          await tx.section.update({
-            where: { id: sectionId },
-            data: { sequence_number: newPosition }
-          });
-        });
-
+        await this.executeReordering(sectionId, currentSection, currentPosition, newPosition);
         return await this.findOne(sectionId);
       } catch (txError) {
         this.logger.error(`Transaction failed: ${txError.message}`, txError.stack);
@@ -265,6 +204,99 @@ export class SectionService {
         throw error;
       }
       throw new InternalServerErrorException(`Failed to reorder section: ${error.message}`);
+    }
+  }
+
+  private async getAndValidateSection(sectionId: number, patternId?: number) {
+    // Get the current section and its details
+    const currentSection = await this.prisma.section.findUnique({
+      where: { id: sectionId },
+      select: {
+        id: true,
+        pattern_id: true,
+        sequence_number: true
+      }
+    });
+
+    if (!currentSection) {
+      throw new NotFoundException(`Section with ID ${sectionId} not found`);
+    }
+
+    this.logger.log(`Found current section: ${JSON.stringify(currentSection)}`);
+
+    // If patternId is provided, verify it matches
+    if (patternId && patternId !== currentSection.pattern_id) {
+      throw new ConflictException('Section does not belong to the specified pattern');
+    }
+
+    return currentSection;
+  }
+
+  private async validateReorderPosition(currentSection: any, newPosition: number): Promise<void> {
+    // Get total sections count to validate newPosition
+    const totalSections = await this.prisma.section.count({
+      where: { pattern_id: currentSection.pattern_id }
+    });
+
+    this.logger.log(`Total sections in pattern: ${totalSections}`);
+
+    // Validate newPosition
+    if (newPosition < 1 || newPosition > totalSections) {
+      throw new ConflictException(`New position must be between 1 and ${totalSections}`);
+    }
+  }
+
+  private async executeReordering(sectionId: number, currentSection: any, currentPosition: number, newPosition: number): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      // First move to temporary position
+      this.logger.log(`Moving section ${sectionId} to temporary position`);
+      await tx.section.update({
+        where: { id: sectionId },
+        data: { sequence_number: 999 }
+      });
+
+      if (currentPosition < newPosition) {
+        await this.shiftSectionsDown(tx, currentSection.pattern_id, currentPosition, newPosition);
+      } else {
+        await this.shiftSectionsUp(tx, currentSection.pattern_id, newPosition, currentPosition);
+      }
+
+      // Finally, move to new position
+      this.logger.log(`Moving section to final position ${newPosition}`);
+      await tx.section.update({
+        where: { id: sectionId },
+        data: { sequence_number: newPosition }
+      });
+    });
+  }
+
+  private async shiftSectionsDown(tx: any, patternId: number, start: number, end: number): Promise<void> {
+    // Moving to a later position - shift sections down
+    for (let i = start + 1; i <= end; i++) {
+      await tx.section.updateMany({
+        where: {
+          pattern_id: patternId,
+          sequence_number: i
+        },
+        data: {
+          sequence_number: i - 1
+        }
+      });
+    }
+  }
+
+  private async shiftSectionsUp(tx: any, patternId: number, start: number, end: number): Promise<void> {
+    // Moving to an earlier position - shift sections up
+    for (let i = end - 1; i >= start; i--) {
+      await tx.section.updateMany({
+        where: {
+          pattern_id: patternId,
+          sequence_number: i
+        },
+        data: {
+          sequence_number: i + 1
+        }
+      });
     }
   }
 

@@ -1,11 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediumStandardSubjectService } from './medium-standard-subject.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotFoundException, ConflictException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 
 describe('MediumStandardSubjectService', () => {
   let service: MediumStandardSubjectService;
-  let prisma: PrismaService;
 
   const mockPrismaService = {
     medium_Standard_Subject: {
@@ -40,7 +39,6 @@ describe('MediumStandardSubjectService', () => {
     }).compile();
 
     service = module.get<MediumStandardSubjectService>(MediumStandardSubjectService);
-    prisma = module.get<PrismaService>(PrismaService);
   });
 
   afterEach(() => {
@@ -96,7 +94,7 @@ describe('MediumStandardSubjectService', () => {
 
       mockPrismaService.medium_Standard_Subject.findMany.mockResolvedValue(expectedResults);
 
-      const result = await service.findAll(query);
+      const result = await service.findAll(query.instruction_medium_id.toString(), query.standard_id.toString(), query.subject_id.toString());
       expect(result).toEqual(expectedResults);
       expect(mockPrismaService.medium_Standard_Subject.findMany).toHaveBeenCalledWith({
         where: query,
