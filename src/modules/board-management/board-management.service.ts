@@ -197,50 +197,8 @@ export class BoardManagementService {
           await this.addressService.update(existingBoard.address_id, updateDto.address);
         }
 
-        // Update instruction mediums if provided
-        if (updateDto.instructionMediums) {
-          await Promise.all(
-            updateDto.instructionMediums.map(async (medium: UpdateInstructionMediumWithIdDto) => {
-              if (medium.id) {
-                return this.instructionMediumService.update(medium.id, medium);
-              }
-              return this.instructionMediumService.create({
-                name: medium.name,
-                board_id: id,
-              });
-            }),
-          );
-        }
-
-        // Update standards if provided
-        if (updateDto.standards) {
-          await Promise.all(
-            updateDto.standards.map(async (standard: UpdateStandardWithIdDto) => {
-              if (standard.id) {
-                return this.standardService.update(standard.id, standard);
-              }
-              return this.standardService.create({
-                name: standard.name,
-                board_id: id,
-              });
-            }),
-          );
-        }
-
-        // Update subjects if provided
-        if (updateDto.subjects) {
-          await Promise.all(
-            updateDto.subjects.map(async (subject: UpdateSubjectWithIdDto) => {
-              if (subject.id) {
-                return this.subjectService.update(subject.id, subject);
-              }
-              return this.subjectService.create({
-                name: subject.name,
-                board_id: id,
-              });
-            }),
-          );
-        }
+        // Update child entities
+        await this.updateChildEntities(id, updateDto);
 
         // Return updated data
         return {
@@ -255,6 +213,53 @@ export class BoardManagementService {
         throw error;
       }
     });
+  }
+
+  /**
+   * Updates child entities (instruction mediums, standards, subjects) for a board
+   */
+  private async updateChildEntities(boardId: number, updateDto: UpdateBoardManagementDto): Promise<void> {
+    // Update instruction mediums if provided
+    if (updateDto.instructionMediums) {
+      await Promise.all(
+        updateDto.instructionMediums.map(async (medium: UpdateInstructionMediumWithIdDto) => {
+          return medium.id
+            ? this.instructionMediumService.update(medium.id, medium)
+            : this.instructionMediumService.create({
+                name: medium.name,
+                board_id: boardId,
+              });
+        }),
+      );
+    }
+
+    // Update standards if provided
+    if (updateDto.standards) {
+      await Promise.all(
+        updateDto.standards.map(async (standard: UpdateStandardWithIdDto) => {
+          return standard.id
+            ? this.standardService.update(standard.id, standard)
+            : this.standardService.create({
+                name: standard.name,
+                board_id: boardId,
+              });
+        }),
+      );
+    }
+
+    // Update subjects if provided
+    if (updateDto.subjects) {
+      await Promise.all(
+        updateDto.subjects.map(async (subject: UpdateSubjectWithIdDto) => {
+          return subject.id
+            ? this.subjectService.update(subject.id, subject)
+            : this.subjectService.create({
+                name: subject.name,
+                board_id: boardId,
+              });
+        }),
+      );
+    }
   }
 
   private async getNextSequenceNumber(boardId: number): Promise<number> {

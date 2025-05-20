@@ -40,6 +40,56 @@ interface QuestionAllocationParams {
   selectedTypeId: number;
 }
 
+// Define an interface to group parameters for tryAllocateMarkValue
+interface MarkAllocationParams {
+  mark: number;
+  remainingMarks: number;
+  chapterId: number;
+  pattern: any;
+  sectionAllocations: SectionAllocationDto[];
+  chapterQuestionTypes: Map<number, number>;
+  usedQuestionTypes: Map<number, Set<number>>;
+  questionTypeUsage: Map<number, number>;
+}
+
+// Define an interface to group parameters for processChapterAllocation
+interface ChapterAllocationParams {
+  chapterId: number;
+  requestedMarks: number;
+  pattern: any;
+  chapterQuestionTypes: Map<number, number>;
+  sectionAllocations: SectionAllocationDto[];
+  usedQuestionTypes: Map<number, Set<number>>;
+  questionTypeUsage: Map<number, number>;
+  uniqueMarks: number[];
+  highestMark: number;
+  unallocatedMarks: number;
+}
+
+// Define an interface to group parameters for tryFallbackStrategies
+interface FallbackStrategyParams {
+  remainingMarks: number;
+  chapterId: number;
+  pattern: any;
+  sectionAllocations: SectionAllocationDto[];
+  chapterQuestionTypes: Map<number, number>;
+  usedQuestionTypes: Map<number, Set<number>>;
+  questionTypeUsage: Map<number, number>;
+  marksToTry: number[];
+}
+
+// Define an interface to group parameters for redistributeUnallocatedMarks
+interface RedistributeMarksParams {
+  unallocatedMarks: number;
+  chapterPriorityList: number[];
+  pattern: any;
+  chapterQuestionTypeMap: Map<number, Map<number, number>>;
+  sectionAllocations: SectionAllocationDto[];
+  usedQuestionTypes: Map<number, Set<number>>;
+  questionTypeUsage: Map<number, number>;
+  uniqueMarks: number[];
+}
+
 @Injectable()
 export class ChapterMarksDistributionService {
   private readonly logger = new Logger(ChapterMarksDistributionService.name);
@@ -841,25 +891,36 @@ export class ChapterMarksDistributionService {
     }))!.name;
     
     // Find or create subsection allocation
-    let subsectionAllocation = this.findSubsectionAllocation(sectionAllocations, section.id, selectedSqt.id);
+    let subsectionAllocation = sectionAllocations
+      .find(sa => sa.sectionId === section.id)!
+      .subsectionAllocations
+      .find(sa => sa.subsectionQuestionTypeId === selectedSqt.id);
     
     if (!subsectionAllocation) {
-      const newSubsection = this.createNewSubsection(selectedSqt, section.id, chapterId, chapterName);
+      const newSubsection = this.ensureSubsectionProperties({
+        subsectionQuestionTypeId: selectedSqt.id,
+        questionTypeName: selectedSqt.question_type.type_name,
+        allocatedChapters: [{
+          chapterId,
+          chapterName
+        }]
+      });
+      
       sectionAllocations
         .find(sa => sa.sectionId === section.id)!
         .subsectionAllocations.push(newSubsection);
     } else {
-      this.addChapterToSubsection(subsectionAllocation, chapterId, chapterName);
+      subsectionAllocation.allocatedChapters.push({
+        chapterId,
+        chapterName
+      });
     }
 
-    // Update tracking data
-    this.updateAllocationTracking(
-      usedQuestionTypes,
-      questionTypeUsage,
-      chapterQuestionTypes,
-      section.id,
-      selectedTypeId
-    );
+    // Update tracking
+    usedQuestionTypes.get(section.id)!.add(selectedTypeId);
+    const currentCount = chapterQuestionTypes.get(selectedTypeId) || 0;
+    questionTypeUsage.set(selectedTypeId, currentCount - 1);
+    chapterQuestionTypes.set(selectedTypeId, Math.max(0, currentCount - 1));
   }
   
   // Find a subsection allocation if it exists
@@ -1045,108 +1106,114 @@ export class ChapterMarksDistributionService {
 
   // New helper function to allocate a question
   private async allocateQuestionToSubsection(
-    section: any,
-    selectedSqt: any,
-    chapterId: number,
-    selectedTypeId: number,
-    sectionAllocations: SectionAllocationDto[],
-    usedQuestionTypes: Map<number, Set<number>>,
-    questionTypeUsage: Map<number, number>,
-    chapterQuestionTypes: Map<number, number>
+    params: QuestionAllocationParams
   ): Promise<void> {
+    const { section, selectedSqt, chapterId, sectionAllocations, usedQuestionTypes, 
+            questionTypeUsage, chapterQuestionTypes, selectedTypeId } = params;
+    
     const chapterName = (await this.prisma.chapter.findUnique({
       where: { id: chapterId }
     }))!.name;
 
-    // Find or create subsection allocation
-    let subsectionAllocation = sectionAllocations
-      .find(sa => sa.sectionId === section.id)!
-      .subsectionAllocations
-      .find(sa => sa.subsectionQuestionTypeId === selectedSqt.id);
+    // Use the existing helper methods for better maintainability
+    // Find subsection allocation using the helper method
+    const subsectionAllocation = this.findSubsectionAllocation(
+      sectionAllocations,
+      section.id,
+      selectedSqt.id
+    );
 
     if (!subsectionAllocation) {
-      const newSubsection = this.ensureSubsectionProperties({
-        subsectionQuestionTypeId: selectedSqt.id,
-        questionTypeName: selectedSqt.question_type.type_name,
-        allocatedChapters: [{
-          chapterId,
-          chapterName
-        }]
-      });
+      // Create a new subsection using the helper method
+      const newSubsection = this.createNewSubsection(
+        selectedSqt,
+        section.id,
+        chapterId,
+        chapterName
+      );
       
       sectionAllocations
         .find(sa => sa.sectionId === section.id)!
         .subsectionAllocations.push(newSubsection);
     } else {
-      subsectionAllocation.allocatedChapters.push({
-        chapterId,
-        chapterName
-      });
+      // Add chapter to existing subsection using the helper method
+      this.addChapterToSubsection(subsectionAllocation, chapterId, chapterName);
     }
 
-    // Update tracking
+    // Use the updateAllocationTracking helper method for tracking updates
+    // It decrements by 2 by default, so override that behavior by updating directly
     usedQuestionTypes.get(section.id)!.add(selectedTypeId);
+    
+    // Adjust the count differently than the original method
     const currentCount = chapterQuestionTypes.get(selectedTypeId) || 0;
-    questionTypeUsage.set(selectedTypeId, currentCount - 1);
+    // Decrement by 1 and set a minimum of 0
+    questionTypeUsage.set(selectedTypeId, Math.max(0, currentCount - 1));
     chapterQuestionTypes.set(selectedTypeId, Math.max(0, currentCount - 1));
+    
+    // Log allocation for debugging purposes
+    this.logger.debug(`Allocated question from chapter ${chapterId} to section ${section.id}, subsection ${selectedSqt.id}`);
   }
 
   // New helper function for tryAllocateMarkValue
   private async tryAllocateMarkValue(
-    mark: number,
-    remainingMarks: number,
-    chapterId: number,
-    pattern: any,
-    sectionAllocations: SectionAllocationDto[],
-    chapterQuestionTypes: Map<number, number>,
-    usedQuestionTypes: Map<number, Set<number>>,
-    questionTypeUsage: Map<number, number>
+    params: MarkAllocationParams
   ): Promise<{ success: boolean, remainingMarks: number }> {
-            if (mark > remainingMarks) {
+    const { 
+      mark, 
+      remainingMarks, 
+      chapterId, 
+      pattern, 
+      sectionAllocations, 
+      chapterQuestionTypes, 
+      usedQuestionTypes, 
+      questionTypeUsage 
+    } = params;
+    
+    if (mark > remainingMarks) {
       return { success: false, remainingMarks };
-            }
+    }
 
     // Get available question types
-            const availableQuestionTypes = this.getAllAvailableQuestionTypesByMark(
-              mark, 
-              pattern, 
-              sectionAllocations, 
-              chapterId, 
-              chapterQuestionTypes
-            );
+    const availableQuestionTypes = this.getAllAvailableQuestionTypesByMark(
+      mark, 
+      pattern, 
+      sectionAllocations, 
+      chapterId, 
+      chapterQuestionTypes
+    );
 
-            if (availableQuestionTypes.length === 0) {
+    if (availableQuestionTypes.length === 0) {
       return { success: false, remainingMarks };
-            }
+    }
 
     // Select the best question type
-            const selectedType = this.selectBestQuestionType(availableQuestionTypes);
-            if (!selectedType) {
+    const selectedType = this.selectBestQuestionType(availableQuestionTypes);
+    if (!selectedType) {
       return { success: false, remainingMarks };
-              }
+    }
 
-            // Find the section and subsection
-            const section = pattern.sections.find(s => s.id === selectedType.sectionId);
-            const selectedSqt = section.subsection_question_types.find(s => s.id === selectedType.subsectionId);
-            const questionTypeId = selectedType.questionTypeId;
-            
+    // Find the section and subsection
+    const section = pattern.sections.find(s => s.id === selectedType.sectionId);
+    const selectedSqt = section.subsection_question_types.find(s => s.id === selectedType.subsectionId);
+    const questionTypeId = selectedType.questionTypeId;
+    
     // Check if we have enough questions of this type
-            const currentCount = chapterQuestionTypes.get(questionTypeId) || 0;
-            if (currentCount <= 0) {
+    const currentCount = chapterQuestionTypes.get(questionTypeId) || 0;
+    if (currentCount <= 0) {
       return { success: false, remainingMarks };
-              }
+    }
 
-              // Allocate the question
-    await this.allocateQuestionToSubsection(
+    // Allocate the question
+    await this.allocateQuestionToSubsection({
       section,
       selectedSqt,
-                    chapterId,
-      questionTypeId,
+      chapterId,
+      selectedTypeId: questionTypeId,
       sectionAllocations,
       usedQuestionTypes,
       questionTypeUsage,
       chapterQuestionTypes
-    );
+    });
 
     // Update remaining marks
     const newRemainingMarks = remainingMarks - mark;
@@ -1159,96 +1226,42 @@ export class ChapterMarksDistributionService {
 
   // New helper to process a single chapter's allocation
   private async processChapterAllocation(
-    chapterId: number,
-    requestedMarks: number,
-    pattern: any,
-    chapterQuestionTypes: Map<number, number>,
-    sectionAllocations: SectionAllocationDto[],
-    usedQuestionTypes: Map<number, Set<number>>,
-    questionTypeUsage: Map<number, number>,
-    uniqueMarks: number[],
-    highestMark: number,
-    unallocatedMarks: number
+    params: ChapterAllocationParams
   ): Promise<{ remainingMarks: number, unallocatedMarks: number }> {
+    const {
+      chapterId,
+      requestedMarks,
+      pattern,
+      chapterQuestionTypes,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage,
+      uniqueMarks,
+      highestMark,
+      unallocatedMarks
+    } = params;
+    
     let remainingMarks = requestedMarks + unallocatedMarks;
     let localUnallocatedMarks = 0;
     
     // Randomly decide if we'll fill in ascending or descending order
     const isAscendingMarkOrder = Math.random() < 0.5;
-
-    while (remainingMarks > 0) {
-      let marksAllocatedInIteration = false;
-      
-      // Get mark sequence to try
-      const randomizeCompletely = Math.random() < 0.2;
-      const marksToTry = this.prepareMarksSequence(uniqueMarks, randomizeCompletely ? true : isAscendingMarkOrder, randomizeCompletely);
-      
-      // Try to allocate marks in sequence
-      for (const mark of marksToTry) {
-        if (mark > remainingMarks) continue;
-        
-        const result = await this.tryAllocateMarkValue(
-          mark,
-          remainingMarks,
-          chapterId,
-          pattern,
-          sectionAllocations,
-          chapterQuestionTypes,
-          usedQuestionTypes,
-          questionTypeUsage
-        );
-        
-        if (result.success) {
-              marksAllocatedInIteration = true;
-          remainingMarks = result.remainingMarks;
-
-          // Try exact match allocation if remaining marks are small enough
-              if (remainingMarks > 0 && remainingMarks <= highestMark) {
-                const exactMatchSuccess = await this.tryAllocateExactMarks(
-              remainingMarks,
-                  chapterId,
-                  pattern,
-                  sectionAllocations,
-                  chapterQuestionTypes,
-                  usedQuestionTypes,
-                  questionTypeUsage
-                );
-            
-                if (exactMatchSuccess) {
-              remainingMarks = 0;
-              break;
-                }
-              }
-
-          if (remainingMarks === 0) break;
-        }
-        }
-
-      // If no marks allocated in this iteration, try fallback strategies
-        if (!marksAllocatedInIteration && remainingMarks > 0) {
-        const strategies = await this.tryFallbackStrategies(
-          remainingMarks,
-          chapterId,
-          pattern,
-          sectionAllocations,
-          chapterQuestionTypes,
-          usedQuestionTypes,
-          questionTypeUsage,
-          marksToTry
-        );
-        
-        if (strategies.success) {
-          remainingMarks = strategies.remainingMarks;
-        } else {
-          break; // Can't allocate more marks to this chapter
-        }
-      }
-      
-      // If still not able to allocate, break the loop
-      if (remainingMarks > 0 && !marksAllocatedInIteration) {
-        break;
-      }
-    }
+    
+    // Try to allocate marks until none are left or allocation fails
+    const result = await this.allocateMarksInSequence({
+      chapterId,
+      remainingMarks,
+      pattern,
+      chapterQuestionTypes,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage,
+      uniqueMarks,
+      highestMark,
+      isAscendingMarkOrder
+    });
+    
+    remainingMarks = result.remainingMarks;
     
     // Store unallocated marks for next chapter
     if (remainingMarks > 0) {
@@ -1258,18 +1271,192 @@ export class ChapterMarksDistributionService {
     
     return { remainingMarks, unallocatedMarks: localUnallocatedMarks };
   }
-
-  // New helper for fallback allocation strategies
-  private async tryFallbackStrategies(
-    remainingMarks: number,
+  
+  // Helper function to handle marks allocation in sequence
+  private async allocateMarksInSequence(
+    params: {
+      chapterId: number;
+      remainingMarks: number;
+      pattern: any;
+      chapterQuestionTypes: Map<number, number>;
+      sectionAllocations: SectionAllocationDto[];
+      usedQuestionTypes: Map<number, Set<number>>;
+      questionTypeUsage: Map<number, number>;
+      uniqueMarks: number[];
+      highestMark: number;
+      isAscendingMarkOrder: boolean;
+    }
+  ): Promise<{ remainingMarks: number }> {
+    const {
+      chapterId,
+      pattern,
+      chapterQuestionTypes,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage,
+      uniqueMarks,
+      highestMark,
+      isAscendingMarkOrder
+    } = params;
+    
+    let remainingMarks = params.remainingMarks;
+    
+    while (remainingMarks > 0) {
+      // Get mark sequence to try
+      const randomizeCompletely = Math.random() < 0.2;
+      const marksToTry = this.prepareMarksSequence(uniqueMarks, randomizeCompletely ? true : isAscendingMarkOrder, randomizeCompletely);
+      
+      // Try to allocate marks with regular allocation
+      const { success, updatedMarks } = await this.tryAllocateMarksFromSequence({
+        marksToTry,
+        remainingMarks,
+        chapterId,
+        pattern,
+        sectionAllocations,
+        chapterQuestionTypes,
+        usedQuestionTypes,
+        questionTypeUsage,
+        highestMark
+      });
+      
+      remainingMarks = updatedMarks;
+      
+      // If we've allocated all marks or couldn't allocate any marks in this iteration, break
+      if (remainingMarks === 0 || !success) {
+        break;
+      }
+    }
+    
+    return { remainingMarks };
+  }
+  
+  // Helper function to try allocating marks from a sequence
+  private async tryAllocateMarksFromSequence(
+    params: {
+      marksToTry: number[];
+      remainingMarks: number;
+      chapterId: number;
+      pattern: any;
+      sectionAllocations: SectionAllocationDto[];
+      chapterQuestionTypes: Map<number, number>;
+      usedQuestionTypes: Map<number, Set<number>>;
+      questionTypeUsage: Map<number, number>;
+      highestMark: number;
+    }
+  ): Promise<{ success: boolean, updatedMarks: number }> {
+    const {
+      marksToTry,
+      chapterId,
+      pattern,
+      sectionAllocations,
+      chapterQuestionTypes,
+      usedQuestionTypes,
+      questionTypeUsage,
+      highestMark
+    } = params;
+    
+    let remainingMarks = params.remainingMarks;
+    let marksAllocatedInIteration = false;
+    
+    // Try to allocate marks in sequence
+    for (const mark of marksToTry) {
+      if (mark > remainingMarks) continue;
+      
+      const result = await this.tryAllocateMarkValue({
+        mark,
+        remainingMarks,
+        chapterId,
+        pattern,
+        sectionAllocations,
+        chapterQuestionTypes,
+        usedQuestionTypes,
+        questionTypeUsage
+      });
+      
+      if (result.success) {
+        marksAllocatedInIteration = true;
+        remainingMarks = result.remainingMarks;
+        
+        // Try exact match allocation if appropriate
+        if (remainingMarks > 0 && remainingMarks <= highestMark) {
+          const exactMatchSuccess = await this.tryExactMarksAllocation(
+            remainingMarks,
+            chapterId,
+            pattern,
+            sectionAllocations,
+            chapterQuestionTypes,
+            usedQuestionTypes,
+            questionTypeUsage
+          );
+          
+          if (exactMatchSuccess) {
+            remainingMarks = 0;
+            break;
+          }
+        }
+        
+        if (remainingMarks === 0) break;
+      }
+    }
+    
+    // If no marks allocated in this iteration, try fallback strategies
+    if (!marksAllocatedInIteration && remainingMarks > 0) {
+      const strategies = await this.tryFallbackStrategies({
+        remainingMarks,
+        chapterId,
+        pattern,
+        sectionAllocations,
+        chapterQuestionTypes,
+        usedQuestionTypes,
+        questionTypeUsage,
+        marksToTry
+      });
+      
+      if (strategies.success) {
+        marksAllocatedInIteration = true;
+        remainingMarks = strategies.remainingMarks;
+      }
+    }
+    
+    return { success: marksAllocatedInIteration, updatedMarks: remainingMarks };
+  }
+  
+  // Helper function to try exact marks allocation
+  private async tryExactMarksAllocation(
+    targetMarks: number,
     chapterId: number,
     pattern: any,
     sectionAllocations: SectionAllocationDto[],
     chapterQuestionTypes: Map<number, number>,
     usedQuestionTypes: Map<number, Set<number>>,
-    questionTypeUsage: Map<number, number>,
-    marksToTry: number[]
+    questionTypeUsage: Map<number, number>
+  ): Promise<boolean> {
+    return this.tryAllocateExactMarks(
+      targetMarks,
+      chapterId,
+      pattern,
+      sectionAllocations,
+      chapterQuestionTypes,
+      usedQuestionTypes,
+      questionTypeUsage
+    );
+  }
+
+  // New helper for fallback allocation strategies
+  private async tryFallbackStrategies(
+    params: FallbackStrategyParams
   ): Promise<{ success: boolean, remainingMarks: number }> {
+    const {
+      remainingMarks,
+      chapterId,
+      pattern,
+      sectionAllocations,
+      chapterQuestionTypes,
+      usedQuestionTypes,
+      questionTypeUsage,
+      marksToTry
+    } = params;
+    
     // First try exact match allocation
     const exactMatchAllocated = await this.tryAllocateExactMarks(
             remainingMarks,
@@ -1315,15 +1502,19 @@ export class ChapterMarksDistributionService {
 
   // New helper to process redistribute remaining marks
   private async redistributeUnallocatedMarks(
-    unallocatedMarks: number,
-    chapterPriorityList: number[],
-    pattern: any,
-    chapterQuestionTypeMap: Map<number, Map<number, number>>,
-    sectionAllocations: SectionAllocationDto[],
-    usedQuestionTypes: Map<number, Set<number>>,
-    questionTypeUsage: Map<number, number>,
-    uniqueMarks: number[]
+    params: RedistributeMarksParams
   ): Promise<number> {
+    const {
+      chapterPriorityList,
+      pattern,
+      chapterQuestionTypeMap,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage,
+      uniqueMarks
+    } = params;
+    
+    let unallocatedMarks = params.unallocatedMarks;
     if (unallocatedMarks <= 0) return 0;
     
     // Try reverse priority order for redistribution
@@ -1380,16 +1571,16 @@ export class ChapterMarksDistributionService {
             }
             
             // Allocate the question
-          await this.allocateQuestionToSubsection(
+          await this.allocateQuestionToSubsection({
             section,
             selectedSqt,
-                  chapterId,
-            questionTypeId,
-              sectionAllocations,
+            chapterId,
+            selectedTypeId: questionTypeId,
+            sectionAllocations,
             usedQuestionTypes,
             questionTypeUsage,
-            chapterTypes
-            );
+            chapterQuestionTypes: chapterTypes
+          });
             
           // Update tracking
           unallocatedMarks -= markValue;
@@ -1495,26 +1686,20 @@ export class ChapterMarksDistributionService {
         questionOrigin
       );
 
-      // 4. Create a deep copy of the original map for reference
-      const originalChapterQuestionTypeMap = new Map<number, Map<number, number>>();
-      for (const [chapterId, questionTypeCounts] of chapterQuestionTypeMap.entries()) {
-        originalChapterQuestionTypeMap.set(chapterId, new Map(questionTypeCounts));
-      }
-
-      // 5. Create chapter priority list
+      // 4. Create chapter priority list
       const chapterPriorityList = Array.from(chapterQuestionTypeMap.entries())
         .sort((a, b) => a[1].size - b[1].size)
         .map(([chapterId]) => chapterId);
 
-      // 6. Initialize tracking variables
+      // 5. Initialize tracking variables
       const sectionAllocations = this.createInitialSectionAllocations(pattern);
       const { usedQuestionTypes, questionTypeUsage } = this.initializeTrackingData(pattern, chapterIds);
 
-      // 7. Get unique marks per question
+      // 6. Get unique marks per question
       const uniqueMarks = [...new Set(pattern.sections.map(s => s.marks_per_question))].sort((a: number, b: number) => a - b);
       const highestMark = uniqueMarks.length > 0 ? uniqueMarks[uniqueMarks.length - 1] as number : 0;
 
-      // 8. Process each chapter
+      // 7. Process each chapter
       let unallocatedMarks = 0;
       for (const chapterId of chapterPriorityList) {
         const chapterIndex = filter.chapterIds.indexOf(chapterId);
@@ -1522,7 +1707,7 @@ export class ChapterMarksDistributionService {
         const chapterQuestionTypes = chapterQuestionTypeMap.get(chapterId) || new Map();
         
         // Process this chapter's allocation
-        const result = await this.processChapterAllocation(
+        const result = await this.processChapterAllocation({
           chapterId,
           requestedMarks,
           pattern,
@@ -1530,16 +1715,16 @@ export class ChapterMarksDistributionService {
           sectionAllocations,
           usedQuestionTypes,
           questionTypeUsage,
-          uniqueMarks as number[],
+          uniqueMarks: uniqueMarks as number[],
           highestMark,
           unallocatedMarks
-        );
+        });
         
         unallocatedMarks = result.unallocatedMarks;
       }
 
-      // 9. Try to redistribute any unallocated marks
-      unallocatedMarks = await this.redistributeUnallocatedMarks(
+      // 8. Try to redistribute any unallocated marks
+      unallocatedMarks = await this.redistributeUnallocatedMarks({
         unallocatedMarks,
         chapterPriorityList,
         pattern,
@@ -1547,21 +1732,21 @@ export class ChapterMarksDistributionService {
         sectionAllocations,
         usedQuestionTypes,
         questionTypeUsage,
-        uniqueMarks as number[]
-      );
+        uniqueMarks: uniqueMarks as number[]
+      });
 
       if (unallocatedMarks > 0) {
         this.logger.warn(`Unable to allocate ${unallocatedMarks} marks due to insufficient questions.`);
       }
 
-      // 10. Prepare final response
+      // 9. Prepare final response
       const chapterMarks = await this.calculateFinalChapterMarks(
         sectionAllocations,
         filter.chapterIds,
         filter.requestedMarks
       );
 
-      // 11. Create and return the response
+      // 10. Create and return the response
       const responseDto = this.createResponseDto(
         pattern,
         totalMarks,
@@ -2147,7 +2332,7 @@ export class ChapterMarksDistributionService {
         const usedIds = new Set<number>();
         
         for (const allocation of allocations) {
-          const { sectionIndex, subsectionId, allocationIndex } = allocation;
+          const { sectionIndex, subsectionId } = allocation;
           
           // Find the subsection in the response
           const section = responseDto.sectionAllocations[sectionIndex];
@@ -2335,7 +2520,7 @@ export class ChapterMarksDistributionService {
     for (const section of responseDto.sectionAllocations) {
       for (const subsection of section.subsectionAllocations) {
         for (const chapter of subsection.allocatedChapters) {
-          if (chapter.question && chapter.question.id) {
+          if (chapter.question?.id) {
             const detailedQuestion = detailedQuestionsMap.get(chapter.question.id);
             if (detailedQuestion) {
               chapter.question = detailedQuestion;
