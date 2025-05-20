@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards, Query, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, UseGuards, Query, ValidationPipe, Req } from '@nestjs/common';
 import { SubjectService } from './subject.service';
-import { CreateSubjectDto, UpdateSubjectDto, UnconnectedSubjectsQueryDto, SchoolStandardSubjectsQueryDto } from './dto/subject.dto';
+import { CreateSubjectDto, UpdateSubjectDto, UnconnectedSubjectsQueryDto, SchoolStandardSubjectsQueryDto, CommonSubjectsQueryDto } from './dto/subject.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -109,6 +109,44 @@ export class SubjectController {
   @ApiResponse({ status: 200, description: 'List of subjects for the specified board, sorted alphabetically' })
   async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
     return await this.subjectService.findByBoard(boardId);
+  }
+
+  @Get('common-subjects')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ 
+    summary: 'Get common subjects for a standard and instruction mediums',
+    description: 'Returns subjects common to all specified mediums for the given standard that are assigned to the authenticated user'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Returns common subjects for the specified standard and mediums, sorted alphabetically by name',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'number', example: 1 },
+          name: { type: 'string', example: 'Physics' },
+          board_id: { type: 'number', example: 1 }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Standard or Medium not found' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'User is not authenticated' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input parameters' })
+  async findCommonSubjects(
+    @Query(new ValidationPipe({ transform: true })) query: CommonSubjectsQueryDto,
+    @Req() request
+  ) {
+    // Extract user ID from the JWT token stored in request
+    const userId = request.user.id;
+    
+    return await this.subjectService.findCommonSubjects(
+      query.standard_id,
+      query.medium_ids,
+      userId
+    );
   }
 
   @Get(':id')

@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseGuards, Patch, Req, Query } from '@nestjs/common';
 import { StandardService } from './standard.service';
-import { StandardDto, CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
+import { StandardDto, CreateStandardDto, UpdateStandardDto, CommonStandardsDto, CommonStandardsQueryDto } from './dto/standard.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ReorderStandardDto } from './dto/reorder-standard.dto';
+import { Request } from 'express';
 
 @ApiTags('standards')
 @Controller('standards')
@@ -37,6 +38,36 @@ export class StandardController {
   })
   findAll(): Promise<StandardDto[]> {
     return this.standardService.findAll();
+  }
+
+  @Get('common-standards')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get standards for single instruction medium or common standards across multiple instruction mediums that are assigned to the user' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'List of standards for single medium or common standards across multiple mediums that are also assigned to the user',
+    type: StandardDto,
+    isArray: true 
+  })
+  @ApiResponse({ status: 400, description: 'Invalid request parameters' })
+  @ApiResponse({ status: 404, description: 'One or more instruction mediums not found or user not found' })
+  async findCommonStandards(@Query() query: CommonStandardsQueryDto, @Req() request: Request) {
+    // Extract user ID from the JWT token in the request
+    const userId = request.user['id'];
+    
+    // Call the service method with both instruction medium IDs and user ID
+    return await this.standardService.findCommonStandardsForUser(
+      query.instruction_medium_ids, 
+      userId
+    );
+  }
+
+  @Get('board/:boardId')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get standards by board id' })
+  @ApiResponse({ status: 200, description: 'List of standards for the specified board' })
+  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
+    return await this.standardService.findByBoard(boardId);
   }
 
   @Get(':id')
@@ -75,14 +106,6 @@ export class StandardController {
   })
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.standardService.remove(id);
-  }
-
-  @Get('board/:boardId')
-  @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get standards by board id' })
-  @ApiResponse({ status: 200, description: 'List of standards for the specified board' })
-  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
-    return await this.standardService.findByBoard(boardId);
   }
 
   @Put(':id/reorder')

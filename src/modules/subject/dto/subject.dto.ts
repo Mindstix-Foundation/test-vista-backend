@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsNotEmpty } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsString, IsNumber, IsOptional, IsNotEmpty, IsArray } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class SubjectDto {
   @ApiProperty({ example: 1 })
@@ -95,4 +95,30 @@ export class SchoolStandardSubjectsQueryDto {
   @IsNotEmpty({ message: 'Standard ID is required' })
   @Transform(({ value }) => parseInt(value))
   standard_id: number;
+}
+
+export class CommonSubjectsQueryDto {
+  @ApiProperty({ 
+    example: 1, 
+    description: 'ID of the standard to fetch common subjects for' 
+  })
+  @IsNumber({}, { message: 'Standard ID must be a number' })
+  @IsNotEmpty({ message: 'Standard ID is required' })
+  @Transform(({ value }) => parseInt(value))
+  standard_id: number;
+
+  @ApiProperty({ 
+    example: [1, 2], 
+    description: 'IDs of the instruction mediums to find common subjects for',
+    isArray: true,
+    type: Number
+  })
+  @IsArray({ message: 'Mediums must be an array' })
+  @Type(() => Number)
+  @Transform(({ value }) => 
+    Array.isArray(value) 
+      ? value.map(v => parseInt(v)) 
+      : [parseInt(value)]
+  )
+  medium_ids: number[];
 } 

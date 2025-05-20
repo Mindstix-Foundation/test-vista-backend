@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
 import { toTitleCase } from '../../utils/titleCase';
@@ -352,6 +352,141 @@ export class SubjectService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to fetch subjects for school and standard');
+    }
+  }
+
+  /**
+   * Finds common subjects for a given standard and instruction mediums that are assigned to the authenticated user
+   * @param standardId ID of the standard
+   * @param mediumIds Array of instruction medium IDs
+   * @param userId ID of the authenticated user
+   * @returns Array of common subjects
+   */
+  async findCommonSubjects(standardId: number, mediumIds: number[], userId: number) {
+    try {
+      // Check if standard exists
+      const standard = await this.prisma.standard.findUnique({
+        where: { id: standardId }
+      });
+
+      if (!standard) {
+        throw new NotFoundException(`Standard with ID ${standardId} not found`);
+      }
+
+      // Check if all mediums exist
+      const mediumsCount = await this.prisma.instruction_Medium.count({
+        where: { id: { in: mediumIds } }
+      });
+
+      if (mediumsCount !== mediumIds.length) {
+        throw new NotFoundException('One or more instruction mediums not found');
+      }
+
+      // Get subjects assigned to the user
+      const userSubjects = await this.prisma.teacher_Subject.findMany({
+        where: {
+          user_id: userId,
+          school_standard: {
+            standard_id: standardId
+          }
+        },
+        select: {
+          subject_id: true
+        }
+      });
+
+      if (userSubjects.length === 0) {
+        return [];
+      }
+
+      const userSubjectIds = userSubjects.map(us => us.subject_id);
+
+      if (mediumIds.length === 1) {
+        // For single medium, just get subjects for that medium and standard
+        const subjects = await this.prisma.medium_Standard_Subject.findMany({
+          where: {
+            standard_id: standardId,
+            instruction_medium_id: mediumIds[0],
+            subject_id: {
+              in: userSubjectIds
+            }
+          },
+          select: {
+            subject: {
+              select: {
+                id: true,
+                name: true,
+                board_id: true
+              }
+            }
+          },
+          distinct: ['subject_id'],
+          orderBy: {
+            subject: {
+              name: 'asc'
+            }
+          }
+        });
+
+        return subjects.map(item => item.subject);
+      } else {
+        // For multiple mediums, find common subjects
+        const subjectsByMedium = await Promise.all(
+          mediumIds.map(mediumId => 
+            this.prisma.medium_Standard_Subject.findMany({
+              where: {
+                standard_id: standardId,
+                instruction_medium_id: mediumId,
+                subject_id: {
+                  in: userSubjectIds
+                }
+              },
+              select: {
+                subject_id: true
+              }
+            })
+          )
+        );
+
+        // Extract subject IDs from each medium's results
+        const subjectIdSets = subjectsByMedium.map(mediumSubjects => 
+          new Set(mediumSubjects.map(s => s.subject_id))
+        );
+
+        // Find the intersection of all sets (common subject IDs)
+        const commonSubjectIds = [...subjectIdSets[0]].filter(subjectId => 
+          subjectIdSets.every(set => set.has(subjectId))
+        );
+
+        if (commonSubjectIds.length === 0) {
+          return [];
+        }
+
+        // Fetch the full subject details for the common subject IDs
+        const commonSubjects = await this.prisma.subject.findMany({
+          where: {
+            id: {
+              in: commonSubjectIds
+            }
+          },
+          select: {
+            id: true,
+            name: true,
+            board_id: true
+          },
+          orderBy: {
+            name: 'asc'
+          }
+        });
+
+        return commonSubjects;
+      }
+    } catch (error) {
+      this.logger.error('Failed to find common subjects:', error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to find common subjects');
     }
   }
 }

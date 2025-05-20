@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AwsS3Service } from '../aws/aws-s3.service';
-import { TestPaperDto, ChapterWeightageDto, InstructionMediumHtmlDto } from './dto/create-test-paper.dto';
+import { TestPaperDto, ChapterWeightageDto, InstructionMediumPdfDto } from './dto/create-test-paper.dto';
 
 @Injectable()
 export class TestPaperHtmlService {
@@ -371,6 +371,48 @@ export class TestPaperHtmlService {
     }
   }
 
+  async deleteTestPaper(testPaperId: number) {
+    try {
+      // Find the test paper to check if it exists
+      const testPaper = await this.prisma.test_Paper.findUnique({
+        where: { id: testPaperId },
+        include: {
+          html_files: true,
+          test_paper_chapters: true
+        }
+      });
+
+      if (!testPaper) {
+        throw new NotFoundException(`Test paper with ID ${testPaperId} not found`);
+      }
+
+      // Delete all associated files from S3
+      for (const htmlFile of testPaper.html_files) {
+        try {
+          await this.awsS3Service.deleteFile(htmlFile.content_url);
+        } catch (fileError) {
+          this.logger.warn(`Could not delete file ${htmlFile.content_url} from storage: ${fileError.message}`);
+          // Continue with other files even if one fails
+        }
+      }
+
+      // Delete the test paper - this will cascade delete html_files and test_paper_chapters
+      // thanks to the onDelete: Cascade relation in the Prisma schema
+      await this.prisma.test_Paper.delete({
+        where: { id: testPaperId }
+      });
+
+      return { 
+        message: 'Test paper deleted successfully',
+        deleted_files_count: testPaper.html_files.length,
+        deleted_chapters_count: testPaper.test_paper_chapters.length
+      };
+    } catch (error) {
+      this.logger.error(`Error deleting test paper: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
   async setDefaultMedium(testPaperId: number, instructionMediumId: number) {
     // First check if the file exists
     const htmlFile = await this.prisma.hTML_File.findUnique({
@@ -487,12 +529,12 @@ export class TestPaperHtmlService {
           }
 
           // Validate file content type
-          if (!file.mimetype.includes('text/html') && !file.originalname.endsWith('.html')) {
-            throw new BadRequestException(`File for instruction medium ID ${mediumId} must be HTML`);
+          if (!file.mimetype.includes('application/pdf') && !file.originalname.endsWith('.pdf')) {
+            throw new BadRequestException(`File for instruction medium ID ${mediumId} must be PDF`);
           }
 
           // Generate filename
-          const finalFilename = `test-paper-${testPaper.id}-medium-${mediumId}.html`;
+          const finalFilename = `test-paper-${testPaper.id}-medium-${mediumId}.pdf`;
 
           // First medium is always the default
           const isDefault = index === 0;
@@ -532,7 +574,7 @@ export class TestPaperHtmlService {
     const uploadResult = await this.awsS3Service.uploadTestPaperContent(
       fileBuffer,
       filename,
-      'text/html',
+      'application/pdf',
     );
 
     // Check if there are existing HTML files for this test paper
@@ -547,7 +589,7 @@ export class TestPaperHtmlService {
         instruction_medium: { connect: { id: instructionMediumId } },
         content_url: uploadResult.url,
         file_size: uploadResult.metadata.fileSize,
-        is_pdf: false,
+        is_pdf: true,
         is_default_medium: isDefaultMedium !== undefined ? isDefaultMedium : htmlFilesCount === 0, // Mark as default if specified or if it's the first one
       },
     });

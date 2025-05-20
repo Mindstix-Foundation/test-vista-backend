@@ -1204,42 +1204,25 @@ export class ChapterMarksDistributionService {
       });
     }
 
-    // Create response with allocation issue information
-    const response: ChapterMarksDistributionResponseDto = {
-      patternId,
+    // Create the response DTO
+    const responseDto: ChapterMarksDistributionResponseDto = {
+      patternId: pattern.id,
       patternName: pattern.pattern_name,
-      totalMarks,
-      absoluteMarks: totalMarks,
-      questionOrigin: questionOrigin, // Add questionOrigin to response
-      mediums: mediumDetails,
-      sectionAllocations: sectionAllocations.map(section => {
-        // Apply the section helper
-        this.ensureSectionProperties(section);
-        
-        // Apply the subsection helper to all subsections
-        section.subsectionAllocations = section.subsectionAllocations.map(subsection => {
-          // Randomize the allocated chapters order
-          if (subsection.allocatedChapters && subsection.allocatedChapters.length > 1) {
-            subsection.allocatedChapters = this.generateRandomSequence(subsection.allocatedChapters);
-          }
-          return this.ensureSubsectionProperties(subsection);
-        });
-        
-        return section;
-      }),
-      chapterMarks
+      totalMarks: totalMarks,
+      absoluteMarks: totalMarks, // Fixed: Using totalMarks for absoluteMarks
+      questionOrigin: filter.questionOrigin,
+      // If we have medium details, include them
+      mediums: mediumDetails.length > 0 ? mediumDetails : [],
+      sectionAllocations: sectionAllocations,
+      chapterMarks: chapterMarks, // Using the correct variable name
+      insufficientQuestions: unallocatedMarks > 0,
+      allocationMessage: unallocatedMarks > 0 ? `Could not allocate ${unallocatedMarks} marks due to insufficient questions` : undefined
     };
-    
-    // Add allocation issue information if there were unallocated marks
-    if (unallocatedMarks > 0) {
-      // Return only the error message without any other data
-      return {
-        insufficientQuestions: true,
-        allocationMessage: `Unable to allocate ${unallocatedMarks} marks due to insufficient questions. Consider reducing the requested marks or adding more questions.`
-      } as ChapterMarksDistributionResponseDto;
-    }
-    
-    return response;
+
+    // Randomize chapter sequence within subsections
+    this.randomizeChapterSequence(responseDto);
+
+    return responseDto;
   } catch (error) {
     this.logger.error(`Error in distributeChapterMarks: ${error.message}`, error.stack);
     throw error;
@@ -2437,5 +2420,28 @@ export class ChapterMarksDistributionService {
 
     // Remove any image_url properties that might still be present
     return this.removeImageUrlProperties(response);
+  }
+
+  /**
+   * Randomizes the sequence of chapters within each subsection
+   * This prevents chapters from being grouped together in a uniform pattern
+   */
+  private randomizeChapterSequence(responseDto: ChapterMarksDistributionResponseDto): void {
+    for (const section of responseDto.sectionAllocations) {
+      for (const subsection of section.subsectionAllocations) {
+        // Skip subsections with less than 2 chapters (no need to randomize)
+        if (subsection.allocatedChapters.length < 2) {
+          continue;
+        }
+        
+        // Shuffle the allocated chapters using Fisher-Yates algorithm
+        for (let i = subsection.allocatedChapters.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          // Swap elements
+          [subsection.allocatedChapters[i], subsection.allocatedChapters[j]] = 
+          [subsection.allocatedChapters[j], subsection.allocatedChapters[i]];
+        }
+      }
+    }
   }
 } 
