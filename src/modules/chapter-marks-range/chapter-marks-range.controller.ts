@@ -1,8 +1,6 @@
 import { Controller, Get, Query, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { ChapterMarksRangeService } from './chapter-marks-range.service';
-import { FilterChaptersDto } from './dto/filter-chapters.dto';
-import { ChapterMarksResponseDto } from './dto/chapter-marks-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ChapterMarksRangeFilterDto, ChapterMarksRangeResponseDto } from './dto/chapter-marks-range.dto';
 

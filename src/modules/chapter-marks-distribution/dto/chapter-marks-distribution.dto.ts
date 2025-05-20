@@ -2,6 +2,8 @@ import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-valid
 import { ApiProperty } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 
+export type QuestionOriginType = 'board' | 'other' | 'both';
+
 export class ChapterMarksRequestDto {
   @ApiProperty({ description: 'Pattern ID', example: 1 })
   @IsNotEmpty()
@@ -29,7 +31,7 @@ export class ChapterMarksRequestDto {
     default: 'both'
   })
   @IsOptional()
-  questionOrigin?: 'board' | 'other' | 'both';
+  questionOrigin?: QuestionOriginType;
 }
 
 export class AllocatedChapterDto {
@@ -235,7 +237,7 @@ export class ChapterMarksDistributionResponseDto {
   @ApiProperty({ description: 'Question origin (board, other, or both)', example: 'board', required: false })
   @Expose()
   @IsOptional()
-  questionOrigin?: 'board' | 'other' | 'both';
+  questionOrigin?: QuestionOriginType;
 
   @ApiProperty({ description: 'Instruction mediums used', type: [MediumResponseDto] })
   @Expose()
@@ -450,7 +452,7 @@ export class FinalQuestionsDistributionBodyDto {
   })
   @IsOptional()
   @Expose()
-  questionOrigin?: 'board' | 'other' | 'both';
+  questionOrigin?: QuestionOriginType;
 
   @ApiProperty({ 
     description: 'Medium information', 
@@ -512,7 +514,7 @@ export class ChangeQuestionRequestDto {
   })
   @IsOptional()
   @Expose()
-  questionOrigin?: 'board' | 'other' | 'both';
+  questionOrigin?: QuestionOriginType;
 }
 
 export class ChangeQuestionResponseDto {

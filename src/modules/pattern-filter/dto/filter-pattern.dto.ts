@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsEnum, IsInt, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 enum QuestionOrigin {
@@ -17,7 +17,12 @@ export class BaseFilterPatternDto {
     if (typeof value === 'string') {
       return value.split(',').map(id => parseInt(id.trim(), 10));
     }
-    return Array.isArray(value) ? value : value ? [value] : [];
+    
+    if (Array.isArray(value)) {
+      return value;
+    } else {
+      return value ? [value] : [];
+    }
   })
   @Type(() => Number)
   @IsNumber({}, { each: true, message: 'Each mediumIds must be a number' })

@@ -5,6 +5,9 @@ import { FilterChaptersDto } from './dto/filter-chapters.dto';
 import { ChapterMarksResponseDto } from './dto/chapter-marks-response.dto';
 import { Prisma } from '@prisma/client';
 
+// Define type alias for the question origin union type
+type QuestionOriginType = 'board' | 'other' | 'both';
+
 @Injectable()
 export class CreateTestPaperService {
   constructor(private prisma: PrismaService) {}
@@ -36,7 +39,7 @@ export class CreateTestPaperService {
     
     // Randomize within groups and flatten
     const result: number[] = [];
-    for (const [marks, chapters] of groupedChapters) {
+    for (const [, chapters] of groupedChapters) {
       if (chapters.length > 1) {
         // Randomize chapters with same marks
         result.push(...this.generateRandomSequence(chapters));
@@ -60,7 +63,7 @@ export class CreateTestPaperService {
   private async getChapterQuestionTypeCounts(
     chapterIds: number[],
     mediumIds: number[],
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<Map<number, Map<number, number>>> {
     console.log('Getting chapter question type counts for chapters:', chapterIds);
     console.log('Medium IDs:', mediumIds);
@@ -85,7 +88,7 @@ export class CreateTestPaperService {
 
     const boardQuestionSql = Prisma.sql([boardQuestionCondition]);
 
-    const result = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
+    await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
       SELECT 
         q.chapter_id,
         q.question_type_id,
@@ -574,7 +577,7 @@ export class CreateTestPaperService {
     pattern: any,
     chapterIds: number[],
     mediumIds: number[],
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<Map<number, number>> {
     const possibleMarksMap = new Map<number, number>();
     
@@ -652,7 +655,7 @@ export class CreateTestPaperService {
     chapterIds: number[],
     mediumIds: number[],
     targetMarks: Map<number, number>,
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<Map<number, Map<number, number[]>>> {
     const allocationMap = new Map<number, Map<number, number[]>>();
     
@@ -756,7 +759,7 @@ export class CreateTestPaperService {
     chapterId: number,
     questionTypeIds: number[],
     mediumIds: number[],
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<boolean> {
     // Build where condition based on question origin
     let boardQuestionCondition = {};

@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AwsS3Service } from '../aws/aws-s3.service';
-import { TestPaperDto, ChapterWeightageDto, InstructionMediumPdfDto } from './dto/create-test-paper.dto';
+import { TestPaperDto } from './dto/create-test-paper.dto';
 
 @Injectable()
 export class TestPaperHtmlService {
@@ -590,7 +590,7 @@ export class TestPaperHtmlService {
         content_url: uploadResult.url,
         file_size: uploadResult.metadata.fileSize,
         is_pdf: true,
-        is_default_medium: isDefaultMedium !== undefined ? isDefaultMedium : htmlFilesCount === 0, // Mark as default if specified or if it's the first one
+        is_default_medium: isDefaultMedium ?? htmlFilesCount === 0, // Mark as default if specified or if it's the first one
       },
     });
   }
@@ -603,13 +603,15 @@ export class TestPaperHtmlService {
     let minutes = 0;
     
     // Extract hours
-    const hoursMatch = examTimeStr.match(/(\d+)\s*hour/i);
+    const hoursRegex = /(\d+)\s*hour/i;
+    const hoursMatch = hoursRegex.exec(examTimeStr);
     if (hoursMatch) {
       hours = parseInt(hoursMatch[1], 10);
     }
     
     // Extract minutes
-    const minutesMatch = examTimeStr.match(/(\d+)\s*minute/i);
+    const minutesRegex = /(\d+)\s*minute/i;
+    const minutesMatch = minutesRegex.exec(examTimeStr);
     if (minutesMatch) {
       minutes = parseInt(minutesMatch[1], 10);
     }

@@ -1,6 +1,6 @@
-import { Controller, Post, Delete, Body, Param, UseInterceptors, UploadedFile, ParseIntPipe, BadRequestException, Query, Logger, Get, Req, UploadedFiles } from '@nestjs/common';
+import { Controller, Post, Delete, Body, Param, UseInterceptors, ParseIntPipe, BadRequestException, Query, Logger, Get, Req, UploadedFiles } from '@nestjs/common';
 import { TestPaperHtmlService } from './test-paper-html.service';
-import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiQuery, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { TestPaperDto } from './dto/create-test-paper.dto';
 
