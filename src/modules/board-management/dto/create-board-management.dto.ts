@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsNotEmpty, IsString, ValidateNested, IsArray, IsOptional } from 'class-validator';
+import { ValidateNested, IsArray } from 'class-validator';
 import { CreateAddressDto } from '../../address/dto/address.dto';
 import { CreateBoardDto } from '../../board/dto/board.dto';
 import { CreateInstructionMediumDto } from '../../instruction_medium/dto/instruction-medium.dto';

@@ -90,6 +90,44 @@ interface RedistributeMarksParams {
   uniqueMarks: number[];
 }
 
+// Define an interface to group parameters for tryAllocateFromTypes
+interface TryAllocateFromTypesParams {
+  allocatableTypes: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }>;
+  pattern: any;
+  chapterId: number;
+  chapterTypes: Map<number, number>;
+  remainingMarks: number;
+  sectionAllocations: SectionAllocationDto[];
+  usedQuestionTypes: Map<number, Set<number>>;
+  questionTypeUsage: Map<number, number>;
+  availableTypes: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }>;
+}
+
+// Define an interface to group parameters for allocateMarksFromAvailableTypes
+interface AllocateMarksFromTypesParams {
+  unallocatedMarks: number;
+  types: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }>;
+  pattern: any;
+  chapterId: number;
+  chapterTypes: Map<number, number>;
+  sectionAllocations: SectionAllocationDto[];
+  usedQuestionTypes: Map<number, Set<number>>;
+  questionTypeUsage: Map<number, number>;
+}
+
+// Define an interface to group parameters for processAllocation
+interface ProcessAllocationParams {
+  allocation: any;
+  questions: any[];
+  usedIds: Set<number>;
+  chapterId: number;
+  questionTypeId: number;
+  requestBody: FinalQuestionsDistributionBodyDto;
+  responseDto: ChapterMarksDistributionResponseDto;
+  selectedQuestionIds: Set<number>;
+  usedQuestionIds: Set<number>;
+}
+
 @Injectable()
 export class ChapterMarksDistributionService {
   private readonly logger = new Logger(ChapterMarksDistributionService.name);
@@ -1373,35 +1411,30 @@ export class ChapterMarksDistributionService {
         questionTypeUsage
       });
       
-      if (result.success) {
-        marksAllocatedInIteration = true;
-        remainingMarks = result.remainingMarks;
-        
-        // Try exact match allocation if appropriate
-        if (remainingMarks > 0 && remainingMarks <= highestMark) {
-          const exactMatchSuccess = await this.tryExactMarksAllocation(
-            remainingMarks,
-            chapterId,
-            pattern,
-            sectionAllocations,
-            chapterQuestionTypes,
-            usedQuestionTypes,
-            questionTypeUsage
-          );
-          
-          if (exactMatchSuccess) {
-            remainingMarks = 0;
-            break;
-          }
-        }
-        
-        if (remainingMarks === 0) break;
+      if (!result.success) continue;
+      
+      marksAllocatedInIteration = true;
+      remainingMarks = result.remainingMarks;
+      
+      // Check if remaining marks are eligible for exact match allocation
+      if (this.isEligibleForExactMatch(remainingMarks, highestMark)) {
+        remainingMarks = await this.handleExactMatchAllocation(
+          remainingMarks,
+          chapterId,
+          pattern,
+          sectionAllocations,
+          chapterQuestionTypes,
+          usedQuestionTypes,
+          questionTypeUsage
+        );
       }
+      
+      if (remainingMarks === 0) break;
     }
     
-    // If no marks allocated in this iteration, try fallback strategies
+    // Try fallback strategies only if needed
     if (!marksAllocatedInIteration && remainingMarks > 0) {
-      const strategies = await this.tryFallbackStrategies({
+      const { success, remainingMarks: updatedMarks } = await this.tryFallbackStrategies({
         remainingMarks,
         chapterId,
         pattern,
@@ -1412,27 +1445,32 @@ export class ChapterMarksDistributionService {
         marksToTry
       });
       
-      if (strategies.success) {
+      if (success) {
         marksAllocatedInIteration = true;
-        remainingMarks = strategies.remainingMarks;
+        remainingMarks = updatedMarks;
       }
     }
     
     return { success: marksAllocatedInIteration, updatedMarks: remainingMarks };
   }
   
-  // Helper function to try exact marks allocation
-  private async tryExactMarksAllocation(
-    targetMarks: number,
+  // Helper for checking if marks are eligible for exact match allocation
+  private isEligibleForExactMatch(remainingMarks: number, highestMark: number): boolean {
+    return remainingMarks > 0 && remainingMarks <= highestMark;
+  }
+  
+  // Helper for handling exact match allocation
+  private async handleExactMatchAllocation(
+    remainingMarks: number,
     chapterId: number,
     pattern: any,
     sectionAllocations: SectionAllocationDto[],
     chapterQuestionTypes: Map<number, number>,
     usedQuestionTypes: Map<number, Set<number>>,
     questionTypeUsage: Map<number, number>
-  ): Promise<boolean> {
-    return this.tryAllocateExactMarks(
-      targetMarks,
+  ): Promise<number> {
+    const exactMatchSuccess = await this.tryExactMarksAllocation(
+      remainingMarks,
       chapterId,
       pattern,
       sectionAllocations,
@@ -1440,6 +1478,8 @@ export class ChapterMarksDistributionService {
       usedQuestionTypes,
       questionTypeUsage
     );
+    
+    return exactMatchSuccess ? 0 : remainingMarks;
   }
 
   // New helper for fallback allocation strategies
@@ -1517,81 +1557,198 @@ export class ChapterMarksDistributionService {
     let unallocatedMarks = params.unallocatedMarks;
     if (unallocatedMarks <= 0) return 0;
     
-    // Try reverse priority order for redistribution
-    for (const chapterId of [...chapterPriorityList].reverse()) {
+    // Process chapters in reverse priority order
+    const reversePriorityList = [...chapterPriorityList].reverse();
+    
+    for (const chapterId of reversePriorityList) {
         const chapterTypes = chapterQuestionTypeMap.get(chapterId) || new Map<number, number>();
         
-      // Find all available question types for this chapter
-      let availableQuestionTypes: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }> = [];
-        for (const mark of uniqueMarks) {
-          const typesForMark = this.getAllAvailableQuestionTypesByMark(
-            mark,
-            pattern,
-            sectionAllocations,
-            chapterId,
-          chapterTypes
-          );
-          availableQuestionTypes = availableQuestionTypes.concat(typesForMark);
-        }
-        
-        if (availableQuestionTypes.length > 0) {
-        // Sort by mark value (higher marks first)
-          availableQuestionTypes.sort((a, b) => {
-          const sectionA = pattern.sections.find((s: any) => s.id === a.sectionId);
-          const sectionB = pattern.sections.find((s: any) => s.id === b.sectionId);
-            return sectionB.marks_per_question - sectionA.marks_per_question;
-          });
-          
-        // Try to allocate as many as possible
-          while (unallocatedMarks > 0 && availableQuestionTypes.length > 0) {
-          // Find allocatable types
-            const allocatableTypes = availableQuestionTypes.filter(type => {
-            const section = pattern.sections.find((s: any) => s.id === type.sectionId);
-              return section.marks_per_question <= unallocatedMarks;
-            });
-            
-            if (allocatableTypes.length === 0) break;
-            
-          // Select and allocate
-            const selectedType = this.selectBestQuestionType(allocatableTypes);
-            if (!selectedType) break;
-            
-          const section = pattern.sections.find((s: any) => s.id === selectedType.sectionId);
-            const markValue = section.marks_per_question;
-          const selectedSqt = section.subsection_question_types.find((s: any) => s.id === selectedType.subsectionId);
-            const questionTypeId = selectedType.questionTypeId;
-            
-          // Skip if not enough questions
-          const currentCount = chapterTypes.get(questionTypeId) || 0;
-            if (currentCount <= 0) {
-              availableQuestionTypes = availableQuestionTypes.filter(t => 
-                !(t.sectionId === selectedType.sectionId && t.questionTypeId === questionTypeId)
-              );
-              continue;
-            }
-            
-            // Allocate the question
-          await this.allocateQuestionToSubsection({
-            section,
-            selectedSqt,
-            chapterId,
-            selectedTypeId: questionTypeId,
-            sectionAllocations,
-            usedQuestionTypes,
-            questionTypeUsage,
-            chapterQuestionTypes: chapterTypes
-          });
-            
-          // Update tracking
-          unallocatedMarks -= markValue;
-          chapterTypes.set(questionTypeId, Math.max(0, currentCount - 2));
-        }
-          }
-          
-          if (unallocatedMarks === 0) break;
+      // Get available question types for this chapter across all mark values
+      const availableQuestionTypes = this.getAvailableTypesForAllMarks(
+        uniqueMarks,
+        pattern,
+        sectionAllocations,
+        chapterId,
+        chapterTypes
+      );
+      
+      if (availableQuestionTypes.length === 0) continue;
+      
+      // Sort by mark value (higher marks first)
+      const sortedTypes = this.sortTypesByMarkValue(availableQuestionTypes, pattern);
+      
+      // Try to allocate marks from this chapter
+      unallocatedMarks = await this.allocateMarksFromAvailableTypes({
+        unallocatedMarks,
+        types: sortedTypes,
+        pattern,
+        chapterId,
+        chapterTypes,
+        sectionAllocations,
+        usedQuestionTypes,
+        questionTypeUsage
+      });
+      
+      if (unallocatedMarks === 0) break;
     }
     
     return unallocatedMarks;
+  }
+  
+  // Helper to get available types for all mark values
+  private getAvailableTypesForAllMarks(
+    uniqueMarks: number[],
+    pattern: any,
+    sectionAllocations: SectionAllocationDto[],
+    chapterId: number,
+    chapterTypes: Map<number, number>
+  ): Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }> {
+    let availableTypes: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }> = [];
+    
+    for (const mark of uniqueMarks) {
+      const typesForMark = this.getAllAvailableQuestionTypesByMark(
+        mark,
+        pattern,
+        sectionAllocations,
+        chapterId,
+        chapterTypes
+      );
+      availableTypes = availableTypes.concat(typesForMark);
+    }
+    
+    return availableTypes;
+  }
+  
+  // Helper to sort types by mark value (higher marks first)
+  private sortTypesByMarkValue(
+    types: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }>,
+    pattern: any
+  ): Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }> {
+    return [...types].sort((a, b) => {
+      const sectionA = pattern.sections.find((s: any) => s.id === a.sectionId);
+      const sectionB = pattern.sections.find((s: any) => s.id === b.sectionId);
+      return sectionB.marks_per_question - sectionA.marks_per_question;
+    });
+  }
+  
+  // Helper to allocate marks from available types
+  private async allocateMarksFromAvailableTypes(
+    params: AllocateMarksFromTypesParams
+  ): Promise<number> {
+    const {
+      types,
+      pattern,
+      chapterId,
+      chapterTypes,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage
+    } = params;
+    
+    let remainingMarks = params.unallocatedMarks;
+    let availableTypes = [...types];
+    
+    while (remainingMarks > 0 && availableTypes.length > 0) {
+      // Find types with marks <= remaining marks
+      const allocatableTypes = this.findAllocatableTypes(availableTypes, pattern, remainingMarks);
+          
+      if (allocatableTypes.length === 0) break;
+          
+      // Try to allocate a question from the available types
+      const result = await this.tryAllocateFromTypes({
+        allocatableTypes, 
+        pattern, 
+        chapterId,
+        chapterTypes,
+        remainingMarks,
+        sectionAllocations,
+        usedQuestionTypes,
+        questionTypeUsage,
+        availableTypes
+      });
+    
+      if (!result.success) break;
+    
+      remainingMarks = result.remainingMarks;
+      availableTypes = result.updatedTypes;
+    }
+    
+    return remainingMarks;
+  }
+  
+  // Helper to find types that can be allocated within remaining marks
+  private findAllocatableTypes(
+    types: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }>,
+    pattern: any,
+    remainingMarks: number
+  ): Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }> {
+    return types.filter(type => {
+      const section = pattern.sections.find((s: any) => s.id === type.sectionId);
+      return section.marks_per_question <= remainingMarks;
+    });
+  }
+  
+  // Helper to try allocating from available types
+  private async tryAllocateFromTypes(
+    params: TryAllocateFromTypesParams
+  ): Promise<{ 
+    success: boolean, 
+    remainingMarks: number,
+    updatedTypes: Array<{ sectionId: number, subsectionId: number, questionTypeId: number, usage: number }>
+  }> {
+    const {
+      allocatableTypes,
+      pattern,
+      chapterId,
+      chapterTypes,
+      remainingMarks,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage,
+      availableTypes
+    } = params;
+    
+    const selectedType = this.selectBestQuestionType(allocatableTypes);
+    if (!selectedType) {
+      return { success: false, remainingMarks, updatedTypes: availableTypes };
+    }
+        
+    const section = pattern.sections.find((s: any) => s.id === selectedType.sectionId);
+    const markValue = section.marks_per_question;
+    const selectedSqt = section.subsection_question_types.find((s: any) => s.id === selectedType.subsectionId);
+    const questionTypeId = selectedType.questionTypeId;
+        
+    // Check if we have enough questions of this type
+    const currentCount = chapterTypes.get(questionTypeId) || 0;
+    if (currentCount <= 0) {
+      // Remove this type from available types
+      const updatedTypes = availableTypes.filter(t => 
+              !(t.sectionId === selectedType.sectionId && t.questionTypeId === questionTypeId)
+            );
+      return { success: true, remainingMarks, updatedTypes };
+    }
+        
+    // Allocate the question
+    await this.allocateQuestionToSubsection({
+      section,
+      selectedSqt,
+      chapterId,
+      selectedTypeId: questionTypeId,
+      sectionAllocations,
+      usedQuestionTypes,
+      questionTypeUsage,
+      chapterQuestionTypes: chapterTypes
+    });
+        
+    // Update tracking
+    const newRemainingMarks = remainingMarks - markValue;
+    chapterTypes.set(questionTypeId, Math.max(0, currentCount - 2));
+
+    return { 
+      success: true, 
+      remainingMarks: newRemainingMarks,
+      updatedTypes: availableTypes  // Keep the same list, we'll filter again on next iteration
+    };
   }
 
   // New helper to calculate the final chapter marks
@@ -1880,97 +2037,85 @@ export class ChapterMarksDistributionService {
 
   // Helper to clean question texts
   private async cleanQuestionTexts(texts: any[]): Promise<any[]> {
-    return Promise.all(texts.map(async (text) => {
-      const { created_at, updated_at, image_url, ...textData } = text;
-      
-      // Process image if exists
-      if (textData?.image?.image_url) { // Using optional chaining for better readability
-        try {
-          const presignedUrl = await this.awsS3Service.generatePresignedUrl(textData.image.image_url, 3600);
-          textData.image = {
-            id: textData.image.id,
-            presigned_url: presignedUrl
-          };
-        } catch (error) {
-           this.logger.error(`Failed to generate presigned URL for image ${textData.image.id}:`, error);
-           // Keep minimal image data if URL generation fails
-           textData.image = { id: textData.image.id };
-        }
-      } else if (textData.image) {
-           // If image exists but has no URL, keep minimal data
-           textData.image = { id: textData.image.id };
-      }
-      
-      // Process MCQ option images
-      if (textData.mcq_options && textData.mcq_options.length > 0) {
-        textData.mcq_options = await Promise.all(textData.mcq_options.map(async (option) => {
-          if (!option) return null;
-          
-          // Remove image_url if present
-          const { image_url, ...optionResult } = { ...option };
-          
-          if (optionResult?.image?.image_url) { // Using optional chaining for better readability
-            try {
-              const presignedUrl = await this.awsS3Service.generatePresignedUrl(optionResult.image.image_url, 3600);
-              optionResult.image = {
-                id: optionResult.image.id,
-                presigned_url: presignedUrl
-              };
-            } catch (error) {
-              this.logger.error(`Failed to generate presigned URL for MCQ option image ${optionResult.image.id}:`, error);
-              optionResult.image = { id: optionResult.image.id };
-            }
-          } else if (optionResult.image) {
-            optionResult.image = { id: optionResult.image.id };
-          }
-          return optionResult;
-        }));
-      }
-      
-      // Process match pair images
-      if (textData.match_pairs && textData.match_pairs.length > 0) {
-        textData.match_pairs = await Promise.all(textData.match_pairs.map(async (pair) => {
-          if (!pair) return null;
-          
-          // Remove left_image_url and right_image_url if present
-          const { left_image_url, right_image_url, ...pairResult } = { ...pair };
-          
-          if (pairResult?.left_image?.image_url) { // Using optional chaining for better readability
-             try {
-                const leftPresignedUrl = await this.awsS3Service.generatePresignedUrl(pairResult.left_image.image_url, 3600);
-                pairResult.left_image = {
-                  id: pairResult.left_image.id,
-                  presigned_url: leftPresignedUrl
-                };
-             } catch (error) {
-                this.logger.error(`Failed to generate presigned URL for match pair left image ${pairResult.left_image.id}:`, error);
-                pairResult.left_image = { id: pairResult.left_image.id };
-             }
-          } else if (pairResult.left_image) {
-             pairResult.left_image = { id: pairResult.left_image.id };
-          }
-          
-          if (pairResult?.right_image?.image_url) { // Using optional chaining for better readability
-             try {
-                const rightPresignedUrl = await this.awsS3Service.generatePresignedUrl(pairResult.right_image.image_url, 3600);
-                pairResult.right_image = {
-                  id: pairResult.right_image.id,
-                  presigned_url: rightPresignedUrl
-                };
-             } catch (error) {
-                this.logger.error(`Failed to generate presigned URL for match pair right image ${pairResult.right_image.id}:`, error);
-                pairResult.right_image = { id: pairResult.right_image.id };
-             }
-          } else if (pairResult.right_image) {
-              pairResult.right_image = { id: pairResult.right_image.id };
-          }
-          
-          return pairResult;
-        }));
-      }
-      
-      return textData;
-    }));
+    return Promise.all(texts.map(text => this.cleanSingleQuestionText(text)));
+  }
+  
+  // Helper to clean a single question text
+  private async cleanSingleQuestionText(text: any): Promise<any> {
+    const { created_at, updated_at, image_url, ...textData } = text;
+    
+    // Process image
+    textData.image = await this.cleanImageData(textData.image);
+    
+    // Process MCQ options
+    if (textData.mcq_options && textData.mcq_options.length > 0) {
+      textData.mcq_options = await this.cleanMcqOptionsData(textData.mcq_options);
+    }
+    
+    // Process match pairs
+    if (textData.match_pairs && textData.match_pairs.length > 0) {
+      textData.match_pairs = await this.cleanMatchPairsData(textData.match_pairs);
+    }
+    
+    return textData;
+  }
+  
+  // Helper to clean image data
+  private async cleanImageData(image: any): Promise<any> {
+    if (!image) return null;
+    
+    // If no image URL, return minimal data
+    if (!image.image_url) {
+      return { id: image.id };
+    }
+    
+    try {
+      const presignedUrl = await this.awsS3Service.generatePresignedUrl(image.image_url, 3600);
+      return {
+        id: image.id,
+        presigned_url: presignedUrl
+      };
+    } catch (error) {
+      this.logger.error(`Failed to generate presigned URL for image ${image.id}:`, error);
+      return { id: image.id };
+    }
+  }
+  
+  // Helper to clean MCQ options data
+  private async cleanMcqOptionsData(options: any[]): Promise<any[]> {
+    return Promise.all(options.map(option => this.cleanSingleMcqOption(option)));
+  }
+  
+  // Helper to clean a single MCQ option
+  private async cleanSingleMcqOption(option: any): Promise<any> {
+    if (!option) return null;
+    
+    // Remove image_url if present
+    const { image_url, ...optionResult } = { ...option };
+    
+    // Process image
+    optionResult.image = await this.cleanImageData(optionResult.image);
+    
+    return optionResult;
+  }
+  
+  // Helper to clean match pairs data
+  private async cleanMatchPairsData(pairs: any[]): Promise<any[]> {
+    return Promise.all(pairs.map(pair => this.cleanSingleMatchPair(pair)));
+  }
+  
+  // Helper to clean a single match pair
+  private async cleanSingleMatchPair(pair: any): Promise<any> {
+    if (!pair) return null;
+    
+    // Remove left_image_url and right_image_url if present
+    const { left_image_url, right_image_url, ...pairResult } = { ...pair };
+    
+    // Process left and right images
+    pairResult.left_image = await this.cleanImageData(pairResult.left_image);
+    pairResult.right_image = await this.cleanImageData(pairResult.right_image);
+    
+    return pairResult;
   }
 
   // Helper to clean image data
@@ -2204,215 +2349,441 @@ export class ChapterMarksDistributionService {
   }
 
   async processFinalQuestionsDistribution(requestBody: FinalQuestionsDistributionBodyDto): Promise<ChapterMarksDistributionResponseDto> {
-    // Extract mediumIds correctly, either from mediumIds field or from mediums array
-    let mediumIds: number[] = [];
-    if (requestBody.mediumIds && requestBody.mediumIds.length > 0) {
-      mediumIds = requestBody.mediumIds;
-    } else if (requestBody.mediums && requestBody.mediums.length > 0) {
-      mediumIds = requestBody.mediums.map(medium => medium.id).filter(id => id !== undefined);
-    }
-
-    this.logger.debug(`Processing final questions distribution with medium IDs: ${mediumIds.join(', ')}`);
-    const usedQuestionIds = new Set<number>();
-
     try {
-      // --- Fetch Medium Details Early ---
-      let mediumDetails: { id: number; instruction_medium: string }[] = [];
-      if (mediumIds && mediumIds.length > 0) {
-        try {
-          mediumDetails = await this.prisma.instruction_Medium.findMany({
-            where: { id: { in: mediumIds } },
-            select: { id: true, instruction_medium: true },
-          });
-          
-          // Ensure the order matches the input mediumIds array
-          const orderMap = new Map(mediumIds.map((id, index) => [id, index]));
-          mediumDetails.sort((a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity));
-          
-          // Log the medium details for debugging
-          this.logger.debug(`Found medium details: ${JSON.stringify(mediumDetails)}`);
-        } catch (error) {
-          this.logger.warn(`Could not fetch medium details for IDs: ${mediumIds}`, error);
-          // Continue without medium details if fetch fails, but filtering might be affected
-        }
-      }
-      // --- End Fetch Medium Details ---
+      // Extract medium IDs and initialize tracking
+      const mediumIds = this.extractMediumIds(requestBody);
+      this.logger.debug(`Processing final questions distribution with medium IDs: ${mediumIds.join(', ')}`);
+      const usedQuestionIds = new Set<number>();
 
-      // Create new response DTO using data from request
-      const responseDto = new ChapterMarksDistributionResponseDto();
-      responseDto.patternId = requestBody.patternId;
-      responseDto.patternName = requestBody.patternName;
-      responseDto.totalMarks = requestBody.totalMarks;
-      responseDto.absoluteMarks = requestBody.absoluteMarks;
-      responseDto.questionOrigin = requestBody.questionOrigin; // Add questionOrigin to response
-      responseDto.mediums = mediumDetails; // Add mediums to response DTO
-      responseDto.sectionAllocations = [];
-      responseDto.chapterMarks = requestBody.chapterMarks.map(chapter => {
-        const chapterMark = new ChapterMarksDto();
-        chapterMark.chapterId = chapter.chapterId;
-        chapterMark.chapterName = chapter.chapterName;
-        chapterMark.absoluteMarks = chapter.absoluteMarks;
-        return chapterMark;
-      });
+      // Fetch medium details
+      const mediumDetails = await this.fetchMediumDetailsForDistribution(mediumIds);
+      
+      // Initialize response DTO
+      const responseDto = this.createInitialResponseDto(requestBody, mediumDetails);
 
-      // Collect all chapter-questionType pairs that need questions
-      const chapterQuestionTypePairs = [];
-      const allocationMap = new Map();
+      // Build allocation map and collect chapter-question type pairs
+      const { allocationMap, chapterQuestionTypePairs } = this.buildAllocationMap(requestBody, responseDto);
       
-      // First pass: collect all required chapter-questionType pairs and build allocation map
-      for (const section of requestBody.sectionAllocations) {
-        for (const subsection of section.subsectionAllocations) {
-          for (const allocatedChapter of subsection.allocatedChapters) {
-            // No need to check if question exists - we know it doesn't
-            const chapterId = allocatedChapter.chapterId;
-            const questionTypeId = subsection.question_type_id;
-            const key = `${chapterId}-${questionTypeId}`;
-            
-            // Create an entry in the allocation map to track all places where 
-            // this chapter-questionType combination is needed
-            if (!allocationMap.has(key)) {
-              allocationMap.set(key, []);
-              // Only add to pairs for fetching if we haven't seen this combination before
-              chapterQuestionTypePairs.push({ chapterId, questionTypeId });
-            }
-            
-            // Record this allocation position for later assignment
-            allocationMap.get(key).push({
-              sectionIndex: responseDto.sectionAllocations.length,
-              subsectionId: subsection.subsectionQuestionTypeId,
-              allocationIndex: allocationMap.get(key).length
-            });
-          }
-        }
-        
-        // Add section to response as we go to maintain the order
-        responseDto.sectionAllocations.push(this.mapSectionAllocation(section));
-      }
-      
-      // Validate that we have enough questions for all required pairs that match ALL requested mediums
-      try {
-        await this.validateAvailableQuestions(allocationMap, chapterQuestionTypePairs, mediumIds, requestBody.questionOrigin);
-      } catch (error) {
-        if (error instanceof BadRequestException && error.message.includes("Insufficient unique questions available")) {
-          this.logger.warn(`Validation failed due to insufficient questions: ${error.message}`);
-          
-          // Return only the error message without any other data
-          return {
-            insufficientQuestions: true,
-            allocationMessage: error.message
-          } as ChapterMarksDistributionResponseDto;
-        }
-        // If it's not the specific error we're handling, rethrow it
-        throw error;
-      }
-      
-      // --- Add Log Before Call --- 
-      this.logger.debug(
-        `[processFinalQuestionsDistribution] Calling bulkFetchQuestions with mediumIds: [${mediumIds?.join(', ') ?? 'undefined/null'}]`
-      );
-      // --- End Log ---
-
-      // Bulk fetch questions for all chapter-questionType pairs (only IDs and minimal data)
-      const questionsMap = await this.bulkFetchQuestions(
+      // Validate available questions
+      const validationResult = await this.validateQuestionsAndHandleErrors(
+        allocationMap, 
         chapterQuestionTypePairs, 
-        mediumIds,
-        usedQuestionIds,
+        mediumIds, 
         requestBody.questionOrigin
       );
       
-      // Track selected question IDs for detailed fetch
-      const selectedQuestionIds = new Set<number>();
-      
-      // Assign fetched questions to their allocation positions
-      for (const [key, allocations] of allocationMap.entries()) {
-        const [chapterId, questionTypeId] = key.split('-').map(Number);
-        const questions = questionsMap.get(key) || [];
-        
-        // Track used question IDs for this chapter-questionType combination
-        const usedIds = new Set<number>();
-        
-        for (const allocation of allocations) {
-          const { sectionIndex, subsectionId } = allocation;
-          
-          // Find the subsection in the response
-          const section = responseDto.sectionAllocations[sectionIndex];
-          const subsection = section.subsectionAllocations.find(
-            sub => sub.subsectionQuestionTypeId === subsectionId
-          );
-          
-          if (!subsection) continue;
-          
-          // Find a question that hasn't been used yet
-          const availableQuestions = questions.filter(q => !usedIds.has(q.id));
-          
-          if (availableQuestions.length > 0) {
-            // Get a random question from available ones
-            const randomIndex = Math.floor(Math.random() * availableQuestions.length);
-            const questionMin = availableQuestions[randomIndex];
-            
-            // Add the question to the allocation
-            const chapterAllocation = new AllocatedChapterDto();
-            chapterAllocation.chapterId = chapterId;
-            
-            // Find the original chapter name from request
-            const originalChapter = requestBody.sectionAllocations[sectionIndex]
-              .subsectionAllocations.find(sub => sub.subsectionQuestionTypeId === subsectionId)
-              ?.allocatedChapters.find(ch => ch.chapterId === chapterId);
-              
-            chapterAllocation.chapterName = originalChapter ? originalChapter.chapterName : `Chapter ${chapterId}`;
-            
-            // Initially set with minimal question data
-            chapterAllocation.question = questionMin;
-            
-            // Track this question ID for detailed fetch
-            selectedQuestionIds.add(questionMin.id);
-            
-            // Track used IDs
-            usedIds.add(questionMin.id);
-            usedQuestionIds.add(questionMin.id);
-            
-            // Add to response
-            subsection.allocatedChapters.push(chapterAllocation);
-          } else {
-            this.logger.error(
-              `Internal inconsistency: Not enough questions for chapter ${chapterId}, type ${questionTypeId} despite passing validation check.`
-            );
-            
-            // Return only the error message without any other data
-            return {
-              insufficientQuestions: true,
-              allocationMessage: `Insufficient unique questions available for chapter ${chapterId}, type ${questionTypeId}. This is likely due to questions being used by other sections.`
-            } as ChapterMarksDistributionResponseDto;
-          }
-        }
+      if (validationResult.hasError) {
+        return validationResult.errorResponse;
       }
-      
-      // OPTIMIZATION: Now fetch complete data only for selected questions
-      if (selectedQuestionIds.size > 0) {
-        const detailedQuestionsMap = await this.fetchDetailedQuestions(Array.from(selectedQuestionIds));
-        
-        // Replace minimal question data with detailed data
-        this.updateQuestionsWithDetailedData(responseDto, detailedQuestionsMap);
 
-        // Filter question texts based on requested mediums only if mediums are specified
-        if (mediumIds.length > 0) {
-          this.filterQuestionTextsByMedium(responseDto, mediumIds);
-        }
-        
-        // Process all images in the questions to add presigned URLs
-        await this.processQuestionsInResponse(responseDto);
+      // Fetch questions and assign to sections
+      const questionAssignmentResult = await this.fetchAndAssignQuestions(
+        chapterQuestionTypePairs,
+        mediumIds,
+        usedQuestionIds,
+        requestBody,
+        responseDto,
+        allocationMap
+      );
+      
+      if (questionAssignmentResult.hasError) {
+        return questionAssignmentResult.errorResponse;
       }
       
-      // Clean up the response data
-      const cleanedResponseDto = await this.cleanResponseData(responseDto);
+      // Process detailed question data if needed
+      if (questionAssignmentResult.selectedQuestionIds.size > 0) {
+        await this.processDetailedQuestionData(
+          questionAssignmentResult.selectedQuestionIds,
+          responseDto,
+          mediumIds
+        );
+      }
       
+      // Finalize response
+      const cleanedResponseDto = await this.cleanResponseData(responseDto);
       return cleanedResponseDto;
+      
     } catch (error) {
       this.logger.error(`Error in processFinalQuestionsDistribution: ${error.message}`, error.stack);
       throw error;
     }
   }
   
+  // Helper to extract medium IDs from request body
+  private extractMediumIds(requestBody: FinalQuestionsDistributionBodyDto): number[] {
+    if (requestBody.mediumIds && requestBody.mediumIds.length > 0) {
+      return requestBody.mediumIds;
+    } 
+    
+    if (requestBody.mediums && requestBody.mediums.length > 0) {
+      return requestBody.mediums.map(medium => medium.id).filter(id => id !== undefined);
+    }
+    
+    return [];
+  }
+  
+  // Helper to fetch medium details
+  private async fetchMediumDetailsForDistribution(mediumIds: number[]): Promise<{ id: number; instruction_medium: string }[]> {
+    if (!mediumIds || mediumIds.length === 0) {
+      return [];
+    }
+    
+    try {
+      const mediumDetails = await this.prisma.instruction_Medium.findMany({
+        where: { id: { in: mediumIds } },
+        select: { id: true, instruction_medium: true },
+      });
+      
+      // Ensure the order matches the input mediumIds array
+      const orderMap = new Map(mediumIds.map((id, index) => [id, index]));
+      mediumDetails.sort((a, b) => (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity));
+      
+      this.logger.debug(`Found medium details: ${JSON.stringify(mediumDetails)}`);
+      return mediumDetails;
+    } catch (error) {
+      this.logger.warn(`Could not fetch medium details for IDs: ${mediumIds}`, error);
+      return [];
+    }
+  }
+  
+  // Helper to create initial response DTO
+  private createInitialResponseDto(
+    requestBody: FinalQuestionsDistributionBodyDto,
+    mediumDetails: { id: number; instruction_medium: string }[]
+  ): ChapterMarksDistributionResponseDto {
+    const responseDto = new ChapterMarksDistributionResponseDto();
+    responseDto.patternId = requestBody.patternId;
+    responseDto.patternName = requestBody.patternName;
+    responseDto.totalMarks = requestBody.totalMarks;
+    responseDto.absoluteMarks = requestBody.absoluteMarks;
+    responseDto.questionOrigin = requestBody.questionOrigin;
+    responseDto.mediums = mediumDetails;
+    responseDto.sectionAllocations = [];
+    responseDto.chapterMarks = requestBody.chapterMarks.map(chapter => {
+      const chapterMark = new ChapterMarksDto();
+      chapterMark.chapterId = chapter.chapterId;
+      chapterMark.chapterName = chapter.chapterName;
+      chapterMark.absoluteMarks = chapter.absoluteMarks;
+      return chapterMark;
+    });
+    
+    return responseDto;
+  }
+  
+  // Helper to build allocation map
+  private buildAllocationMap(
+    requestBody: FinalQuestionsDistributionBodyDto,
+    responseDto: ChapterMarksDistributionResponseDto
+  ): {
+    allocationMap: Map<string, any[]>;
+    chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>;
+  } {
+    const allocationMap = new Map<string, any[]>();
+    const chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }> = [];
+    
+    // Process each section
+    for (const section of requestBody.sectionAllocations) {
+      this.processSection(section, responseDto, allocationMap, chapterQuestionTypePairs);
+    }
+    
+    return { allocationMap, chapterQuestionTypePairs };
+  }
+  
+  // Helper to process a section
+  private processSection(
+    section: any,
+    responseDto: ChapterMarksDistributionResponseDto,
+    allocationMap: Map<string, any[]>,
+    chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>
+  ): void {
+    // Add section to response to maintain order
+    responseDto.sectionAllocations.push(this.mapSectionAllocation(section));
+    const sectionIndex = responseDto.sectionAllocations.length - 1;
+    
+    // Process each subsection
+    for (const subsection of section.subsectionAllocations) {
+      this.processSubsection(
+        subsection, 
+        sectionIndex, 
+        allocationMap, 
+        chapterQuestionTypePairs
+      );
+    }
+  }
+  
+  // Helper to process a subsection
+  private processSubsection(
+    subsection: any,
+    sectionIndex: number,
+    allocationMap: Map<string, any[]>,
+    chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>
+  ): void {
+    for (const allocatedChapter of subsection.allocatedChapters) {
+      const chapterId = allocatedChapter.chapterId;
+      const questionTypeId = subsection.question_type_id;
+      const key = `${chapterId}-${questionTypeId}`;
+      
+      if (!allocationMap.has(key)) {
+        allocationMap.set(key, []);
+        chapterQuestionTypePairs.push({ chapterId, questionTypeId });
+      }
+      
+      // Record allocation position
+      allocationMap.get(key).push({
+        sectionIndex,
+        subsectionId: subsection.subsectionQuestionTypeId,
+        allocationIndex: allocationMap.get(key).length
+      });
+    }
+  }
+  
+  // Helper to validate questions and handle errors
+  private async validateQuestionsAndHandleErrors(
+    allocationMap: Map<string, any[]>,
+    chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>,
+    mediumIds: number[],
+    questionOrigin?: QuestionOrigin
+  ): Promise<{
+    hasError: boolean;
+    errorResponse?: ChapterMarksDistributionResponseDto;
+  }> {
+    try {
+      await this.validateAvailableQuestions(allocationMap, chapterQuestionTypePairs, mediumIds, questionOrigin);
+      return { hasError: false };
+    } catch (error) {
+      if (error instanceof BadRequestException && error.message.includes("Insufficient unique questions available")) {
+        this.logger.warn(`Validation failed due to insufficient questions: ${error.message}`);
+        
+        // Return only the error message without any other data
+        return {
+          hasError: true,
+          errorResponse: {
+            insufficientQuestions: true,
+            allocationMessage: error.message
+          } as ChapterMarksDistributionResponseDto
+        };
+      }
+      // If it's not the specific error we're handling, rethrow it
+      throw error;
+    }
+  }
+  
+  // Helper to fetch and assign questions
+  private async fetchAndAssignQuestions(
+    chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>,
+    mediumIds: number[],
+    usedQuestionIds: Set<number>,
+    requestBody: FinalQuestionsDistributionBodyDto,
+    responseDto: ChapterMarksDistributionResponseDto,
+    allocationMap: Map<string, any[]>
+  ): Promise<{
+    hasError: boolean;
+    errorResponse?: ChapterMarksDistributionResponseDto;
+    selectedQuestionIds: Set<number>;
+  }> {
+    this.logger.debug(
+      `[processFinalQuestionsDistribution] Calling bulkFetchQuestions with mediumIds: [${mediumIds?.join(', ') ?? 'undefined/null'}]`
+    );
+    
+    // Fetch questions
+    const questionsMap = await this.bulkFetchQuestions(
+      chapterQuestionTypePairs, 
+      mediumIds,
+      usedQuestionIds,
+      requestBody.questionOrigin
+    );
+    
+    // Assign questions
+    const selectedQuestionIds = new Set<number>();
+    const result = this.assignQuestionsToAllocations(
+      allocationMap,
+      questionsMap,
+      requestBody,
+      responseDto,
+      selectedQuestionIds,
+      usedQuestionIds
+    );
+    
+    if (result.hasError) {
+      return {
+        hasError: true,
+        errorResponse: result.errorResponse,
+        selectedQuestionIds: new Set<number>()
+      };
+    }
+    
+    return {
+      hasError: false,
+      selectedQuestionIds
+    };
+  }
+  
+  // Helper to assign questions to allocations
+  private assignQuestionsToAllocations(
+    allocationMap: Map<string, any[]>,
+    questionsMap: Map<string, any[]>,
+    requestBody: FinalQuestionsDistributionBodyDto,
+    responseDto: ChapterMarksDistributionResponseDto,
+    selectedQuestionIds: Set<number>,
+    usedQuestionIds: Set<number>
+  ): {
+    hasError: boolean;
+    errorResponse?: ChapterMarksDistributionResponseDto;
+  } {
+    // Track used question IDs per chapter-questionType combination
+    const usedIdsMap = new Map<string, Set<number>>();
+    
+      for (const [key, allocations] of allocationMap.entries()) {
+        const [chapterId, questionTypeId] = key.split('-').map(Number);
+        const questions = questionsMap.get(key) || [];
+        
+      // Initialize set for tracking used questions for this key
+      if (!usedIdsMap.has(key)) {
+        usedIdsMap.set(key, new Set<number>());
+      }
+      const usedIds = usedIdsMap.get(key);
+        
+        for (const allocation of allocations) {
+        const result = this.processAllocation({
+          allocation,
+          questions,
+          usedIds,
+          chapterId,
+          questionTypeId,
+          requestBody,
+          responseDto,
+          selectedQuestionIds,
+          usedQuestionIds
+        });
+        
+        if (result.hasError) {
+          return {
+            hasError: true,
+            errorResponse: result.errorResponse
+          };
+        }
+      }
+    }
+    
+    return { hasError: false };
+  }
+  
+  // Helper to process a single allocation
+  private processAllocation(
+    params: ProcessAllocationParams
+  ): {
+    hasError: boolean;
+    errorResponse?: ChapterMarksDistributionResponseDto;
+  } {
+    const {
+      allocation,
+      questions,
+      usedIds,
+      chapterId,
+      questionTypeId,
+      requestBody,
+      responseDto,
+      selectedQuestionIds,
+      usedQuestionIds
+    } = params;
+    
+    const { sectionIndex, subsectionId } = allocation;
+    
+    // Find the subsection in the response
+    const section = responseDto.sectionAllocations[sectionIndex];
+    const subsection = section?.subsectionAllocations.find(
+      sub => sub.subsectionQuestionTypeId === subsectionId
+    );
+    
+    if (!subsection) return { hasError: false }; // Skip if subsection not found
+    
+    // Find available questions
+    const availableQuestions = questions.filter(q => !usedIds.has(q.id));
+    
+    if (availableQuestions.length === 0) {
+      this.logger.error(
+        `Internal inconsistency: Not enough questions for chapter ${chapterId}, type ${questionTypeId} despite passing validation check.`
+      );
+      
+      return {
+        hasError: true,
+        errorResponse: {
+          insufficientQuestions: true,
+          allocationMessage: `Insufficient unique questions available for chapter ${chapterId}, type ${questionTypeId}. This is likely due to questions being used by other sections.`
+        } as ChapterMarksDistributionResponseDto
+      };
+    }
+    
+    // Get a random question
+    const randomIndex = Math.floor(Math.random() * availableQuestions.length);
+    const questionMin = availableQuestions[randomIndex];
+    
+    // Create allocation
+    const chapterAllocation = this.createChapterAllocation(
+      chapterId,
+      questionMin,
+      requestBody,
+      sectionIndex,
+      subsectionId
+    );
+    
+    // Track IDs
+    usedIds.add(questionMin.id);
+    selectedQuestionIds.add(questionMin.id);
+    usedQuestionIds.add(questionMin.id);
+    
+    // Add to response
+    subsection.allocatedChapters.push(chapterAllocation);
+    
+    return { hasError: false };
+  }
+  
+  // Helper to create chapter allocation
+  private createChapterAllocation(
+    chapterId: number,
+    question: any,
+    requestBody: FinalQuestionsDistributionBodyDto,
+    sectionIndex: number,
+    subsectionId: number
+  ): AllocatedChapterDto {
+    const chapterAllocation = new AllocatedChapterDto();
+    chapterAllocation.chapterId = chapterId;
+    
+    // Find original chapter name
+    const originalChapter = requestBody.sectionAllocations[sectionIndex]
+      ?.subsectionAllocations.find(sub => sub.subsectionQuestionTypeId === subsectionId)
+      ?.allocatedChapters.find(ch => ch.chapterId === chapterId);
+    
+    chapterAllocation.chapterName = originalChapter 
+      ? originalChapter.chapterName 
+      : `Chapter ${chapterId}`;
+    
+    // Set question data
+    chapterAllocation.question = question;
+    
+    return chapterAllocation;
+  }
+  
+  // Helper to process detailed question data
+  private async processDetailedQuestionData(
+    selectedQuestionIds: Set<number>,
+    responseDto: ChapterMarksDistributionResponseDto,
+    mediumIds: number[]
+  ): Promise<void> {
+    const detailedQuestionsMap = await this.fetchDetailedQuestions(Array.from(selectedQuestionIds));
+    
+    // Replace minimal question data with detailed data
+    this.updateQuestionsWithDetailedData(responseDto, detailedQuestionsMap);
+    
+    // Filter question texts based on requested mediums if needed
+    if (mediumIds.length > 0) {
+      this.filterQuestionTextsByMedium(responseDto, mediumIds);
+    }
+    
+    // Process all images in the questions to add presigned URLs
+    await this.processQuestionsInResponse(responseDto);
+  }
+
   // New method to fetch detailed question data
   private async fetchDetailedQuestions(questionIds: number[]): Promise<Map<number, any>> {
     const questionsMap = new Map<number, any>();
@@ -2594,168 +2965,34 @@ export class ChapterMarksDistributionService {
     
     try {
       // Group by question type to minimize queries
-      const questionTypeGroups = new Map<number, number[]>();
+      const questionTypeGroups = this.groupPairsByQuestionType(chapterQuestionTypePairs);
       
-      for (const pair of chapterQuestionTypePairs) {
-        if (!questionTypeGroups.has(pair.questionTypeId)) {
-          questionTypeGroups.set(pair.questionTypeId, []);
-        }
-        questionTypeGroups.get(pair.questionTypeId).push(pair.chapterId);
-      }
+      // Fetch questions for each question type
+      await this.fetchQuestionsForTypes(
+        questionTypeGroups, 
+        questionsMap, 
+        mediumIds, 
+        usedQuestionIds, 
+        questionOrigin
+      );
       
-      // For each question type, fetch questions for all its chapters
-      for (const [questionTypeId, chapterIds] of questionTypeGroups.entries()) {
-        // Build the where clause for Prisma
-        const whereClause: any = {
-          question_type_id: questionTypeId,
-          question_topics: {
-            some: {
-              topic: {
-                chapter_id: { in: chapterIds }
-              }
-            }
-          }
-        };
-        
-        // Add board_question condition based on questionOrigin
-        if (questionOrigin === 'board') {
-          whereClause.board_question = true;
-        } else if (questionOrigin === 'other') {
-          whereClause.board_question = false;
-        }
-        
-        // Add medium IDs filter if provided - create a condition for EACH medium
-        if (mediumIds && mediumIds.length > 0) {
-          // Create a condition for each medium ID that requires questions to have texts
-          // in THAT specific medium
-          const mediumConditions = mediumIds.map(mediumId => ({
-            question_texts: {
-              some: {
-                question_text_topics: {
-                  some: {
-                    instruction_medium_id: mediumId,
-                    is_verified: true
-                  }
-                }
-              }
-            }
-          }));
-          
-          // Add AND array with all medium conditions to ensure questions match ALL mediums
-          whereClause.AND = mediumConditions;
-        }
-        
-        // Exclude already used questions
-        if (usedQuestionIds.size > 0) {
-          whereClause.id = {
-            notIn: Array.from(usedQuestionIds)
-          };
-        }
-        
-        // OPTIMIZATION: First fetch only IDs and minimal data
-        const minimumQuestions = await this.prisma.question.findMany({
-          where: whereClause,
-          select: {
-            id: true,
-            question_type_id: true,
-            question_topics: {
-              select: {
-                topic_id: true,
-                topic: {
-                  select: {
-                    chapter_id: true
-                  }
-                }
-              }
-            }
-          }
-        });
-        
-        // --- Added Logging --- 
-        this.logger.debug(
-          `[bulkFetchQuestions] Query for TypeID: ${questionTypeId}, Chapters: [${chapterIds.join(', ')}], Mediums: [${mediumIds.join(', ')}] ` +
-          `returned ${minimumQuestions.length} question IDs: [${minimumQuestions.map(q => q.id).join(', ')}] ` +
-          `using whereClause: ${JSON.stringify(whereClause, null, 2)}` // Log the where clause for detailed inspection
-        );
-        // --- End Logging ---
-
-        // Filter out questions already used
-        const availableQuestions = minimumQuestions.filter(q => !usedQuestionIds.has(q.id));
-        
-        // Organize minimum questions by chapter
-        for (const question of availableQuestions) { // Use filtered list
-          // Find which chapter(s) this question belongs to
-          const questionChapterIds = question.question_topics
-            .map(qt => qt.topic?.chapter_id)
-            .filter(id => id !== undefined && chapterIds.includes(id));
-          
-          // Add question to each relevant chapter-questionType pair
-          for (const chapterId of questionChapterIds) {
-            const key = `${chapterId}-${questionTypeId}`;
-            
-            if (!questionsMap.has(key)) {
-              questionsMap.set(key, []);
-            }
-            
-            questionsMap.get(key).push({
-              id: question.id,
-              question_type_id: question.question_type_id
-            });
-          }
-        }
-      }
-      
-      // If some chapter-questionType pairs have no questions, try without medium filter
+      // Try fallback strategies for empty pairs if needed
       if (mediumIds && mediumIds.length > 0) {
-        // Check which pairs have no questions
-        const emptyPairs = chapterQuestionTypePairs.filter(pair => {
-          const key = `${pair.chapterId}-${pair.questionTypeId}`;
-          // Check if the key exists and has questions AFTER filtering used IDs
-          return !questionsMap.has(key) || questionsMap.get(key).length === 0;
-        });
-
-        if (emptyPairs.length > 0) {
-          this.logger.warn(`No questions found for some chapter-type pairs with all specified mediums ${mediumIds}. Checking with individual mediums.`);
-          
-          // First try with each medium individually
-          for (const mediumId of mediumIds) {
-            const individualMediumMap = await this.bulkFetchQuestions(emptyPairs, [mediumId], usedQuestionIds, questionOrigin);
-            
-            // Merge results, giving priority to the original results if they exist
-            for (const [key, questions] of individualMediumMap.entries()) {
-              if (!questionsMap.has(key) || questionsMap.get(key).length === 0) {
-                questionsMap.set(key, questions);
-                this.logger.debug(`Using questions with medium ${mediumId} only for ${key}`);
-              }
-            }
-          }
-          
-          // Check if there are still empty pairs after trying individual mediums
-          const stillEmptyPairs = chapterQuestionTypePairs.filter(pair => {
-            const key = `${pair.chapterId}-${pair.questionTypeId}`;
-            return !questionsMap.has(key) || questionsMap.get(key).length === 0;
-          });
-          
-          // As a last resort, try without any medium filter for the remaining empty pairs
-          if (stillEmptyPairs.length > 0) {
-            this.logger.warn(`Still no questions found with any medium for some pairs. Trying without medium filter as last resort.`);
-            const noMediumMap = await this.bulkFetchQuestions(stillEmptyPairs, [], usedQuestionIds, questionOrigin);
-            
-            // Merge results from no-medium query
-            for (const [key, questions] of noMediumMap.entries()) {
-              if (!questionsMap.has(key) || questionsMap.get(key).length === 0) {
-                questionsMap.set(key, questions);
-                this.logger.debug(`Using questions with no medium constraint for ${key}`);
-              }
-            }
-          }
-        }
+        await this.applyFallbackStrategies(
+          chapterQuestionTypePairs,
+          questionsMap,
+          mediumIds,
+          usedQuestionIds,
+          questionOrigin
+        );
       }
       
       return questionsMap;
     } catch (error) {
       this.logger.error(`Error in bulkFetchQuestions: ${error.message}`, error.stack);
-      return questionsMap;
+      // Create a new map for the error case to avoid returning the same reference
+      const emptyMap = new Map<string, any[]>();
+      return emptyMap;
     }
   }
 
@@ -2768,103 +3005,81 @@ export class ChapterMarksDistributionService {
     
     // Process question texts and their images
     if (processedQuestion.question_texts && processedQuestion.question_texts.length > 0) {
-      processedQuestion.question_texts = await Promise.all(processedQuestion.question_texts.map(async (text) => {
-        if (!text) return null;
-        
-        // Clone text to avoid mutation and remove image_url if present
-        const { image_url, ...textResult } = { ...text };
-        
-        // Process main image
-        if (textResult?.image?.image_url) { // Using optional chaining for better readability
-          try {
-            const presignedUrl = await this.awsS3Service.generatePresignedUrl(textResult.image.image_url, 3600);
-            textResult.image = {
-              id: textResult.image.id,
-              presigned_url: presignedUrl
-            };
-          } catch (error) {
-             this.logger.error(`Failed to generate presigned URL for image ${textResult.image.id}:`, error);
-             // Keep minimal image data if URL generation fails
-             textResult.image = { id: textResult.image.id };
-          }
-        } else if (textResult.image) {
-             // If image exists but has no URL, keep minimal data
-             textResult.image = { id: textResult.image.id };
-        }
-        
-        // Process MCQ option images
-        if (textResult.mcq_options && textResult.mcq_options.length > 0) {
-          textResult.mcq_options = await Promise.all(textResult.mcq_options.map(async (option) => {
-            if (!option) return null;
-            
-            // Remove image_url if present
-            const { image_url, ...optionResult } = { ...option };
-            
-            if (optionResult?.image?.image_url) { // Using optional chaining for better readability
-              try {
-                const presignedUrl = await this.awsS3Service.generatePresignedUrl(optionResult.image.image_url, 3600);
-                optionResult.image = {
-                  id: optionResult.image.id,
-                  presigned_url: presignedUrl
-                };
-              } catch (error) {
-                this.logger.error(`Failed to generate presigned URL for MCQ option image ${optionResult.image.id}:`, error);
-                optionResult.image = { id: optionResult.image.id };
-              }
-            } else if (optionResult.image) {
-              optionResult.image = { id: optionResult.image.id };
-            }
-            return optionResult;
-          }));
-        }
-        
-        // Process match pair images
-        if (textResult.match_pairs && textResult.match_pairs.length > 0) {
-          textResult.match_pairs = await Promise.all(textResult.match_pairs.map(async (pair) => {
-            if (!pair) return null;
-            
-            // Remove left_image_url and right_image_url if present
-            const { left_image_url, right_image_url, ...pairResult } = { ...pair };
-            
-            if (pairResult?.left_image?.image_url) { // Using optional chaining for better readability
-               try {
-                  const leftPresignedUrl = await this.awsS3Service.generatePresignedUrl(pairResult.left_image.image_url, 3600);
-                  pairResult.left_image = {
-                    id: pairResult.left_image.id,
-                    presigned_url: leftPresignedUrl
-                  };
-               } catch (error) {
-                  this.logger.error(`Failed to generate presigned URL for match pair left image ${pairResult.left_image.id}:`, error);
-                  pairResult.left_image = { id: pairResult.left_image.id };
-               }
-            } else if (pairResult.left_image) {
-               pairResult.left_image = { id: pairResult.left_image.id };
-            }
-            
-            if (pairResult?.right_image?.image_url) { // Using optional chaining for better readability
-               try {
-                  const rightPresignedUrl = await this.awsS3Service.generatePresignedUrl(pairResult.right_image.image_url, 3600);
-                  pairResult.right_image = {
-                    id: pairResult.right_image.id,
-                    presigned_url: rightPresignedUrl
-                  };
-               } catch (error) {
-                  this.logger.error(`Failed to generate presigned URL for match pair right image ${pairResult.right_image.id}:`, error);
-                  pairResult.right_image = { id: pairResult.right_image.id };
-               }
-            } else if (pairResult.right_image) {
-                pairResult.right_image = { id: pairResult.right_image.id };
-            }
-            
-            return pairResult;
-          }));
-        }
-        
-        return textResult;
-      }));
+      processedQuestion.question_texts = await this.processQuestionTexts(processedQuestion.question_texts);
     }
     
     return processedQuestion;
+  }
+  
+  // Helper to process question texts
+  private async processQuestionTexts(questionTexts: any[]): Promise<any[]> {
+    return Promise.all(questionTexts.map(text => this.processQuestionText(text)));
+  }
+  
+  // Helper to process a single question text
+  private async processQuestionText(text: any): Promise<any> {
+    if (!text) return null;
+    
+    // Clone text to avoid mutation and remove image_url if present
+    const { image_url, ...textResult } = { ...text };
+    
+    // Process main image
+    textResult.image = await this.processImage(textResult.image);
+    
+    // Process MCQ options
+    if (textResult.mcq_options && textResult.mcq_options.length > 0) {
+      textResult.mcq_options = await this.processMcqOptions(textResult.mcq_options);
+    }
+    
+    // Process match pairs
+    if (textResult.match_pairs && textResult.match_pairs.length > 0) {
+      textResult.match_pairs = await this.processMatchPairs(textResult.match_pairs);
+    }
+    
+    return textResult;
+  }
+  
+  // Helper to process an image
+  private async processImage(image: any): Promise<any> {
+    // Use the existing cleanImageData method to avoid duplicate code
+    return this.cleanImageData(image);
+  }
+  
+  // Helper to process MCQ options
+  private async processMcqOptions(options: any[]): Promise<any[]> {
+    return Promise.all(options.map(option => this.processMcqOption(option)));
+  }
+  
+  // Helper to process a single MCQ option
+  private async processMcqOption(option: any): Promise<any> {
+    if (!option) return null;
+    
+    // Remove image_url if present
+    const { image_url, ...optionResult } = { ...option };
+    
+    // Process the image
+    optionResult.image = await this.processImage(optionResult.image);
+    
+    return optionResult;
+  }
+  
+  // Helper to process match pairs
+  private async processMatchPairs(pairs: any[]): Promise<any[]> {
+    return Promise.all(pairs.map(pair => this.processMatchPair(pair)));
+  }
+  
+  // Helper to process a single match pair
+  private async processMatchPair(pair: any): Promise<any> {
+    if (!pair) return null;
+    
+    // Remove left_image_url and right_image_url if present
+    const { left_image_url, right_image_url, ...pairResult } = { ...pair };
+    
+    // Process left and right images
+    pairResult.left_image = await this.processImage(pairResult.left_image);
+    pairResult.right_image = await this.processImage(pairResult.right_image);
+    
+    return pairResult;
   }
 
   // Helper method to ensure a SubsectionAllocationDto has all required properties
@@ -3125,6 +3340,317 @@ export class ChapterMarksDistributionService {
           // Swap elements
           [subsection.allocatedChapters[i], subsection.allocatedChapters[j]] = 
           [subsection.allocatedChapters[j], subsection.allocatedChapters[i]];
+        }
+      }
+    }
+  }
+
+  // Helper function to try exact marks allocation
+  private async tryExactMarksAllocation(
+    targetMarks: number,
+    chapterId: number,
+    pattern: any,
+    sectionAllocations: SectionAllocationDto[],
+    chapterQuestionTypes: Map<number, number>,
+    usedQuestionTypes: Map<number, Set<number>>,
+    questionTypeUsage: Map<number, number>
+  ): Promise<boolean> {
+    return this.tryAllocateExactMarks(
+      targetMarks,
+      chapterId,
+      pattern,
+      sectionAllocations,
+      chapterQuestionTypes,
+      usedQuestionTypes,
+      questionTypeUsage
+    );
+  }
+
+  // Helper to group pairs by question type
+  private groupPairsByQuestionType(
+    pairs: Array<{ chapterId: number, questionTypeId: number }>
+  ): Map<number, number[]> {
+    const questionTypeGroups = new Map<number, number[]>();
+    
+    for (const pair of pairs) {
+      if (!questionTypeGroups.has(pair.questionTypeId)) {
+        questionTypeGroups.set(pair.questionTypeId, []);
+      }
+      questionTypeGroups.get(pair.questionTypeId).push(pair.chapterId);
+    }
+    
+    return questionTypeGroups;
+  }
+  
+  // Helper to fetch questions for each question type
+  private async fetchQuestionsForTypes(
+    questionTypeGroups: Map<number, number[]>,
+    questionsMap: Map<string, any[]>,
+    mediumIds: number[] = [],
+    usedQuestionIds: Set<number> = new Set(),
+    questionOrigin?: QuestionOrigin
+  ): Promise<void> {
+    for (const [questionTypeId, chapterIds] of questionTypeGroups.entries()) {
+      // Build the where clause
+      const whereClause = this.buildWhereClause(
+        questionTypeId, 
+        chapterIds, 
+        mediumIds, 
+        usedQuestionIds, 
+        questionOrigin
+      );
+      
+      // Fetch minimum questions
+      const minimumQuestions = await this.fetchMinimumQuestions(whereClause);
+      
+      // Log the results
+      this.logQueryResults(questionTypeId, chapterIds, mediumIds, minimumQuestions, whereClause);
+      
+      // Process and organize questions
+      this.organizeQuestionsByChapter(
+        minimumQuestions,
+        usedQuestionIds,
+        chapterIds,
+        questionTypeId,
+        questionsMap
+      );
+    }
+  }
+  
+  // Helper to build the where clause for Prisma
+  private buildWhereClause(
+    questionTypeId: number,
+    chapterIds: number[],
+    mediumIds: number[] = [],
+    usedQuestionIds: Set<number> = new Set(),
+    questionOrigin?: QuestionOrigin
+  ): any {
+    // Base where clause
+    const whereClause: any = {
+      question_type_id: questionTypeId,
+      question_topics: {
+        some: {
+          topic: {
+            chapter_id: { in: chapterIds }
+          }
+        }
+      }
+    };
+    
+    // Add board_question condition based on questionOrigin
+    if (questionOrigin === 'board') {
+      whereClause.board_question = true;
+    } else if (questionOrigin === 'other') {
+      whereClause.board_question = false;
+    }
+    
+    // Add medium IDs filter if provided
+    if (mediumIds && mediumIds.length > 0) {
+      whereClause.AND = this.createMediumConditions(mediumIds);
+    }
+    
+    // Exclude already used questions
+    if (usedQuestionIds.size > 0) {
+      whereClause.id = {
+        notIn: Array.from(usedQuestionIds)
+      };
+    }
+    
+    return whereClause;
+  }
+  
+  // Helper to create medium conditions
+  private createMediumConditions(mediumIds: number[]): any[] {
+    return mediumIds.map(mediumId => ({
+      question_texts: {
+        some: {
+          question_text_topics: {
+            some: {
+              instruction_medium_id: mediumId,
+              is_verified: true
+            }
+          }
+        }
+      }
+    }));
+  }
+  
+  // Helper to fetch minimum questions
+  private async fetchMinimumQuestions(whereClause: any): Promise<any[]> {
+    return this.prisma.question.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        question_type_id: true,
+        question_topics: {
+          select: {
+            topic_id: true,
+            topic: {
+              select: {
+                chapter_id: true
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+  
+  // Helper to log query results
+  private logQueryResults(
+    questionTypeId: number,
+    chapterIds: number[],
+    mediumIds: number[],
+    minimumQuestions: any[],
+    whereClause: any
+  ): void {
+    this.logger.debug(
+      `[bulkFetchQuestions] Query for TypeID: ${questionTypeId}, Chapters: [${chapterIds.join(', ')}], Mediums: [${mediumIds.join(', ')}] ` +
+      `returned ${minimumQuestions.length} question IDs: [${minimumQuestions.map(q => q.id).join(', ')}] ` +
+      `using whereClause: ${JSON.stringify(whereClause, null, 2)}`
+    );
+  }
+  
+  // Helper to organize questions by chapter
+  private organizeQuestionsByChapter(
+    minimumQuestions: any[],
+    usedQuestionIds: Set<number>,
+    chapterIds: number[],
+    questionTypeId: number,
+    questionsMap: Map<string, any[]>
+  ): void {
+    // Filter out questions already used
+    const availableQuestions = minimumQuestions.filter(q => !usedQuestionIds.has(q.id));
+    
+    for (const question of availableQuestions) {
+      // Find which chapter(s) this question belongs to
+      const questionChapterIds = this.extractChapterIds(question, chapterIds);
+      
+      // Add question to each relevant chapter-questionType pair
+      for (const chapterId of questionChapterIds) {
+        this.addQuestionToMap(question, chapterId, questionTypeId, questionsMap);
+      }
+    }
+  }
+  
+  // Helper to extract chapter IDs from a question
+  private extractChapterIds(question: any, chapterIds: number[]): number[] {
+    return question.question_topics
+      .map(qt => qt.topic?.chapter_id)
+      .filter(id => id !== undefined && chapterIds.includes(id));
+  }
+  
+  // Helper to add a question to the map
+  private addQuestionToMap(
+    question: any,
+    chapterId: number,
+    questionTypeId: number,
+    questionsMap: Map<string, any[]>
+  ): void {
+    const key = `${chapterId}-${questionTypeId}`;
+    
+    if (!questionsMap.has(key)) {
+      questionsMap.set(key, []);
+    }
+    
+    questionsMap.get(key).push({
+      id: question.id,
+      question_type_id: question.question_type_id
+    });
+  }
+  
+  // Helper to apply fallback strategies for empty pairs
+  private async applyFallbackStrategies(
+    chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>,
+    questionsMap: Map<string, any[]>,
+    mediumIds: number[],
+    usedQuestionIds: Set<number>,
+    questionOrigin?: QuestionOrigin
+  ): Promise<void> {
+    // Find empty pairs
+    const emptyPairs = this.findEmptyPairs(chapterQuestionTypePairs, questionsMap);
+    
+    if (emptyPairs.length === 0) {
+      return;
+    }
+    
+    this.logger.warn(`No questions found for some chapter-type pairs with all specified mediums ${mediumIds}. Checking with individual mediums.`);
+    
+    // Try individual mediums
+    await this.tryIndividualMediums(emptyPairs, mediumIds, questionsMap, usedQuestionIds, questionOrigin);
+    
+    // Try without medium filter as last resort
+    const stillEmptyPairs = this.findEmptyPairs(chapterQuestionTypePairs, questionsMap);
+    
+    if (stillEmptyPairs.length > 0) {
+      await this.tryWithoutMediumFilter(stillEmptyPairs, questionsMap, usedQuestionIds, questionOrigin);
+    }
+  }
+  
+  // Helper to find empty pairs
+  private findEmptyPairs(
+    pairs: Array<{ chapterId: number, questionTypeId: number }>,
+    questionsMap: Map<string, any[]>
+  ): Array<{ chapterId: number, questionTypeId: number }> {
+    return pairs.filter(pair => {
+      const key = `${pair.chapterId}-${pair.questionTypeId}`;
+      return !questionsMap.has(key) || questionsMap.get(key).length === 0;
+    });
+  }
+  
+  // Helper to try individual mediums
+  private async tryIndividualMediums(
+    emptyPairs: Array<{ chapterId: number, questionTypeId: number }>,
+    mediumIds: number[],
+    questionsMap: Map<string, any[]>,
+    usedQuestionIds: Set<number>,
+    questionOrigin?: QuestionOrigin
+  ): Promise<void> {
+    for (const mediumId of mediumIds) {
+      const individualMediumMap = await this.bulkFetchQuestions(
+        emptyPairs, 
+        [mediumId], 
+        usedQuestionIds, 
+        questionOrigin
+      );
+      
+      this.mergeQuestionMaps(questionsMap, individualMediumMap, mediumId);
+    }
+  }
+  
+  // Helper to try without medium filter
+  private async tryWithoutMediumFilter(
+    stillEmptyPairs: Array<{ chapterId: number, questionTypeId: number }>,
+    questionsMap: Map<string, any[]>,
+    usedQuestionIds: Set<number>,
+    questionOrigin?: QuestionOrigin
+  ): Promise<void> {
+    this.logger.warn(`Still no questions found with any medium for some pairs. Trying without medium filter as last resort.`);
+    
+    const noMediumMap = await this.bulkFetchQuestions(
+      stillEmptyPairs, 
+      [], 
+      usedQuestionIds, 
+      questionOrigin
+    );
+    
+    this.mergeQuestionMaps(questionsMap, noMediumMap);
+  }
+  
+  // Helper to merge question maps
+  private mergeQuestionMaps(
+    targetMap: Map<string, any[]>,
+    sourceMap: Map<string, any[]>,
+    mediumId?: number
+  ): void {
+    for (const [key, questions] of sourceMap.entries()) {
+      if (!targetMap.has(key) || targetMap.get(key).length === 0) {
+        targetMap.set(key, questions);
+        
+        if (mediumId !== undefined) {
+          this.logger.debug(`Using questions with medium ${mediumId} only for ${key}`);
+        } else {
+          this.logger.debug(`Using questions with no medium constraint for ${key}`);
         }
       }
     }

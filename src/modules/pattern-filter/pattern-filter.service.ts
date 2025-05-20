@@ -269,49 +269,81 @@ export class PatternFilterService {
   ): { isValid: boolean; reason?: string } {
     try {
       // Get question type requirements for this pattern
-      const patternRequirements = new Map<number, number>();
+      const patternRequirements = this.buildPatternRequirements(pattern);
       
-      // Process all sections to build the requirements
-      for (const section of pattern.sections) {
-        // If the section has specific subsection question types
-        if (section.subsection_question_types && section.subsection_question_types.length > 0) {
-          for (const sqt of section.subsection_question_types) {
-            const questionTypeId = sqt.question_type_id;
-            const currentCount = patternRequirements.get(questionTypeId) || 0;
-            
-            // If sequence number is 0, it applies to all questions in section
-            if (sqt.seqencial_subquestion_number === 0) {
-              patternRequirements.set(questionTypeId, currentCount + section.total_questions);
-            } else {
-              patternRequirements.set(questionTypeId, currentCount + 1);
-            }
-          }
-        } else {
-          // If no specific question types defined, it might be invalid pattern data
-          this.logger.warn(`Section ${section.id} has no defined question types`);
-        }
-      }
-      
-      // Check each required question type against the mapping
-      for (const [typeId, requiredCount] of patternRequirements.entries()) {
-        const availableCount = questionTypeMapping.get(typeId) || 0;
-        
-        // Calculate minimum required: half of available with ceiling for odd numbers
-        const minimumRequired = Math.ceil(availableCount / 2);
-        
-        if (requiredCount > minimumRequired) {
-          return { 
-            isValid: false, 
-            reason: `Not enough questions of type ID ${typeId}. Required: ${requiredCount}, Available: ${availableCount}, Half+Ceiling: ${minimumRequired}`
-          };
-        }
-      }
-      
-      return { isValid: true };
+      // Validate requirements against available questions
+      return this.validateRequirements(patternRequirements, questionTypeMapping);
     } catch (error) {
       this.logger.error('Error checking pattern eligibility:', error);
       return { isValid: false, reason: 'Error during pattern validation' };
     }
+  }
+
+  /**
+   * Builds a map of question type requirements from pattern sections
+   */
+  private buildPatternRequirements(pattern: any): Map<number, number> {
+    const patternRequirements = new Map<number, number>();
+    
+    // Process all sections to build the requirements
+    for (const section of pattern.sections) {
+      this.processSection(section, patternRequirements);
+    }
+    
+    return patternRequirements;
+  }
+
+  /**
+   * Processes a single section to update question type requirements
+   */
+  private processSection(section: any, requirements: Map<number, number>): void {
+    // Skip if section has no subsection question types
+    if (!section.subsection_question_types || section.subsection_question_types.length === 0) {
+      this.logger.warn(`Section ${section.id} has no defined question types`);
+      return;
+    }
+    
+    // Process each subsection question type
+    for (const sqt of section.subsection_question_types) {
+      const questionTypeId = sqt.question_type_id;
+      const currentCount = requirements.get(questionTypeId) || 0;
+      const additionalCount = this.getAdditionalCount(sqt, section);
+      
+      requirements.set(questionTypeId, currentCount + additionalCount);
+    }
+  }
+
+  /**
+   * Gets additional count for a question type based on sequential number
+   */
+  private getAdditionalCount(subsectionQuestionType: any, section: any): number {
+    // If sequence number is 0, it applies to all questions in section
+    return subsectionQuestionType.seqencial_subquestion_number === 0
+      ? section.total_questions
+      : 1;
+  }
+
+  /**
+   * Validates requirements against available questions
+   */
+  private validateRequirements(
+    requirements: Map<number, number>, 
+    questionTypeMapping: Map<number, number>
+  ): { isValid: boolean; reason?: string } {
+    // Check each required question type against the mapping
+    for (const [typeId, requiredCount] of requirements.entries()) {
+      const availableCount = questionTypeMapping.get(typeId) || 0;
+      const minimumRequired = Math.ceil(availableCount / 2);
+      
+      if (requiredCount > minimumRequired) {
+        return { 
+          isValid: false, 
+          reason: `Not enough questions of type ID ${typeId}. Required: ${requiredCount}, Available: ${availableCount}, Half+Ceiling: ${minimumRequired}`
+        };
+      }
+    }
+    
+    return { isValid: true };
   }
 
   private async countQuestionsOfTypeInChapters(
@@ -321,94 +353,122 @@ export class PatternFilterService {
     questionOrigin?: string
   ): Promise<number> {
     try {
-      // Build the query conditions
-      let whereCondition: any = {
-        question_type_id: questionTypeId,
-        question_topics: {
-          some: {
-            topic: {
-              chapter_id: {
-                in: chapterIds
-              }
-            }
-          }
-        }
-      };
-
-      // Add board_question filter based on questionOrigin
-      if (questionOrigin) {
-        if (questionOrigin === 'board') {
-          whereCondition.board_question = true;
-        } else if (questionOrigin === 'other') {
-          whereCondition.board_question = false;
-        }
-        // For 'both', we don't add any filter
-      }
-
-      // Handle medium filtering differently based on number of mediums
+      // Build base query condition
+      const whereCondition = this.buildBaseWhereCondition(questionTypeId, chapterIds);
+      
+      // Add origin filter if specified
+      this.addOriginFilter(whereCondition, questionOrigin);
+      
+      // Handle medium filtering
       if (mediumIds && mediumIds.length > 0) {
-        if (mediumIds.length === 1) {
-          // If only one medium, simply filter questions available in that medium
-          whereCondition.question_texts = {
-            some: {
-              question_text_topics: {
-                some: {
-                  instruction_medium_id: mediumIds[0]
-                }
-              }
-            }
-          };
-        } else {
-          // If multiple mediums, count questions that are available in ALL specified mediums
-          // We need to use a different approach to ensure the question is available in all mediums
-          
-          // First get all questions of this type that match basic criteria (without medium filter)
-          const questionsWithoutMediumFilter = await this.prisma.question.findMany({
-            where: whereCondition,
-            select: {
-              id: true,
-              question_texts: {
-                select: {
-                  id: true,
-                  question_text_topics: {
-                    select: {
-                      instruction_medium_id: true
-                    }
-                  }
-                }
-              }
-            }
-          });
-          
-          // Then filter them to only include questions available in all specified mediums
-          const filteredQuestions = questionsWithoutMediumFilter.filter(question => {
-            // Get all unique mediums this question is available in
-            const availableMediums = new Set<number>();
-            
-            for (const text of question.question_texts) {
-              for (const topic of text.question_text_topics) {
-                availableMediums.add(topic.instruction_medium_id);
-              }
-            }
-            
-            // Check if ALL requested mediums are available for this question
-            return mediumIds.every(mediumId => availableMediums.has(mediumId));
-          });
-          
-          // Return the count of filtered questions
-          return filteredQuestions.length;
-        }
+        return await this.countQuestionsWithMediumFilter(whereCondition, mediumIds);
       }
-
-      // If we reach here, we're doing a simple count with the where condition
-      const count = await this.prisma.question.count({
-        where: whereCondition
-      });
-
-      return count;
+      
+      // If no medium filter, perform a simple count
+      return await this.prisma.question.count({ where: whereCondition });
     } catch (error) {
       this.logger.error('Error counting questions:', error);
       return 0;
     }
+  }
+
+  /**
+   * Builds the base where condition for question queries
+   */
+  private buildBaseWhereCondition(questionTypeId: number, chapterIds: number[]): any {
+    return {
+      question_type_id: questionTypeId,
+      question_topics: {
+        some: {
+          topic: {
+            chapter_id: {
+              in: chapterIds
+            }
+          }
+        }
+      }
+    };
+  }
+  
+  /**
+   * Adds origin filter to the where condition if specified
+   */
+  private addOriginFilter(whereCondition: any, questionOrigin?: string): void {
+    if (!questionOrigin) return;
+    
+    if (questionOrigin === 'board') {
+      whereCondition.board_question = true;
+    } else if (questionOrigin === 'other') {
+      whereCondition.board_question = false;
+    }
+    // For 'both', we don't add any filter
+  }
+  
+  /**
+   * Counts questions with medium filtering
+   */
+  private async countQuestionsWithMediumFilter(whereCondition: any, mediumIds: number[]): Promise<number> {
+    // Handle single medium case
+    if (mediumIds.length === 1) {
+      whereCondition.question_texts = {
+        some: {
+          question_text_topics: {
+            some: {
+              instruction_medium_id: mediumIds[0]
+            }
+          }
+        }
+      };
+      return await this.prisma.question.count({ where: whereCondition });
+    }
+    
+    // Handle multiple mediums case
+    return await this.countQuestionsWithMultipleMediums(whereCondition, mediumIds);
+  }
+  
+  /**
+   * Counts questions available in all specified mediums
+   */
+  private async countQuestionsWithMultipleMediums(whereCondition: any, mediumIds: number[]): Promise<number> {
+    // Get questions without medium filter
+    const questionsWithoutMediumFilter = await this.prisma.question.findMany({
+      where: whereCondition,
+      select: {
+        id: true,
+        question_texts: {
+          select: {
+            id: true,
+            question_text_topics: {
+              select: {
+                instruction_medium_id: true
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    // Filter questions available in all mediums
+    const filteredQuestions = questionsWithoutMediumFilter.filter(question => {
+      const availableMediums = this.getAvailableMediums(question);
+      return mediumIds.every(mediumId => availableMediums.has(mediumId));
+    });
+    
+    return filteredQuestions.length;
+  }
+  
+  /**
+   * Gets a set of available medium IDs for a question
+   */
+  private getAvailableMediums(question: any): Set<number> {
+    const availableMediums = new Set<number>();
+    
+    for (const text of question.question_texts) {
+      for (const topic of text.question_text_topics) {
+        availableMediums.add(topic.instruction_medium_id);
+      }
+    }
+    
+    return availableMediums;
   }
 } 

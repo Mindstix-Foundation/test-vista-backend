@@ -2,7 +2,6 @@ import {
   Injectable, 
   Logger, 
   NotFoundException,
-  ConflictException,
   InternalServerErrorException 
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
