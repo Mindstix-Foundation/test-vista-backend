@@ -3077,18 +3077,18 @@ export class QuestionService {
   private async isImageUsedByOtherQuestions(imageId: number, questionId: number): Promise<boolean> {
     const usageCount = await this.prisma.$queryRaw`
       SELECT COUNT(*) as count FROM (
-        SELECT image_id FROM Question_Text WHERE image_id = ${imageId} AND question_id != ${questionId}
+        SELECT image_id FROM "Question_Text" WHERE image_id = ${imageId} AND question_id != ${questionId}
         UNION ALL
-        SELECT image_id FROM MCQ_Option WHERE image_id = ${imageId} AND question_text_id NOT IN (
-          SELECT id FROM Question_Text WHERE question_id = ${questionId}
+        SELECT image_id FROM "Mcq_Option" WHERE image_id = ${imageId} AND question_text_id NOT IN (
+          SELECT id FROM "Question_Text" WHERE question_id = ${questionId}
         )
         UNION ALL
-        SELECT left_image_id FROM Match_Pair WHERE left_image_id = ${imageId} AND question_text_id NOT IN (
-          SELECT id FROM Question_Text WHERE question_id = ${questionId}
+        SELECT left_image_id FROM "Match_Pair" WHERE left_image_id = ${imageId} AND question_text_id NOT IN (
+          SELECT id FROM "Question_Text" WHERE question_id = ${questionId}
         )
         UNION ALL
-        SELECT right_image_id FROM Match_Pair WHERE right_image_id = ${imageId} AND question_text_id NOT IN (
-          SELECT id FROM Question_Text WHERE question_id = ${questionId}
+        SELECT right_image_id FROM "Match_Pair" WHERE right_image_id = ${imageId} AND question_text_id NOT IN (
+          SELECT id FROM "Question_Text" WHERE question_id = ${questionId}
         )
       ) as usage
     `;

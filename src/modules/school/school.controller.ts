@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { SchoolService } from './school.service';
-import { CreateSchoolDto, UpdateSchoolDto, SchoolListDto } from './dto/school.dto';
+import { CreateSchoolDto, UpdateSchoolDto, SchoolListDto, UpsertSchoolDto } from './dto/school.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiProperty, ApiBearerAuth } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
@@ -96,6 +96,21 @@ export class SchoolController {
     @Body() updateSchoolDto: UpdateSchoolDto,
   ) {
     return await this.schoolService.update(id, updateSchoolDto);
+  }
+
+  @Post('upsert')
+  @Roles('ADMIN')
+  @ApiOperation({ 
+    summary: 'Create or update a school with address and mappings in one call',
+    description: 'If id is provided, updates existing school. If id is not provided, creates new school. Handles address creation/update and instruction medium/standard mappings automatically.'
+  })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'School created successfully' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'School updated successfully' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School, board, city, instruction medium, or standard not found' })
+  @ApiResponse({ status: HttpStatus.CONFLICT, description: 'School name already exists' })
+  async upsertSchool(@Body() upsertSchoolDto: UpsertSchoolDto) {
+    return await this.schoolService.upsertSchool(upsertSchoolDto);
   }
 
   @Delete(':id')

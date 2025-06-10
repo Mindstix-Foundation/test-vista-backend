@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsInt, IsPositive } from 'class-validator';
+import { IsString, IsNotEmpty, IsInt, IsPositive, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateImageDto {
@@ -58,4 +58,24 @@ export class ImageUploadDto {
     description: 'Image file to upload'
   })
   file: any;
+
+  @ApiProperty({
+    example: 800,
+    description: 'Custom width for the image in pixels (optional - if not provided, actual image width will be used)',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  width?: number;
+
+  @ApiProperty({
+    example: 600,
+    description: 'Custom height for the image in pixels (optional - if not provided, actual image height will be used)',
+    required: false
+  })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  height?: number;
 } 

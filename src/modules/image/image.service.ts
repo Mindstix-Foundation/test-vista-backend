@@ -23,10 +23,14 @@ export class ImageService {
     }
   }
 
-  async uploadImage(file: Express.Multer.File) {
+  async uploadImage(file: Express.Multer.File, customWidth?: number, customHeight?: number) {
     try {
       // Upload to S3 and get metadata
       const { url, metadata } = await this.awsS3Service.uploadFile(file);
+      
+      // Use custom dimensions if provided, otherwise use actual image dimensions
+      const finalWidth = customWidth ?? metadata.width;
+      const finalHeight = customHeight ?? metadata.height;
       
       // Create image record in database
       const image = await this.prisma.image.create({
@@ -35,15 +39,54 @@ export class ImageService {
           original_filename: metadata.originalFilename,
           file_size: metadata.fileSize,
           file_type: metadata.fileType,
-          width: metadata.width,
-          height: metadata.height
+          width: finalWidth,
+          height: finalHeight
         }
       });
       
-      this.logger.log(`Created image record with ID ${image.id}`);
-      return image;
+      this.logger.log(`Created image record with ID ${image.id} (${customWidth || customHeight ? 'custom' : 'actual'} dimensions: ${finalWidth}x${finalHeight})`);
+      
+      // Return the data in the format expected by frontend
+      return {
+        id: image.id,
+        image_url: image.image_url,
+        original_filename: image.original_filename,
+        file_size: image.file_size,
+        file_type: image.file_type,
+        width: image.width,
+        height: image.height
+      };
     } catch (error) {
       this.logger.error('Failed to upload image:', error);
+      throw error;
+    }
+  }
+
+  async uploadAndCreateImage(file: Express.Multer.File, customWidth?: number, customHeight?: number): Promise<number> {
+    try {
+      // Upload to S3 and get metadata
+      const { url, metadata } = await this.awsS3Service.uploadFile(file);
+      
+      // Use custom dimensions if provided, otherwise use actual image dimensions
+      const finalWidth = customWidth ?? metadata.width;
+      const finalHeight = customHeight ?? metadata.height;
+      
+      // Create image record in database
+      const image = await this.prisma.image.create({
+        data: {
+          image_url: url,
+          original_filename: metadata.originalFilename,
+          file_size: metadata.fileSize,
+          file_type: metadata.fileType,
+          width: finalWidth,
+          height: finalHeight
+        }
+      });
+      
+      this.logger.log(`Created image record with ID ${image.id} (${customWidth || customHeight ? 'custom' : 'actual'} dimensions: ${finalWidth}x${finalHeight})`);
+      return image.id;
+    } catch (error) {
+      this.logger.error('Failed to upload and create image:', error);
       throw error;
     }
   }

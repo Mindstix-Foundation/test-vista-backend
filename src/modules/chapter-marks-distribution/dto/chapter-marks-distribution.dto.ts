@@ -107,9 +107,10 @@ export class SectionAllocationDto {
   @Expose()
   section_number: number;
 
-  @ApiProperty({ description: 'Sub section identifier', example: 'A' })
+  @ApiProperty({ description: 'Sub section identifier', example: 'A', required: false })
+  @IsOptional()
   @Expose()
-  subSection: string;
+  subSection?: string;
 
   @ApiProperty({ description: 'Total questions in section', example: 7 })
   @Expose()
@@ -168,8 +169,9 @@ export class SectionDto {
   @ApiProperty()
   section_number: number;
 
-  @ApiProperty()
-  sub_section: string;
+  @ApiProperty({ required: false })
+  @IsOptional()
+  sub_section?: string;
 
   @ApiProperty()
   section_name: string;
@@ -358,10 +360,11 @@ export class FinalQuestionsSectionDto {
   @Expose()
   section_number: number;
 
-  @ApiProperty({ description: 'Sub section identifier', example: 'A' })
+  @ApiProperty({ description: 'Sub section identifier', example: 'A', required: false })
   @IsString()
+  @IsOptional()
   @Expose()
-  subSection: string;
+  subSection?: string;
 
   @ApiProperty({ description: 'Total questions in section', example: 7 })
   @IsNumber()

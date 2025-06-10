@@ -170,7 +170,7 @@ export class SectionService {
         sequence_number: dto.sequence_number,
         section_number: dto.section_number
       }),
-      ...(dto.sub_section && { sub_section: dto.sub_section }),
+      ...(dto.sub_section !== undefined && { sub_section: dto.sub_section }),
       ...(dto.section_name && { section_name: dto.section_name }),
       ...(dto.total_questions && { total_questions: dto.total_questions }),
       ...(dto.mandotory_questions && { mandotory_questions: dto.mandotory_questions }),

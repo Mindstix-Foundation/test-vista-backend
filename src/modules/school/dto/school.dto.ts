@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsNotEmpty, IsEmail, IsPhoneNumber } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsNotEmpty, IsEmail, IsPhoneNumber, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class SchoolDto {
   @ApiProperty({ example: 1 })
@@ -132,4 +133,75 @@ export class SchoolListDto {
   @ApiProperty({ example: 'CBSE' })
   @IsString()
   board_abbreviation: string;
+}
+
+export class AddressDto {
+  @ApiProperty({ example: '123 Main Street' })
+  @IsString()
+  @IsNotEmpty()
+  street: string;
+
+  @ApiProperty({ example: '12345' })
+  @IsString()
+  @IsNotEmpty()
+  postal_code: string;
+
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  @IsNotEmpty()
+  city_id: number;
+}
+
+export class UpsertSchoolDto {
+  @ApiPropertyOptional({ example: 1, description: 'School ID for update operation. If not provided, creates new school' })
+  @IsOptional()
+  @IsNumber()
+  id?: number;
+
+  @ApiProperty({ example: 'Delhi Public School' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  @IsNotEmpty()
+  board_id: number;
+
+  @ApiProperty({ type: AddressDto })
+  @ValidateNested()
+  @Type(() => AddressDto)
+  address: AddressDto;
+
+  @ApiProperty({ example: 'John Doe' })
+  @IsString()
+  @IsNotEmpty()
+  principal_name: string;
+
+  @ApiProperty({ example: 'school@example.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({ example: '+911234567890', description: 'Contact number with country code' })
+  @IsPhoneNumber()
+  @IsNotEmpty({ message: 'Contact number is required' })
+  contact_number: string;
+
+  @ApiPropertyOptional({ example: '+919876543210', description: 'Alternate contact number with country code' })
+  @IsOptional()
+  @IsPhoneNumber()
+  alternate_contact_number?: string;
+
+  @ApiProperty({ example: [1, 2, 3], description: 'Array of instruction medium IDs' })
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsNotEmpty()
+  instruction_medium_ids: number[];
+
+  @ApiProperty({ example: [1, 2, 3], description: 'Array of standard IDs' })
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsNotEmpty()
+  standard_ids: number[];
 } 
