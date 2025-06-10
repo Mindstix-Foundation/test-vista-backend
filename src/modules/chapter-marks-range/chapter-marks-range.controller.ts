@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, UsePipes, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { ChapterMarksRangeService } from './chapter-marks-range.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -53,15 +53,45 @@ export class ChapterMarksRangeController {
   })
   @UsePipes(new ValidationPipe({ transform: true }))
   async getChapterMarksRanges(
-    @Query('patternId') patternId: number,
+    @Query('patternId') patternIdStr: string,
     @Query('chapterIds') chapterIds: string,
     @Query('mediumIds') mediumIds: string,
     @Query('questionOrigin') questionOrigin: 'board' | 'other' | 'both' = 'both',
   ): Promise<ChapterMarksRangeResponseDto[]> {
+    // Parse and validate patternId
+    const patternId = parseInt(patternIdStr, 10);
+    if (isNaN(patternId) || patternId <= 0) {
+      throw new BadRequestException('Invalid pattern ID provided');
+    }
+
+    // Parse and validate chapterIds
+    if (!chapterIds || chapterIds.trim() === '') {
+      throw new BadRequestException('Chapter IDs are required');
+    }
+    const parsedChapterIds = chapterIds.split(',').map(id => {
+      const parsed = parseInt(id.trim(), 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        throw new BadRequestException(`Invalid chapter ID: ${id}`);
+      }
+      return parsed;
+    });
+
+    // Parse and validate mediumIds
+    if (!mediumIds || mediumIds.trim() === '') {
+      throw new BadRequestException('Medium IDs are required');
+    }
+    const parsedMediumIds = mediumIds.split(',').map(id => {
+      const parsed = parseInt(id.trim(), 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        throw new BadRequestException(`Invalid medium ID: ${id}`);
+      }
+      return parsed;
+    });
+
     const filter: ChapterMarksRangeFilterDto = {
       patternId,
-      chapterIds: chapterIds.split(',').map(Number),
-      mediumIds: mediumIds.split(',').map(Number),
+      chapterIds: parsedChapterIds,
+      mediumIds: parsedMediumIds,
       questionOrigin,
     };
 
