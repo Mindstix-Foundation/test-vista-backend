@@ -508,9 +508,9 @@ model Student {
   id                    Int             @id @default(autoincrement())
   user                  User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
   user_id               Int             @unique
+  student_id            String          @db.VarChar // Student ID/Roll Number from registration form
   date_of_birth         DateTime?       @db.Date
   enrollment_date       DateTime        @default(now()) @db.Date
-  academic_year         String          @db.VarChar // 2024-2025 format
   school_standard       School_Standard @relation(fields: [school_standard_id], references: [id], onDelete: Cascade)
   school_standard_id    Int
   status                String          @default("active") @db.VarChar // active, inactive, graduated
@@ -524,6 +524,8 @@ model Student {
   student_results       Student_Result[]
   student_analytics     Student_Analytics?
   student_notifications Student_Notification[]
+
+  @@unique([student_id, school_standard_id])
 }
 
 // Test assignments for students

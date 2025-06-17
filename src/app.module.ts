@@ -40,6 +40,7 @@ import { CreateTestPaperModule } from './modules/create_test_paper/create-test-p
 import { ChapterMarksDistributionModule } from './modules/chapter-marks-distribution/chapter-marks-distribution.module';
 import { ChapterMarksRangeModule } from './modules/chapter-marks-range/chapter-marks-range.module';
 import { TestPaperHtmlModule } from './modules/test-paper-html/test-paper-html.module';
+import { StudentModule } from './modules/student/student.module';
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { TestPaperHtmlModule } from './modules/test-paper-html/test-paper-html.m
     ChapterMarksDistributionModule,
     ChapterMarksRangeModule,
     TestPaperHtmlModule,
+    StudentModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB
