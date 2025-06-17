@@ -24,12 +24,12 @@ class GetSchoolsQueryDto extends PaginationDto {
 
 @ApiTags('schools')
 @Controller('schools')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
 export class SchoolController {
   constructor(private readonly schoolService: SchoolService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new school' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'School created successfully' })
@@ -43,7 +43,6 @@ export class SchoolController {
   }
 
   @Get()
-  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all schools with optional pagination, sorting and search' })
   @ApiQuery({ name: 'boardId', required: false, type: Number, description: 'Filter schools by board ID' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all schools.' })
@@ -71,6 +70,8 @@ export class SchoolController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
     summary: 'Get a school by id',
@@ -86,6 +87,8 @@ export class SchoolController {
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a school' })
   @ApiResponse({ status: HttpStatus.OK, description: 'School updated successfully' })
@@ -99,6 +102,8 @@ export class SchoolController {
   }
 
   @Post('upsert')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ 
     summary: 'Create or update a school with address and mappings in one call',
@@ -114,6 +119,8 @@ export class SchoolController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a school' })
