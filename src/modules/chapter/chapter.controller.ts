@@ -11,7 +11,6 @@ import {
   HttpCode,
   Query,
   UseGuards,
-  BadRequestException,
 } from '@nestjs/common';
 import { ChapterService } from './chapter.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';

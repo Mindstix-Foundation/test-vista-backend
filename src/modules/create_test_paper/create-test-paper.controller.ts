@@ -1,5 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { CreateTestPaperService } from './create-test-paper.service';
 import { CreateTestPaperFilterDto, CreateTestPaperResponseDto } from './dto/create-test-paper.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';

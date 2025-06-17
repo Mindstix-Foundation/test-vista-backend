@@ -1,16 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserService } from './user.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotFoundException, ConflictException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AddTeacherDto } from './dto/add-teacher.dto';
 import { UserExistsException } from './exceptions/user-exists.exception';
-import { EditTeacherDto } from './dto/edit-teacher.dto';
 
 describe('UserService', () => {
   let service: UserService;
-  let prisma: PrismaService;
 
   // Create a more complete mock of the PrismaService
   const mockPrismaService = {
@@ -60,7 +58,6 @@ describe('UserService', () => {
     }).compile();
 
     service = module.get<UserService>(UserService);
-    prisma = module.get<PrismaService>(PrismaService);
     jest.clearAllMocks();
 
     // Expose private methods for testing
@@ -136,7 +133,7 @@ describe('UserService', () => {
       mockPrismaService.user.count.mockResolvedValue(2);
       mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
 
-      const result = await service.findAll(undefined, 1, 15);
+      const result = await service.findAll({ page: 1, page_size: 15 });
       
       expect(result).toEqual({
         data: mockUsers,
@@ -167,7 +164,7 @@ describe('UserService', () => {
       mockPrismaService.user.count.mockResolvedValue(1);
       mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
 
-      const result = await service.findAll(1, 1, 15);
+      const result = await service.findAll({ schoolId: 1, page: 1, page_size: 15 });
       
       expect(result.data).toEqual(mockUsers);
       expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
@@ -192,7 +189,12 @@ describe('UserService', () => {
       mockPrismaService.user.count.mockResolvedValue(2);
       mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
 
-      const result = await service.findAll(undefined, undefined, 1, 15, SortField.CREATED_AT, SortOrder.DESC);
+      const result = await service.findAll({
+        page: 1, 
+        page_size: 15, 
+        sort_by: SortField.CREATED_AT, 
+        sort_order: SortOrder.DESC
+      });
       
       expect(result.data).toEqual(mockUsers);
       expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
@@ -470,7 +472,7 @@ describe('UserService', () => {
   });
 
   describe('editTeacher', () => {
-    const mockEditTeacherDto: EditTeacherDto = {
+    const mockEditTeacherDto = {
       id: 1,
       name: 'Updated Teacher',
       email_id: 'updated.teacher@example.com',
@@ -480,7 +482,7 @@ describe('UserService', () => {
       standard_subjects: [
         { schoolStandardId: 3, subjectIds: [4, 5] }
       ]
-    };
+    } as any; // Type assertion to avoid TypeScript errors
 
     it('should update a teacher with valid data', async () => {
       // Mock existing user with teacher role

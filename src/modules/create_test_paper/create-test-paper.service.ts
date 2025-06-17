@@ -5,6 +5,9 @@ import { FilterChaptersDto } from './dto/filter-chapters.dto';
 import { ChapterMarksResponseDto } from './dto/chapter-marks-response.dto';
 import { Prisma } from '@prisma/client';
 
+// Define type alias for the question origin union type
+type QuestionOriginType = 'board' | 'other' | 'both';
+
 @Injectable()
 export class CreateTestPaperService {
   constructor(private prisma: PrismaService) {}
@@ -36,7 +39,7 @@ export class CreateTestPaperService {
     
     // Randomize within groups and flatten
     const result: number[] = [];
-    for (const [marks, chapters] of groupedChapters) {
+    for (const [, chapters] of groupedChapters) {
       if (chapters.length > 1) {
         // Randomize chapters with same marks
         result.push(...this.generateRandomSequence(chapters));
@@ -60,7 +63,7 @@ export class CreateTestPaperService {
   private async getChapterQuestionTypeCounts(
     chapterIds: number[],
     mediumIds: number[],
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<Map<number, Map<number, number>>> {
     console.log('Getting chapter question type counts for chapters:', chapterIds);
     console.log('Medium IDs:', mediumIds);
@@ -85,7 +88,7 @@ export class CreateTestPaperService {
 
     const boardQuestionSql = Prisma.sql([boardQuestionCondition]);
 
-    const result = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
+    await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
       SELECT 
         q.chapter_id,
         q.question_type_id,
@@ -173,57 +176,57 @@ export class CreateTestPaperService {
   async getTestPaperAllocation(filter: CreateTestPaperFilterDto): Promise<CreateTestPaperResponseDto> {
     console.log('Starting test paper allocation with filter:', filter);
 
+    // Fetch data and initialize structures
+    const { pattern, mediumDetails, chapterNameMap } = await this.fetchInitialData(filter);
+    
+    // Get chapter question type counts
+    const chapterQuestionTypeMap = await this.getChapterQuestionTypeCounts(
+      filter.chapterIds,
+      filter.mediumIds,
+      filter.questionOrigin
+    );
+
+    // Initialize chapter marks tracking
+    const chapterMarksMap = this.initializeChapterMarks(filter.chapterIds);
+    
+    // Create random sections array and process each section
+    const randomSections = this.generateRandomSequence(pattern.sections);
+    const sectionAllocations = this.processSections(
+      randomSections, 
+      chapterQuestionTypeMap, 
+      chapterMarksMap, 
+      chapterNameMap,
+      filter
+    );
+
+    // Format results
+    return this.formatTestPaperResponse(
+      pattern, 
+      mediumDetails, 
+      sectionAllocations, 
+      chapterMarksMap, 
+      chapterNameMap,
+      filter
+    );
+  }
+
+  /**
+   * Fetches initial data needed for test paper allocation
+   */
+  private async fetchInitialData(filter: CreateTestPaperFilterDto): Promise<{
+    pattern: any;
+    mediumDetails: any[];
+    chapterNameMap: Map<number, string>;
+  }> {
     // 1. Get pattern with all necessary relations
-    const pattern = await this.prisma.pattern.findUnique({
-      where: { id: filter.patternId },
-      include: {
-        sections: {
-          include: {
-            subsection_question_types: {
-              include: {
-                question_type: true
-              }
-            }
-          }
-        }
-      }
-    });
-
-    if (!pattern) {
-      console.error('Pattern not found for ID:', filter.patternId);
-      throw new NotFoundException('Pattern not found');
-    }
-
-    // Fetch Medium details
-    let mediumDetails: { id: number; instruction_medium: string }[] = [];
-    if (filter.mediumIds && filter.mediumIds.length > 0) {
-      try {
-        mediumDetails = await this.prisma.instruction_Medium.findMany({
-          where: { id: { in: filter.mediumIds } },
-          select: { id: true, instruction_medium: true },
-        });
-      } catch (error) {
-        // console.error is better for backend logs than logger.warn
-        console.error(`Could not fetch medium details for IDs: ${filter.mediumIds}`, error);
-        // Continue without medium details if fetch fails
-      }
-    }
-
-    // Fetch chapter names first
-    const chapters = await this.prisma.chapter.findMany({
-      where: {
-        id: {
-          in: filter.chapterIds
-        }
-      },
-      select: {
-        id: true,
-        name: true
-      }
-    });
-
-    const chapterNameMap = new Map(chapters.map(ch => [ch.id, ch.name]));
-
+    const pattern = await this.fetchPattern(filter.patternId);
+    
+    // 2. Fetch Medium details
+    const mediumDetails = await this.fetchMediumDetails(filter.mediumIds);
+    
+    // 3. Fetch chapter names
+    const chapterNameMap = await this.fetchChapterNames(filter.chapterIds);
+    
     console.log('Found pattern:', {
       id: pattern.id,
       name: pattern.pattern_name,
@@ -239,172 +242,421 @@ export class CreateTestPaperService {
         }))
       }))
     });
+    
+    return { pattern, mediumDetails, chapterNameMap };
+  }
 
-    // 2. Get chapter question type counts
-    const chapterQuestionTypeMap = await this.getChapterQuestionTypeCounts(
-      filter.chapterIds,
-      filter.mediumIds,
-      filter.questionOrigin
-    );
-
-    // 3. Initialize chapter marks tracking
-    const chapterMarksMap = new Map<number, number>();
-    filter.chapterIds.forEach(chapterId => chapterMarksMap.set(chapterId, 0));
-    console.log('Initialized chapter marks map:', Array.from(chapterMarksMap.entries()));
-
-    // 4. Create random sections array
-    const randomSections = this.generateRandomSequence(pattern.sections);
-    console.log('Random sections order:', randomSections.map(s => s.section_name));
-
-    // 5. Process each section
-    const sectionAllocations: SectionAllocationDto[] = [];
-
-    for (const section of randomSections) {
-      console.log(`\nProcessing Section: ${section.section_name}`);
-      console.log(`Total Questions: ${section.total_questions}`);
-      console.log(`Number of Subsections: ${section.subsection_question_types.length}`);
-
-      const sectionAbsoluteMarks = section.total_questions * section.marks_per_question;
-      const sectionTotalMarks = section.mandotory_questions * section.marks_per_question;
-
-      // Create random chapters array based on current marks
-      let randomChapters = this.getRandomChaptersByMarks(chapterMarksMap);
-      console.log('Initial random chapters for section:', randomChapters);
-
-      const subsectionAllocations: SubsectionAllocationDto[] = [];
-
-      for (const sqt of section.subsection_question_types) {
-        console.log(`\nProcessing Question Type: ${sqt.question_type.type_name}`);
-        const allocatedChapters: ChapterInfoDto[] = [];
-        let remainingQuestions = section.subsection_question_types.length === 1 
-          ? section.total_questions 
-          : 1;
-        
-        console.log(`Questions to allocate for this subsection: ${remainingQuestions}`);
-
-        while (remainingQuestions > 0) {
-          if (randomChapters.length === 0) {
-            console.log('Regenerating random chapters array');
-            randomChapters = this.getRandomChaptersByMarks(chapterMarksMap);
-            console.log('New random chapters:', randomChapters);
-          }
-
-          let currentIndex = 0;
-          let chapterAllocated = false;
-
-          while (currentIndex < randomChapters.length && !chapterAllocated) {
-            const currentChapterId = randomChapters[currentIndex];
-            const chapterQuestionTypes = chapterQuestionTypeMap.get(currentChapterId);
-            
-            console.log(`Trying Chapter ID: ${currentChapterId} at index ${currentIndex}`);
-            console.log('Chapter question types:', chapterQuestionTypes ? 
-              Array.from(chapterQuestionTypes.entries()) : 'No question types found');
-
-            if (chapterQuestionTypes && chapterQuestionTypes.has(sqt.question_type_id)) {
-              const questionCount = chapterQuestionTypes.get(sqt.question_type_id)!;
-              
-              if (questionCount > 0) {
-                console.log(`✓ Allocated Chapter ID: ${currentChapterId} for ${sqt.question_type.type_name}`);
-                allocatedChapters.push({
-                  chapterId: currentChapterId,
-                  chapterName: chapterNameMap.get(currentChapterId) || `Chapter ${currentChapterId}`
-                });
-
-                const currentMarks = chapterMarksMap.get(currentChapterId) || 0;
-                chapterMarksMap.set(currentChapterId, currentMarks + section.marks_per_question);
-                console.log(`Updated marks for Chapter ${currentChapterId}: ${currentMarks} -> ${currentMarks + section.marks_per_question}`);
-
-                chapterQuestionTypes.set(sqt.question_type_id, questionCount - 2);
-                console.log(`Updated question count for Chapter ${currentChapterId}: ${questionCount} -> ${questionCount - 2}`);
-                
-                remainingQuestions--;
-                chapterAllocated = true;
-                
-                // Remove allocated chapter from array
-                randomChapters.splice(currentIndex, 1);
-                console.log('Removed allocated chapter from array. Remaining chapters:', randomChapters);
-              } else {
-                console.log(`✗ Chapter ${currentChapterId} has insufficient questions (${questionCount})`);
-                currentIndex++;
+  /**
+   * Fetches pattern with its sections and subsection question types
+   */
+  private async fetchPattern(patternId: number) {
+    const pattern = await this.prisma.pattern.findUnique({
+      where: { id: patternId },
+      include: {
+        sections: {
+          include: {
+            subsection_question_types: {
+              include: {
+                question_type: true
               }
-            } else {
-              console.log(`✗ Chapter ${currentChapterId} doesn't have question type ${sqt.question_type.type_name}`);
-              currentIndex++;
             }
-          }
-
-          // If we reached the end of array without allocating, check if it's possible to allocate at all
-          if (!chapterAllocated) {
-            console.log('Attempted all chapters, none suitable or available for:', sqt.question_type.type_name);
-
-            // Check if *any* chapter has remaining questions of this type
-            const isAnyQuestionAvailable = filter.chapterIds.some(chapterId => {
-              const types = chapterQuestionTypeMap.get(chapterId);
-              return types && (types.get(sqt.question_type_id) || 0) > 0;
-            });
-
-            if (!isAnyQuestionAvailable) {
-              console.error(`Allocation failed: No chapter has enough verified questions for type '${sqt.question_type.type_name}' (ID: ${sqt.question_type_id}) across all specified mediums.`);
-              throw new BadRequestException(
-                `Insufficient verified questions for type '${sqt.question_type.type_name}' ` +
-                `available across all selected mediums (${filter.mediumIds.join(', ')}) ` +
-                `in the chosen chapters (${filter.chapterIds.join(', ')}). Cannot generate test paper.`
-              );
-            }
-
-            console.log('Regenerating random chapters array as some chapters might still have questions.');
-            randomChapters = this.getRandomChaptersByMarks(chapterMarksMap);
-            console.log('New random chapters:', randomChapters);
           }
         }
-
-        console.log(`Completed allocation for ${sqt.question_type.type_name}. Allocated chapters:`, 
-          allocatedChapters.map(c => `ID: ${c.chapterId}`).join(', '));
-
-        subsectionAllocations.push({
-          subsectionQuestionTypeId: sqt.id,
-          section_id: section.id,
-          questionTypeName: sqt.question_type.type_name,
-          sequentialNumber: sqt.seqencial_subquestion_number,
-          question_type_id: sqt.question_type_id,
-          question_type: {
-            id: sqt.question_type.id,
-            type_name: sqt.question_type.type_name
-          },
-          allocatedChapters
-        });
       }
+    });
 
-      sectionAllocations.push({
-        sectionId: section.id,
-        pattern_id: section.pattern_id,
-        sectionName: section.section_name,
-        sequentialNumber: section.sequence_number,
-        section_number: section.section_number,
-        subSection: section.sub_section,
-        totalQuestions: section.total_questions,
-        mandotory_questions: section.mandotory_questions,
-        marks_per_question: section.marks_per_question,
-        absoluteMarks: sectionAbsoluteMarks,
-        totalMarks: sectionTotalMarks,
-        subsectionAllocations
-      });
-
+    if (!pattern) {
+      console.error('Pattern not found for ID:', patternId);
+      throw new NotFoundException('Pattern not found');
+    }
+    
+    return pattern;
+  }
+  
+  /**
+   * Fetches medium details
+   */
+  private async fetchMediumDetails(mediumIds?: number[]): Promise<any[]> {
+    let mediumDetails: { id: number; instruction_medium: string }[] = [];
+    
+    if (mediumIds && mediumIds.length > 0) {
+      try {
+        mediumDetails = await this.prisma.instruction_Medium.findMany({
+          where: { id: { in: mediumIds } },
+          select: { id: true, instruction_medium: true },
+        });
+      } catch (error) {
+        console.error(`Could not fetch medium details for IDs: ${mediumIds}`, error);
+      }
+    }
+    
+    return mediumDetails;
+  }
+  
+  /**
+   * Fetches chapter names and returns a map of chapter ID to name
+   */
+  private async fetchChapterNames(chapterIds: number[]): Promise<Map<number, string>> {
+    const chapters = await this.prisma.chapter.findMany({
+      where: {
+        id: { in: chapterIds }
+      },
+      select: { id: true, name: true }
+    });
+    
+    return new Map(chapters.map(ch => [ch.id, ch.name]));
+  }
+  
+  /**
+   * Initializes chapter marks map
+   */
+  private initializeChapterMarks(chapterIds: number[]): Map<number, number> {
+    const chapterMarksMap = new Map<number, number>();
+    chapterIds.forEach(chapterId => chapterMarksMap.set(chapterId, 0));
+    console.log('Initialized chapter marks map:', Array.from(chapterMarksMap.entries()));
+    return chapterMarksMap;
+  }
+  
+  /**
+   * Processes all sections to create section allocations
+   */
+  private processSections(
+    sections: any[],
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    filter: CreateTestPaperFilterDto
+  ): SectionAllocationDto[] {
+    console.log('Random sections order:', sections.map(s => s.section_name));
+    const sectionAllocations: SectionAllocationDto[] = [];
+    
+    for (const section of sections) {
+      const sectionAllocation = this.processSection(
+        section, 
+        chapterQuestionTypeMap, 
+        chapterMarksMap,
+        chapterNameMap,
+        filter
+      );
+      
+      sectionAllocations.push(sectionAllocation);
       console.log(`Completed section ${section.section_name}. Current chapter marks:`, 
         Array.from(chapterMarksMap.entries()));
     }
-
-    // 6. Format chapter marks
-    const chapterMarks: ChapterMarksDto[] = Array.from(chapterMarksMap.entries()).map(([chapterId, absoluteMarks]) => ({
+    
+    return sectionAllocations;
+  }
+  
+  /**
+   * Processes a single section
+   */
+  private processSection(
+    section: any,
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    filter: CreateTestPaperFilterDto
+  ): SectionAllocationDto {
+    console.log(`\nProcessing Section: ${section.section_name}`);
+    console.log(`Total Questions: ${section.total_questions}`);
+    console.log(`Number of Subsections: ${section.subsection_question_types.length}`);
+    
+    const sectionAbsoluteMarks = section.total_questions * section.marks_per_question;
+    const sectionTotalMarks = section.mandotory_questions * section.marks_per_question;
+    
+    // Process subsections
+    const subsectionAllocations = this.processSubsections(
+      section,
+      chapterQuestionTypeMap,
+      chapterMarksMap,
+      chapterNameMap,
+      filter
+    );
+    
+    return {
+      sectionId: section.id,
+      pattern_id: section.pattern_id,
+      sectionName: section.section_name,
+      sequentialNumber: section.sequence_number,
+      section_number: section.section_number,
+      subSection: section.sub_section,
+      totalQuestions: section.total_questions,
+      mandotory_questions: section.mandotory_questions,
+      marks_per_question: section.marks_per_question,
+      absoluteMarks: sectionAbsoluteMarks,
+      totalMarks: sectionTotalMarks,
+      subsectionAllocations
+    };
+  }
+  
+  /**
+   * Processes all subsections in a section
+   */
+  private processSubsections(
+    section: any,
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    filter: CreateTestPaperFilterDto
+  ): SubsectionAllocationDto[] {
+    let randomChapters = this.getRandomChaptersByMarks(chapterMarksMap);
+    console.log('Initial random chapters for section:', randomChapters);
+    
+    const subsectionAllocations: SubsectionAllocationDto[] = [];
+    
+    for (const sqt of section.subsection_question_types) {
+      const subsectionAllocation = this.processSubsection(
+        sqt,
+        section,
+        randomChapters,
+        chapterQuestionTypeMap,
+        chapterMarksMap,
+        chapterNameMap,
+        filter
+      );
+      
+      subsectionAllocations.push(subsectionAllocation);
+    }
+    
+    return subsectionAllocations;
+  }
+  
+  /**
+   * Processes a single subsection
+   */
+  private processSubsection(
+    sqt: any,
+    section: any,
+    randomChapters: number[],
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    filter: CreateTestPaperFilterDto
+  ): SubsectionAllocationDto {
+    console.log(`\nProcessing Question Type: ${sqt.question_type.type_name}`);
+    
+    const allocatedChapters = this.allocateChaptersForSubsection(
+      sqt,
+      section,
+      randomChapters,
+      chapterQuestionTypeMap,
+      chapterMarksMap,
+      chapterNameMap,
+      filter
+    );
+    
+    console.log(`Completed allocation for ${sqt.question_type.type_name}. Allocated chapters:`, 
+      allocatedChapters.map(c => `ID: ${c.chapterId}`).join(', '));
+    
+    return {
+      subsectionQuestionTypeId: sqt.id,
+      section_id: section.id,
+      questionTypeName: sqt.question_type.type_name,
+      sequentialNumber: sqt.seqencial_subquestion_number,
+      question_type_id: sqt.question_type_id,
+      question_type: {
+        id: sqt.question_type.id,
+        type_name: sqt.question_type.type_name
+      },
+      allocatedChapters
+    };
+  }
+  
+  /**
+   * Allocates chapters for a subsection
+   */
+  private allocateChaptersForSubsection(
+    sqt: any,
+    section: any,
+    randomChapters: number[],
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    filter: CreateTestPaperFilterDto
+  ): ChapterInfoDto[] {
+    const allocatedChapters: ChapterInfoDto[] = [];
+    let remainingQuestions = this.calculateRemainingQuestions(section);
+    
+    console.log(`Questions to allocate for this subsection: ${remainingQuestions}`);
+    
+    let chaptersToUse = [...randomChapters]; // Create a copy to avoid modifying the original
+    
+    while (remainingQuestions > 0) {
+      // Check if we need to regenerate the chapters array
+      if (chaptersToUse.length === 0) {
+        chaptersToUse = this.getRandomChaptersByMarks(chapterMarksMap);
+        console.log('Regenerated random chapters array:', chaptersToUse);
+      }
+      
+      // Try to allocate a chapter
+      const allocationResult = this.tryAllocateChapter(
+        sqt,
+        chaptersToUse,
+        chapterQuestionTypeMap,
+        chapterMarksMap,
+        chapterNameMap,
+        section.marks_per_question
+      );
+      
+      // Handle allocation result
+      if (allocationResult.success) {
+        allocatedChapters.push(allocationResult.chapterInfo);
+        remainingQuestions--;
+        
+        // Remove the allocated chapter from the array
+        const index = chaptersToUse.indexOf(allocationResult.chapterInfo.chapterId);
+        if (index !== -1) {
+          chaptersToUse.splice(index, 1);
+        }
+      } else {
+        // Check if allocation is possible at all
+        this.checkQuestionAvailability(sqt, filter, chapterQuestionTypeMap);
+        
+        // Regenerate random chapters
+        chaptersToUse = this.getRandomChaptersByMarks(chapterMarksMap);
+        console.log('Regenerated random chapters array after failed allocation:', chaptersToUse);
+      }
+    }
+    
+    return allocatedChapters;
+  }
+  
+  /**
+   * Calculates the number of questions needed for a subsection
+   */
+  private calculateRemainingQuestions(section: any): number {
+    return section.subsection_question_types.length === 1 
+      ? section.total_questions 
+      : 1;
+  }
+  
+  /**
+   * Tries to allocate a chapter for a question type
+   */
+  private tryAllocateChapter(
+    sqt: any,
+    randomChapters: number[],
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    marksPerQuestion: number
+  ): { success: boolean; chapterInfo?: ChapterInfoDto } {
+    for (let i = 0; i < randomChapters.length; i++) {
+      const chapterId = randomChapters[i];
+      const chapterQuestionTypes = chapterQuestionTypeMap.get(chapterId);
+      
+      console.log(`Trying Chapter ID: ${chapterId} at index ${i}`);
+      console.log('Chapter question types:', chapterQuestionTypes ? 
+        Array.from(chapterQuestionTypes.entries()) : 'No question types found');
+      
+      if (chapterQuestionTypes && chapterQuestionTypes.has(sqt.question_type_id)) {
+        const questionCount = chapterQuestionTypes.get(sqt.question_type_id)!;
+        
+        if (questionCount > 0) {
+          // Allocate the chapter
+          const chapterInfo = this.allocateChapter(
+            chapterId,
+            sqt,
+            questionCount,
+            chapterQuestionTypes,
+            chapterMarksMap,
+            chapterNameMap,
+            marksPerQuestion
+          );
+          
+          return { success: true, chapterInfo };
+        } else {
+          console.log(`✗ Chapter ${chapterId} has insufficient questions (${questionCount})`);
+        }
+      } else {
+        console.log(`✗ Chapter ${chapterId} doesn't have question type ${sqt.question_type.type_name}`);
+      }
+    }
+    
+    return { success: false };
+  }
+  
+  /**
+   * Allocates a chapter for a question type
+   */
+  private allocateChapter(
+    chapterId: number,
+    sqt: any,
+    questionCount: number,
+    chapterQuestionTypes: Map<number, number>,
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    marksPerQuestion: number
+  ): ChapterInfoDto {
+    console.log(`✓ Allocated Chapter ID: ${chapterId} for ${sqt.question_type.type_name}`);
+    
+    // Create chapter info
+    const chapterInfo: ChapterInfoDto = {
       chapterId,
-      chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
-      absoluteMarks
-    }));
-
-    // 7. Calculate total marks
-    const patternAbsoluteMarks = pattern.sections.reduce((total, section) => 
+      chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`
+    };
+    
+    // Update marks
+    const currentMarks = chapterMarksMap.get(chapterId) || 0;
+    chapterMarksMap.set(chapterId, currentMarks + marksPerQuestion);
+    console.log(`Updated marks for Chapter ${chapterId}: ${currentMarks} -> ${currentMarks + marksPerQuestion}`);
+    
+    // Update question count
+    chapterQuestionTypes.set(sqt.question_type_id, questionCount - 2);
+    console.log(`Updated question count for Chapter ${chapterId}: ${questionCount} -> ${questionCount - 2}`);
+    
+    return chapterInfo;
+  }
+  
+  /**
+   * Checks if there are any questions available for allocation
+   */
+  private checkQuestionAvailability(
+    sqt: any,
+    filter: CreateTestPaperFilterDto,
+    chapterQuestionTypeMap: Map<number, Map<number, number>>
+  ): void {
+    console.log('Attempted all chapters, none suitable or available for:', sqt.question_type.type_name);
+    
+    // Check if *any* chapter has remaining questions of this type
+    const isAnyQuestionAvailable = filter.chapterIds.some(chapterId => {
+      const types = chapterQuestionTypeMap.get(chapterId);
+      return types && (types.get(sqt.question_type_id) || 0) > 0;
+    });
+    
+    if (!isAnyQuestionAvailable) {
+      console.error(`Allocation failed: No chapter has enough verified questions for type '${sqt.question_type.type_name}' (ID: ${sqt.question_type_id}) across all specified mediums.`);
+      throw new BadRequestException(
+        `Insufficient verified questions for type '${sqt.question_type.type_name}' ` +
+        `available across all selected mediums (${filter.mediumIds.join(', ')}) ` +
+        `in the chosen chapters (${filter.chapterIds.join(', ')}). Cannot generate test paper.`
+      );
+    }
+  }
+  
+  /**
+   * Formats the final test paper response
+   */
+  private formatTestPaperResponse(
+    pattern: any,
+    mediumDetails: any[],
+    sectionAllocations: SectionAllocationDto[],
+    chapterMarksMap: Map<number, number>,
+    chapterNameMap: Map<number, string>,
+    filter: CreateTestPaperFilterDto
+  ): CreateTestPaperResponseDto {
+    // Format chapter marks
+    const chapterMarks: ChapterMarksDto[] = Array.from(chapterMarksMap.entries())
+      .map(([chapterId, absoluteMarks]) => ({
+        chapterId,
+        chapterName: chapterNameMap.get(chapterId) || `Chapter ${chapterId}`,
+        absoluteMarks
+      }));
+    
+    // Calculate total marks
+    const patternAbsoluteMarks = pattern.sections.reduce((total: number, section: any) => 
       total + (section.total_questions * section.marks_per_question), 0);
-
+    
     console.log('Final allocation:', {
       patternId: pattern.id,
       patternName: pattern.pattern_name,
@@ -421,9 +673,9 @@ export class CreateTestPaperService {
       })),
       chapterMarks
     });
-
+    
     console.log('\n' + '-'.repeat(50) + '\n');
-
+    
     return {
       patternId: pattern.id,
       patternName: pattern.pattern_name,
@@ -439,7 +691,21 @@ export class CreateTestPaperService {
   async getChaptersWithPossibleMarks(filterDto: FilterChaptersDto): Promise<ChapterMarksResponseDto[]> {
     const { patternId, chapterIds, mediumIds, questionOrigin = 'both' } = filterDto;
 
-    // Get pattern details with sections
+    // Fetch pattern and chapters
+    const pattern = await this.fetchPatternForMarks(patternId);
+    const chapters = await this.fetchChaptersForMarks(chapterIds);
+    
+    // Get question counts for chapters
+    const chapterQuestionTypeMap = await this.getQuestionCountsForMarks(chapterIds, mediumIds, questionOrigin);
+    
+    // Calculate possible marks for each chapter
+    return this.calculatePossibleMarksForChapters(chapters, pattern, chapterQuestionTypeMap, questionOrigin);
+  }
+
+  /**
+   * Fetches pattern with sections and question types for marks calculation
+   */
+  private async fetchPatternForMarks(patternId: number) {
     const pattern = await this.prisma.pattern.findUnique({
       where: { id: patternId },
       include: {
@@ -458,28 +724,33 @@ export class CreateTestPaperService {
     if (!pattern) {
       throw new NotFoundException('Pattern not found');
     }
+    
+    return pattern;
+  }
 
-    // Get chapters
-    const chapters = await this.prisma.chapter.findMany({
+  /**
+   * Fetches chapters for marks calculation
+   */
+  private async fetchChaptersForMarks(chapterIds: number[]) {
+    return this.prisma.chapter.findMany({
       where: {
         id: { in: chapterIds }
       }
     });
+  }
 
-    const result: ChapterMarksResponseDto[] = [];
-
-    // Build the board_question condition based on questionOrigin
-    let boardQuestionCondition = '';
-    if (questionOrigin === 'board') {
-      boardQuestionCondition = 'AND q.board_question = true';
-    } else if (questionOrigin === 'other') {
-      boardQuestionCondition = 'AND q.board_question = false';
-    }
-    // For 'both', we don't add any condition
-
-    const boardQuestionSql = Prisma.sql([boardQuestionCondition]);
+  /**
+   * Gets question counts for marks calculation
+   */
+  private async getQuestionCountsForMarks(
+    chapterIds: number[],
+    mediumIds: number[],
+    questionOrigin: QuestionOriginType
+  ): Promise<Map<number, Map<number, number>>> {
+    // Build SQL condition for question origin
+    const boardQuestionSql = this.buildBoardQuestionCondition(questionOrigin);
     
-    // Get question counts for each chapter and question type
+    // Execute query to get question counts
     const questionCounts = await this.prisma.$queryRaw<{ chapter_id: bigint, question_type_id: bigint, count: bigint }[]>`
       SELECT 
         c.id as chapter_id,
@@ -498,67 +769,72 @@ export class CreateTestPaperService {
       ${boardQuestionSql}
       GROUP BY c.id, qt.id
     `;
-
-    // Create a map of chapter question type counts
+    
+    // Create map of chapter question type counts
+    return this.buildQuestionTypeMap(questionCounts);
+  }
+  
+  /**
+   * Builds SQL condition for question origin filter
+   */
+  private buildBoardQuestionCondition(questionOrigin: QuestionOriginType): Prisma.Sql {
+    let boardQuestionCondition = '';
+    
+    if (questionOrigin === 'board') {
+      boardQuestionCondition = 'AND q.board_question = true';
+    } else if (questionOrigin === 'other') {
+      boardQuestionCondition = 'AND q.board_question = false';
+    }
+    // For 'both', we don't add any condition
+    
+    return Prisma.sql([boardQuestionCondition]);
+  }
+  
+  /**
+   * Builds a map of chapter question types from query results
+   */
+  private buildQuestionTypeMap(
+    questionCounts: { chapter_id: bigint, question_type_id: bigint, count: bigint }[]
+  ): Map<number, Map<number, number>> {
     const chapterQuestionTypeMap = new Map<number, Map<number, number>>();
+    
     for (const row of questionCounts) {
       const chapterId = Number(row.chapter_id);
       const questionTypeId = Number(row.question_type_id);
       const count = Number(row.count);
-
+      
       if (!chapterQuestionTypeMap.has(chapterId)) {
         chapterQuestionTypeMap.set(chapterId, new Map());
       }
+      
       chapterQuestionTypeMap.get(chapterId)!.set(questionTypeId, count);
     }
-
-    // Process each chapter
+    
+    return chapterQuestionTypeMap;
+  }
+  
+  /**
+   * Calculates possible marks for each chapter
+   */
+  private calculatePossibleMarksForChapters(
+    chapters: any[],
+    pattern: any,
+    chapterQuestionTypeMap: Map<number, Map<number, number>>,
+    questionOrigin: QuestionOriginType
+  ): ChapterMarksResponseDto[] {
+    const result: ChapterMarksResponseDto[] = [];
+    
     for (const chapter of chapters) {
-      let absoluteMarks = 0;
+      // Get chapter question types or empty map if none
       const chapterQuestionTypes = chapterQuestionTypeMap.get(chapter.id) || new Map();
-
-      // Process each section in the pattern
-      for (const section of pattern.sections) {
-        const totalQuestions = section.total_questions;
-        const marksPerQuestion = section.marks_per_question;
-        const subsectionQuestionTypes = section.subsection_question_types;
-
-        if (subsectionQuestionTypes.length === 1) {
-          // If section has only one subsection question type
-          const questionTypeId = subsectionQuestionTypes[0].question_type_id;
-          const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
-
-          // Calculate how many questions can be allocated
-          const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
-          
-          if (canAllocate >= totalQuestions) {
-            absoluteMarks += totalQuestions * marksPerQuestion;
-          } else {
-            absoluteMarks += canAllocate * marksPerQuestion;
-          }
-        } else {
-          // If section has multiple subsection question types
-          let remainingQuestions = totalQuestions;
-          let sectionMarks = 0;
-
-          for (const sqt of subsectionQuestionTypes) {
-            if (remainingQuestions <= 0) break;
-
-            const questionTypeId = sqt.question_type_id;
-            const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
-
-            if (questionCount >= 2) {
-              // Subtract 2 questions and add marks
-              sectionMarks += marksPerQuestion;
-              remainingQuestions--;
-              chapterQuestionTypes.set(questionTypeId, questionCount - 2);
-            }
-          }
-
-          absoluteMarks += sectionMarks;
-        }
-      }
-
+      
+      // Calculate absolute marks for this chapter
+      const absoluteMarks = this.calculateAbsoluteMarksForChapter(
+        pattern.sections,
+        chapterQuestionTypes
+      );
+      
+      // Add chapter to result
       result.push({
         chapterId: chapter.id,
         chapterName: chapter.name,
@@ -566,15 +842,95 @@ export class CreateTestPaperService {
         questionOrigin
       });
     }
-
+    
     return result;
+  }
+  
+  /**
+   * Calculates absolute marks for a chapter based on pattern sections
+   */
+  private calculateAbsoluteMarksForChapter(
+    sections: any[],
+    chapterQuestionTypes: Map<number, number>
+  ): number {
+    let absoluteMarks = 0;
+    
+    // Create a copy of the question types map to avoid modifying the original
+    const availableQuestions = new Map(chapterQuestionTypes);
+    
+    for (const section of sections) {
+      absoluteMarks += this.calculateMarksForSection(section, availableQuestions);
+    }
+    
+    return absoluteMarks;
+  }
+  
+  /**
+   * Calculates marks for a single section
+   */
+  private calculateMarksForSection(
+    section: any,
+    availableQuestions: Map<number, number>
+  ): number {
+    const { total_questions, marks_per_question, subsection_question_types } = section;
+    
+    return subsection_question_types.length === 1
+      ? this.calculateMarksForSingleTypeSection(subsection_question_types[0], total_questions, marks_per_question, availableQuestions)
+      : this.calculateMarksForMultiTypeSection(subsection_question_types, total_questions, marks_per_question, availableQuestions);
+  }
+  
+  /**
+   * Calculates marks for a section with a single question type
+   */
+  private calculateMarksForSingleTypeSection(
+    subsectionQuestionType: any,
+    totalQuestions: number,
+    marksPerQuestion: number,
+    availableQuestions: Map<number, number>
+  ): number {
+    const questionTypeId = subsectionQuestionType.question_type_id;
+    const questionCount = availableQuestions.get(questionTypeId) || 0;
+    
+    // Calculate how many questions can be allocated
+    const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
+    
+    return Math.min(canAllocate, totalQuestions) * marksPerQuestion;
+  }
+  
+  /**
+   * Calculates marks for a section with multiple question types
+   */
+  private calculateMarksForMultiTypeSection(
+    subsectionQuestionTypes: any[],
+    totalQuestions: number,
+    marksPerQuestion: number,
+    availableQuestions: Map<number, number>
+  ): number {
+    let remainingQuestions = totalQuestions;
+    let sectionMarks = 0;
+    
+    for (const sqt of subsectionQuestionTypes) {
+      if (remainingQuestions <= 0) break;
+      
+      const questionTypeId = sqt.question_type_id;
+      const questionCount = availableQuestions.get(questionTypeId) || 0;
+      
+      if (questionCount >= 2) {
+        // Subtract 2 questions and add marks
+        sectionMarks += marksPerQuestion;
+        remainingQuestions--;
+        availableQuestions.set(questionTypeId, questionCount - 2);
+      }
+    }
+    
+    return sectionMarks;
   }
 
   private async calculatePossibleMarksPerChapter(
     pattern: any,
     chapterIds: number[],
     mediumIds: number[],
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<Map<number, number>> {
     const possibleMarksMap = new Map<number, number>();
     
@@ -652,11 +1008,32 @@ export class CreateTestPaperService {
     chapterIds: number[],
     mediumIds: number[],
     targetMarks: Map<number, number>,
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<Map<number, Map<number, number[]>>> {
+    // Initialize allocation map
+    const allocationMap = this.initializeAllocationMap(pattern, chapterIds);
+    
+    // Get sorted data
+    const sortedData = await this.getSortedSectionsAndChapters(pattern, chapterIds, mediumIds, questionOrigin);
+    
+    // First pass: Allocate minimum possible marks for each chapter
+    await this.performFirstPassAllocation(sortedData, allocationMap, targetMarks, mediumIds, questionOrigin);
+    
+    // Second pass: Fill remaining questions in sections
+    this.performSecondPassAllocation(sortedData, allocationMap, targetMarks);
+    
+    return allocationMap;
+  }
+
+  /**
+   * Initialize the allocation map structure
+   */
+  private initializeAllocationMap(
+    pattern: any, 
+    chapterIds: number[]
+  ): Map<number, Map<number, number[]>> {
     const allocationMap = new Map<number, Map<number, number[]>>();
     
-    // Initialize allocation map
     for (const section of pattern.sections) {
       const sectionMap = new Map<number, number[]>();
       for (const chapterId of chapterIds) {
@@ -665,6 +1042,22 @@ export class CreateTestPaperService {
       allocationMap.set(section.id, sectionMap);
     }
     
+    return allocationMap;
+  }
+
+  /**
+   * Get sorted sections and chapters for allocation
+   */
+  private async getSortedSectionsAndChapters(
+    pattern: any,
+    chapterIds: number[],
+    mediumIds: number[],
+    questionOrigin?: QuestionOriginType
+  ): Promise<{
+    sortedSections: any[],
+    sortedChapters: number[],
+    possibleMarks: Map<number, number>
+  }> {
     // Sort sections by marks per question (descending)
     const sortedSections = [...pattern.sections].sort((a, b) => 
       b.marks_per_question - a.marks_per_question
@@ -676,87 +1069,229 @@ export class CreateTestPaperService {
       possibleMarks.get(a) - possibleMarks.get(b)
     );
     
-    // First pass: Allocate minimum possible marks
+    return { sortedSections, sortedChapters, possibleMarks };
+  }
+
+  /**
+   * First pass: Allocate minimum possible marks for each chapter
+   */
+  private async performFirstPassAllocation(
+    sortedData: {
+      sortedSections: any[],
+      sortedChapters: number[],
+      possibleMarks: Map<number, number>
+    },
+    allocationMap: Map<number, Map<number, number[]>>,
+    targetMarks: Map<number, number>,
+    mediumIds: number[],
+    questionOrigin?: QuestionOriginType
+  ): Promise<void> {
+    const { sortedSections, sortedChapters } = sortedData;
+    
     for (const chapterId of sortedChapters) {
-      const target = targetMarks.get(chapterId);
-      let allocatedMarks = 0;
-      
-      // Allocate high value questions first
-      for (const section of sortedSections) {
-        if (allocatedMarks >= target) break;
-        
-        const remainingMarks = target - allocatedMarks;
-        const marksPerQuestion = section.marks_per_question;
-        const maxQuestions = Math.floor(remainingMarks / marksPerQuestion);
-        
-        if (maxQuestions > 0) {
-          // Check if chapter has verified questions for this section
-          const hasQuestions = await this.hasVerifiedQuestions(
-            chapterId,
-            section.subsection_question_types.map(sqt => sqt.question_type_id),
-            mediumIds,
-            questionOrigin
-          );
-          
-          if (hasQuestions) {
-            // Allocate at least one question to each section
-            const questionsToAllocate = Math.min(
-              maxQuestions,
-              section.total_questions,
-              Math.floor(remainingMarks / marksPerQuestion)
-            );
-            
-            if (questionsToAllocate > 0) {
-              const currentAllocation = allocationMap.get(section.id).get(chapterId);
-              allocationMap.get(section.id).set(chapterId, [
-                ...currentAllocation,
-                ...Array(questionsToAllocate).fill(marksPerQuestion)
-              ]);
-              
-              allocatedMarks += questionsToAllocate * marksPerQuestion;
-            }
-          }
-        }
-      }
+      await this.allocateMarksToChapter(
+        chapterId,
+        sortedSections,
+        allocationMap,
+        targetMarks.get(chapterId),
+        mediumIds,
+        questionOrigin
+      );
     }
+  }
+
+  /**
+   * Allocate marks to a specific chapter across sections
+   */
+  private async allocateMarksToChapter(
+    chapterId: number,
+    sortedSections: any[],
+    allocationMap: Map<number, Map<number, number[]>>,
+    targetMark: number,
+    mediumIds: number[],
+    questionOrigin?: QuestionOriginType
+  ): Promise<void> {
+    let allocatedMarks = 0;
     
-    // Second pass: Fill remaining marks
     for (const section of sortedSections) {
-      const sectionAllocation = allocationMap.get(section.id);
-      const totalAllocated = Array.from(sectionAllocation.values())
-        .reduce((sum, marks) => sum + marks.length, 0);
+      // Break if we've already reached the target
+      if (allocatedMarks >= targetMark) break;
       
-      const remainingQuestions = section.total_questions - totalAllocated;
+      const remainingMarks = targetMark - allocatedMarks;
+      const marksPerQuestion = section.marks_per_question;
+      const maxQuestions = Math.floor(remainingMarks / marksPerQuestion);
       
-      if (remainingQuestions > 0) {
-        // Find chapters that need more marks
-        const chaptersNeedingMarks = sortedChapters.filter(chapterId => {
-          const allocated = Array.from(allocationMap.values())
-            .reduce((sum, sectionMap) => 
-              sum + sectionMap.get(chapterId).reduce((a, b) => a + b, 0), 0);
-          return allocated < targetMarks.get(chapterId);
-        });
-        
-        // Allocate remaining questions
-        for (let i = 0; i < remainingQuestions; i++) {
-          const chapterId = chaptersNeedingMarks[i % chaptersNeedingMarks.length];
-          const currentAllocation = sectionAllocation.get(chapterId);
-          sectionAllocation.set(chapterId, [
-            ...currentAllocation,
-            section.marks_per_question
-          ]);
-        }
-      }
+      if (maxQuestions <= 0) continue;
+      
+      // Check if chapter has verified questions for this section
+      const hasQuestions = await this.hasVerifiedQuestions(
+        chapterId,
+        section.subsection_question_types.map(sqt => sqt.question_type_id),
+        mediumIds,
+        questionOrigin
+      );
+      
+      if (!hasQuestions) continue;
+      
+      // Add questions to section allocation
+      const additionalMarks = this.allocateQuestionsToSection(
+        section,
+        chapterId,
+        allocationMap,
+        maxQuestions,
+        remainingMarks,
+        marksPerQuestion
+      );
+      
+      allocatedMarks += additionalMarks;
     }
+  }
+
+  /**
+   * Allocate questions to a specific section for a chapter
+   */
+  private allocateQuestionsToSection(
+    section: any,
+    chapterId: number,
+    allocationMap: Map<number, Map<number, number[]>>,
+    maxQuestions: number,
+    remainingMarks: number,
+    marksPerQuestion: number
+  ): number {
+    // Calculate how many questions to allocate
+    const questionsToAllocate = Math.min(
+      maxQuestions,
+      section.total_questions,
+      Math.floor(remainingMarks / marksPerQuestion)
+    );
     
-    return allocationMap;
+    if (questionsToAllocate <= 0) return 0;
+    
+    // Update allocation
+    const sectionAllocation = allocationMap.get(section.id);
+    const currentAllocation = sectionAllocation.get(chapterId);
+    
+    sectionAllocation.set(chapterId, [
+      ...currentAllocation,
+      ...Array(questionsToAllocate).fill(marksPerQuestion)
+    ]);
+    
+    return questionsToAllocate * marksPerQuestion;
+  }
+
+  /**
+   * Second pass: Fill remaining questions in sections
+   */
+  private performSecondPassAllocation(
+    sortedData: {
+      sortedSections: any[],
+      sortedChapters: number[],
+      possibleMarks: Map<number, number>
+    },
+    allocationMap: Map<number, Map<number, number[]>>,
+    targetMarks: Map<number, number>
+  ): void {
+    const { sortedSections, sortedChapters } = sortedData;
+    
+    for (const section of sortedSections) {
+      this.fillRemainingQuestionsInSection(section, sortedChapters, allocationMap, targetMarks);
+    }
+  }
+
+  /**
+   * Fill remaining questions in a specific section
+   */
+  private fillRemainingQuestionsInSection(
+    section: any,
+    sortedChapters: number[],
+    allocationMap: Map<number, Map<number, number[]>>,
+    targetMarks: Map<number, number>
+  ): void {
+    const sectionAllocation = allocationMap.get(section.id);
+    const totalAllocated = this.countAllocatedQuestionsInSection(sectionAllocation);
+    const remainingQuestions = section.total_questions - totalAllocated;
+    
+    if (remainingQuestions <= 0) return;
+    
+    // Find chapters that need more marks
+    const chaptersNeedingMarks = this.findChaptersNeedingMoreMarks(
+      sortedChapters,
+      allocationMap,
+      targetMarks
+    );
+    
+    // Distribute remaining questions
+    this.distributeRemainingQuestions(
+      remainingQuestions,
+      chaptersNeedingMarks,
+      sectionAllocation,
+      section.marks_per_question
+    );
+  }
+
+  /**
+   * Count allocated questions in a section
+   */
+  private countAllocatedQuestionsInSection(
+    sectionAllocation: Map<number, number[]>
+  ): number {
+    return Array.from(sectionAllocation.values())
+      .reduce((sum, marks) => sum + marks.length, 0);
+  }
+
+  /**
+   * Find chapters that need more marks
+   */
+  private findChaptersNeedingMoreMarks(
+    sortedChapters: number[],
+    allocationMap: Map<number, Map<number, number[]>>,
+    targetMarks: Map<number, number>
+  ): number[] {
+    return sortedChapters.filter(chapterId => {
+      const allocated = this.getTotalAllocatedMarksForChapter(chapterId, allocationMap);
+      return allocated < targetMarks.get(chapterId);
+    });
+  }
+
+  /**
+   * Get total allocated marks for a chapter across all sections
+   */
+  private getTotalAllocatedMarksForChapter(
+    chapterId: number,
+    allocationMap: Map<number, Map<number, number[]>>
+  ): number {
+    return Array.from(allocationMap.values())
+      .reduce((sum, sectionMap) => 
+        sum + sectionMap.get(chapterId).reduce((a, b) => a + b, 0), 0);
+  }
+
+  /**
+   * Distribute remaining questions among chapters
+   */
+  private distributeRemainingQuestions(
+    remainingQuestions: number,
+    chaptersNeedingMarks: number[],
+    sectionAllocation: Map<number, number[]>,
+    marksPerQuestion: number
+  ): void {
+    if (chaptersNeedingMarks.length === 0) return;
+    
+    for (let i = 0; i < remainingQuestions; i++) {
+      const chapterId = chaptersNeedingMarks[i % chaptersNeedingMarks.length];
+      const currentAllocation = sectionAllocation.get(chapterId);
+      
+      sectionAllocation.set(chapterId, [
+        ...currentAllocation,
+        marksPerQuestion
+      ]);
+    }
   }
 
   private async hasVerifiedQuestions(
     chapterId: number,
     questionTypeIds: number[],
     mediumIds: number[],
-    questionOrigin?: 'board' | 'other' | 'both'
+    questionOrigin?: QuestionOriginType
   ): Promise<boolean> {
     // Build where condition based on question origin
     let boardQuestionCondition = {};

@@ -17,7 +17,7 @@ class OptionalParseIntPipe implements PipeTransform<string | undefined, number |
     // Handle string case
     if (typeof value === 'string' && value.trim() === '') return undefined;
     
-    const val = parseInt(value as string);
+    const val = parseInt(value);
     if (isNaN(val)) {
       throw new BadRequestException('Validation failed (numeric string is expected)');
     }

@@ -1,94 +1,67 @@
-import { Controller, Post, Body, Get, Param, Delete, ParseIntPipe, Put, HttpStatus, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { BoardManagementService } from './board-management.service';
-import { CreateBoardManagementDto } from './dto/create-board-management.dto';
-import { UpdateBoardManagementDto } from './dto/update-board-management.dto';
+import { Controller, Post, Body, Get, Param, Delete, ParseIntPipe, Put, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { BoardManagementService } from './board-management.service';
+import { CreateBoardManagementDto } from './dto/create-board-management.dto';
+import { UpdateBoardManagementDto } from './dto/update-board-management.dto';
 
 @ApiTags('board-management')
-@Controller('board-management')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
+@Controller('board-management')
 export class BoardManagementController {
   constructor(private readonly boardManagementService: BoardManagementService) {}
 
   @Post()
-  @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new board with all related entities' })
-  @ApiResponse({ 
-    status: HttpStatus.CREATED, 
-    description: 'Board and related entities created successfully' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data' 
-  })
-  async create(@Body() createDto: CreateBoardManagementDto) {
-    return await this.boardManagementService.create(createDto);
+  @ApiResponse({ status: 201, description: 'Board created successfully' })
+  @ApiResponse({ status: 400, description: 'Bad Request' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  create(@Body() createBoardManagementDto: CreateBoardManagementDto) {
+    return this.boardManagementService.create(createBoardManagementDto);
   }
 
   @Get()
-  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all boards with their related entities' })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Returns all boards and their related entities' 
-  })
-  async findAll() {
-    return await this.boardManagementService.findAll();
+  @ApiResponse({ status: 200, description: 'Boards retrieved successfully' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'TEACHER')
+  findAll() {
+    return this.boardManagementService.findAll();
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get a specific board by ID with all related entities' })
+  @ApiParam({ name: 'id', description: 'Board ID' })
+  @ApiResponse({ status: 200, description: 'Board retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Board not found' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get a board and its related entities by id' })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Returns the board and its related entities' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'Board not found' 
-  })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
-    return await this.boardManagementService.findOne(id);
-  }
-
-  @Delete(':id')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Delete a board and its related entities' })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Board and related entities deleted successfully' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'Board not found' 
-  })
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    return await this.boardManagementService.remove(id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.boardManagementService.findOne(id);
   }
 
   @Put(':id')
-  @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a board and its related entities' })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Board and related entities updated successfully' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'Board not found' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data' 
-  })
-  async update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() updateDto: UpdateBoardManagementDto,
-  ) {
-    return await this.boardManagementService.update(id, updateDto);
+  @ApiParam({ name: 'id', description: 'Board ID' })
+  @ApiResponse({ status: 200, description: 'Board updated successfully' })
+  @ApiResponse({ status: 404, description: 'Board not found' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  update(@Param('id', ParseIntPipe) id: number, @Body() updateBoardManagementDto: UpdateBoardManagementDto) {
+    return this.boardManagementService.update(id, updateBoardManagementDto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a board and all its related entities' })
+  @ApiParam({ name: 'id', description: 'Board ID' })
+  @ApiResponse({ status: 200, description: 'Board deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Board not found' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.boardManagementService.remove(id);
   }
 } 

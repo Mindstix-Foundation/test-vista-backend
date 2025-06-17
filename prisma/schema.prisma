@@ -292,7 +292,7 @@ model Section {
   pattern_id          Int
   sequence_number     Int
   section_number      Int
-  sub_section         String   @db.VarChar
+  sub_section         String?  @db.VarChar
   section_name        String   @db.VarChar
   total_questions     Int
   mandotory_questions Int

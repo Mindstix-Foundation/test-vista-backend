@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTeacherSubjectDto } from './dto/teacher-subject.dto';
-import { Prisma } from '@prisma/client';
 import { parseQueryParams } from '../../utils/queryParams';
 
 @Injectable()

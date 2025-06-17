@@ -5,7 +5,7 @@ import { RoleService } from '../role/role.service';
 import * as bcrypt from 'bcrypt';
 import { LoginDto } from './dto/login.dto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/password.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
 
@@ -88,12 +88,19 @@ export class AuthService {
         throw new UnauthorizedException('Invalid token format');
       }
 
-      await this.prisma.blacklisted_Token.create({
-        data: {
+      await this.prisma.blacklisted_Token.upsert({
+        where: { token },
+        update: {
+          expires_at: new Date((decoded.exp * 1000))
+        },
+        create: {
           token,
           expires_at: new Date((decoded.exp * 1000))
         }
       });
+
+      // Also add to in-memory blacklist for faster lookup
+      this.tokenBlacklist.add(token);
     } catch (error) {
       this.logger.error('Token blacklisting error:', error);
       throw error;
@@ -101,7 +108,39 @@ export class AuthService {
   }
 
   async isTokenBlacklisted(token: string): Promise<boolean> {
-    return this.tokenBlacklist.has(token);
+    // First check in-memory cache for faster lookup
+    if (this.tokenBlacklist.has(token)) {
+      return true;
+    }
+
+    // Check database for blacklisted tokens
+    try {
+      const blacklistedToken = await this.prisma.blacklisted_Token.findUnique({
+        where: { 
+          token,
+        }
+      });
+
+      if (blacklistedToken) {
+        // Check if token has expired
+        if (blacklistedToken.expires_at > new Date()) {
+          // Add to in-memory cache for future fast lookups
+          this.tokenBlacklist.add(token);
+          return true;
+        } else {
+          // Token has expired, remove from database
+          await this.prisma.blacklisted_Token.delete({
+            where: { token }
+          });
+        }
+      }
+
+      return false;
+    } catch (error) {
+      this.logger.error('Error checking token blacklist:', error);
+      // In case of database error, fall back to in-memory check
+      return this.tokenBlacklist.has(token);
+    }
   }
 
   async invalidateToken(token: string): Promise<void> {
@@ -160,7 +199,7 @@ export class AuthService {
       await transporter.sendMail({
         from: this.configService.get('SMTP_FROM'),
         to: user.email_id,
-        subject: 'Password Reset Request',
+        subject: 'Password Reset Request - TEST VISTA',
         html: `
           <!DOCTYPE html>
           <html>
@@ -169,93 +208,89 @@ export class AuthService {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Reset Your Password</title>
           </head>
-          <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f5f5f5;">
+          <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f8f9fa; line-height: 1.6;">
             <!-- Main Container -->
-            <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
-              <!-- Header with Logo -->
-              <div style="text-align: center; padding: 20px; background-color: #ffffff;">
-                <img src="cid:logo" 
-                     alt="TEST VISTA Logo" 
-                     style="width: 200px; max-width: 100%; height: auto;">
+            <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 8px;">
+              
+              <!-- Header Section -->
+              <div style="background-color: #212529; color: #ffffff; padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
+                <h1 style="margin: 0; font-size: 24px; font-weight: bold;">TEST VISTA</h1>
+                <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.9;">Password Reset Request</p>
               </div>
 
               <!-- Content Section -->
-              <div style="padding: 20px 30px;">
-                <h1 style="margin: 0 0 20px; font-size: 24px; color: #2563eb; text-align: center;">
-                  Password Reset Request
-                </h1>
+              <div style="padding: 30px;">
+                <h2 style="margin: 0 0 20px; font-size: 20px; color: #212529; font-weight: 600;">
+                  Reset Your Password
+                </h2>
 
-                <p style="margin: 0 0 20px; font-size: 16px; line-height: 24px; color: #333333;">
+                <p style="margin: 0 0 20px; font-size: 16px; color: #495057;">
                   Hello,
                 </p>
 
-                <p style="margin: 0 0 20px; font-size: 16px; line-height: 24px; color: #333333;">
+                <p style="margin: 0 0 25px; font-size: 16px; color: #495057;">
                   We received a request to reset the password for your TEST VISTA account. 
-                  To proceed with the password reset, click the button below:
+                  Click the button below to reset your password:
                 </p>
 
                 <!-- Reset Button -->
                 <div style="text-align: center; margin: 30px 0;">
                   <a href="${this.configService.get('FRONTEND_URL')}/reset-password?token=${token}" 
-                     style="display: inline-block; padding: 12px 25px; background-color: #2563eb; 
-                              color: #ffffff; text-decoration: none; border-radius: 4px; 
-                              font-weight: bold; font-size: 16px;">
+                     style="display: inline-block; padding: 12px 24px; background-color: #198754; 
+                            color: #ffffff; text-decoration: none; border-radius: 4px; 
+                            font-weight: 600; font-size: 16px; border: 1px solid #198754;">
                     Reset Password
                   </a>
                 </div>
 
-                <p style="margin: 0 0 20px; font-size: 16px; line-height: 24px; color: #333333;">
-                  This password reset link will expire in 15 minutes for security reasons.
-                </p>
-
-                <!-- Security Notice -->
-                <div style="margin: 20px 0; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                  <p style="margin: 0 0 10px; font-size: 16px; font-weight: bold; color: #333333;">
-                    Important Security Notice:
+                <!-- Important Notice -->
+                <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px; margin: 25px 0;">
+                  <p style="margin: 0; font-size: 14px; color: #856404;">
+                    <strong>Important:</strong> This password reset link will expire in 15 minutes for your security.
                   </p>
-                  <ul style="margin: 0; padding-left: 20px; color: #4b5563;">
-                    <li style="margin-bottom: 10px;">If you didn't request this password reset, please ignore this email or contact support.</li>
-                    <li style="margin-bottom: 10px;">Never share this reset link with anyone.</li>
-                    <li style="margin-bottom: 10px;">Our support team will never ask for your password.</li>
+                </div>
+
+                <!-- Security Information -->
+                <div style="border: 1px solid #dee2e6; border-radius: 4px; padding: 20px; margin: 25px 0; background-color: #f8f9fa;">
+                  <h4 style="margin: 0 0 15px; font-size: 16px; color: #212529;">Security Information</h4>
+                  <ul style="margin: 0; padding-left: 20px; color: #495057; font-size: 14px;">
+                    <li style="margin-bottom: 8px;">If you didn't request this password reset, please ignore this email</li>
+                    <li style="margin-bottom: 8px;">Never share this reset link with anyone</li>
+                    <li style="margin-bottom: 8px;">Choose a strong password for your account</li>
+                    <li>Contact support if you have any concerns</li>
                   </ul>
                 </div>
 
-                <!-- Token Info (Development Only) -->
-                <div style="margin: 20px 0; padding: 15px; background-color: #f3f4f6; border-radius: 6px;">
-                  <p style="margin: 0; font-family: monospace; font-size: 14px;">
-                    <strong>Development Mode - Reset Token:</strong><br>
-                    ${token}
+                <!-- Alternative Link -->
+                <div style="margin: 25px 0; padding: 15px; background-color: #e9ecef; border-radius: 4px;">
+                  <p style="margin: 0 0 8px; font-size: 12px; color: #495057; font-weight: 600;">
+                    Having trouble with the button? Copy and paste this link into your browser:
+                  </p>
+                  <p style="margin: 0; font-size: 11px; color: #6c757d; word-break: break-all; font-family: monospace;">
+                    ${this.configService.get('FRONTEND_URL')}/reset-password?token=${token}
                   </p>
                 </div>
               </div>
 
               <!-- Footer -->
-              <div style="padding: 20px 30px; background-color: #f5f5f5; text-align: center;">
-                <p style="margin: 0 0 10px; font-size: 12px; color: #666666;">
-                  This is an automated message, please do not reply to this email.
+              <div style="background-color: #f8f9fa; padding: 20px; text-align: center; border-top: 1px solid #dee2e6; border-radius: 0 0 8px 8px;">
+                <p style="margin: 0 0 8px; font-size: 14px; color: #212529; font-weight: 600;">
+                  TEST VISTA
                 </p>
-                <p style="margin: 0 0 10px; font-size: 12px; color: #2563eb;">
-                  TEST VISTA - Transforming Testing Experience
+                <p style="margin: 0 0 8px; font-size: 12px; color: #6c757d;">
+                  Transforming Testing Experience
                 </p>
-                <p style="margin: 0 0 10px; font-size: 12px; color: #666666;">
+                <p style="margin: 0 0 15px; font-size: 11px; color: #6c757d;">
+                  This is an automated message. Please do not reply to this email.
+                </p>
+                <p style="margin: 0; font-size: 10px; color: #adb5bd;">
                   &copy; ${new Date().getFullYear()} TEST VISTA. All rights reserved.
-                </p>
-                <p style="margin: 0 0 10px; font-size: 12px; color: #4b5563;">
-                  If you're having trouble clicking the reset password button, copy and paste the following URL into your web browser:
-                </p>
-                <p style="margin: 0; font-size: 11px; color: #6b7280; word-break: break-all;">
-                  ${this.configService.get('FRONTEND_URL')}/reset-password?token=${token}
                 </p>
               </div>
             </div>
           </body>
           </html>
-        `,
-        attachments: [{
-          filename: 'logo.png',
-          path: 'https://drive.google.com/uc?export=view&id=1Xbu3xeKFthTqzETOc7bM9sGlN1CZJq2U',
-          cid: 'logo'
-        }]
+        `
       });
 
       this.logger.log(`Password reset email sent to: ${user.email_id}`);
@@ -277,7 +312,7 @@ export class AuthService {
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
     try {
-      const payload = this.jwtService.verify(resetPasswordDto.token) as { email_id: string };
+      const payload = this.jwtService.verify(resetPasswordDto.token);
       
       const resetRecord = await this.prisma.password_Reset.findFirst({
         where: {

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, Min, IsOptional } from 'class-validator';
 
 export class CreateSectionDto {
   @ApiProperty({
@@ -30,11 +30,12 @@ export class CreateSectionDto {
 
   @ApiProperty({
     description: 'Sub section',
-    example: 'A'
+    example: 'A',
+    required: false
   })
   @IsString()
-  @IsNotEmpty()
-  sub_section: string;
+  @IsOptional()
+  sub_section?: string;
 
   @ApiProperty({
     description: 'Section name',

@@ -42,7 +42,6 @@ describe('PatternService', () => {
     }).compile();
 
     service = module.get<PatternService>(PatternService);
-    prisma = module.get<PrismaService>(PrismaService);
     jest.clearAllMocks();
   });
 

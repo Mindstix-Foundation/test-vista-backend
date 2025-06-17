@@ -156,55 +156,71 @@ export class ChapterService {
     }
   }
 
+  private async verifySubject(subjectId?: number): Promise<void> {
+    if (!subjectId) return;
+    
+    const subject = await this.prisma.subject.findUnique({
+      where: { id: subjectId },
+    });
+    
+    if (!subject) {
+      throw new NotFoundException('Subject not found');
+    }
+  }
+
+  private async verifyStandard(standardId?: number): Promise<void> {
+    if (!standardId) return;
+    
+    const standard = await this.prisma.standard.findUnique({
+      where: { id: standardId },
+    });
+    
+    if (!standard) {
+      throw new NotFoundException('Standard not found');
+    }
+  }
+
+  private async checkDuplicateSequence(
+    id: number,
+    subjectId: number,
+    standardId: number,
+    sequentialNumber: number,
+  ): Promise<void> {
+    const duplicateSequence = await this.prisma.chapter.findFirst({
+      where: {
+        id: { not: id },
+        subject_id: subjectId,
+        standard_id: standardId,
+        sequential_chapter_number: sequentialNumber,
+      },
+    });
+
+    if (duplicateSequence) {
+      throw new ConflictException(
+        `Chapter with sequence number ${sequentialNumber} already exists for this subject and standard`,
+      );
+    }
+  }
+
   async update(id: number, updateChapterDto: UpdateChapterDto) {
     try {
       const existingChapter = await this.findOne(id);
 
-      // Verify subject if provided
-      if (updateChapterDto.subject_id) {
-        const subject = await this.prisma.subject.findUnique({
-          where: { id: updateChapterDto.subject_id },
-        });
+      // Verify subject and standard if provided
+      await this.verifySubject(updateChapterDto.subject_id);
+      await this.verifyStandard(updateChapterDto.standard_id);
 
-        if (!subject) {
-          throw new NotFoundException('Subject not found');
-        }
-      }
-
-      // Verify standard if provided
-      if (updateChapterDto.standard_id) {
-        const standard = await this.prisma.standard.findUnique({
-          where: { id: updateChapterDto.standard_id },
-        });
-
-        if (!standard) {
-          throw new NotFoundException('Standard not found');
-        }
-      }
-
-      // Check for duplicate sequence if changing subject, standard or sequence
-      if (updateChapterDto.sequential_chapter_number || 
-          updateChapterDto.subject_id || 
-          updateChapterDto.standard_id) {
+      // Check for duplicate sequence if changing relevant fields
+      const needsSequenceCheck = updateChapterDto.sequential_chapter_number !== undefined || 
+                                updateChapterDto.subject_id !== undefined || 
+                                updateChapterDto.standard_id !== undefined;
+      
+      if (needsSequenceCheck) {
+        const subjectId = updateChapterDto.subject_id ?? existingChapter.subject_id;
+        const standardId = updateChapterDto.standard_id ?? existingChapter.standard_id;
+        const sequentialNumber = updateChapterDto.sequential_chapter_number ?? existingChapter.sequential_chapter_number;
         
-        const subjectId = updateChapterDto.subject_id || existingChapter.subject_id;
-        const standardId = updateChapterDto.standard_id || existingChapter.standard_id;
-        const sequentialNumber = updateChapterDto.sequential_chapter_number || existingChapter.sequential_chapter_number;
-        
-        const duplicateSequence = await this.prisma.chapter.findFirst({
-          where: {
-            id: { not: id },
-            subject_id: subjectId,
-            standard_id: standardId,
-            sequential_chapter_number: sequentialNumber,
-          },
-        });
-
-        if (duplicateSequence) {
-          throw new ConflictException(
-            `Chapter with sequence number ${sequentialNumber} already exists for this subject and standard`,
-          );
-        }
+        await this.checkDuplicateSequence(id, subjectId, standardId, sequentialNumber);
       }
 
       const chapterData = {
@@ -223,6 +239,7 @@ export class ChapterService {
       });
     } catch (error) {
       this.logger.error(`Failed to update chapter ${id}:`, error);
+      
       if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
@@ -277,44 +294,82 @@ export class ChapterService {
     }
   }
 
+  private async validateChapterAndPosition(chapterId: number, newPosition: number) {
+    // Get the current chapter and its details
+    const currentChapter = await this.prisma.chapter.findUnique({
+      where: { id: chapterId },
+      select: {
+        id: true,
+        subject_id: true,
+        standard_id: true,
+        sequential_chapter_number: true
+      }
+    });
+
+    if (!currentChapter) {
+      throw new NotFoundException(`Chapter with ID ${chapterId} not found`);
+    }
+
+    this.logger.log(`Found current chapter: ${JSON.stringify(currentChapter)}`);
+
+    // Get total chapters count to validate newPosition
+    const totalChapters = await this.prisma.chapter.count({
+      where: { 
+        subject_id: currentChapter.subject_id,
+        standard_id: currentChapter.standard_id
+      }
+    });
+
+    this.logger.log(`Total chapters in subject/standard: ${totalChapters}`);
+
+    // Validate newPosition
+    if (newPosition < 1 || newPosition > totalChapters) {
+      throw new ConflictException(`New position must be between 1 and ${totalChapters}`);
+    }
+
+    return { currentChapter, currentPosition: currentChapter.sequential_chapter_number };
+  }
+  
+  private async updateChapterPositions(tx, currentChapter, currentPosition, newPosition) {
+    if (currentPosition < newPosition) {
+      // Moving to a later position - shift chapters in between down by 1
+      await tx.chapter.updateMany({
+        where: {
+          subject_id: currentChapter.subject_id,
+          standard_id: currentChapter.standard_id,
+          sequential_chapter_number: {
+            gt: currentPosition,
+            lte: newPosition
+          }
+        },
+        data: {
+          sequential_chapter_number: { decrement: 1 }
+        }
+      });
+    } else {
+      // Moving to an earlier position - shift chapters in between up by 1
+      await tx.chapter.updateMany({
+        where: {
+          subject_id: currentChapter.subject_id,
+          standard_id: currentChapter.standard_id,
+          sequential_chapter_number: {
+            gte: newPosition,
+            lt: currentPosition
+          }
+        },
+        data: {
+          sequential_chapter_number: { increment: 1 }
+        }
+      });
+    }
+  }
+
   async reorderChapter(chapterId: number, newPosition: number) {
     try {
       this.logger.log(`Starting reorder for chapter ${chapterId} to position ${newPosition}`);
       
-      // Get the current chapter and its details
-      const currentChapter = await this.prisma.chapter.findUnique({
-        where: { id: chapterId },
-        select: {
-          id: true,
-          subject_id: true,
-          standard_id: true,
-          sequential_chapter_number: true
-        }
-      });
-
-      if (!currentChapter) {
-        throw new NotFoundException(`Chapter with ID ${chapterId} not found`);
-      }
-
-      this.logger.log(`Found current chapter: ${JSON.stringify(currentChapter)}`);
-
-      // Get total chapters count to validate newPosition
-      const totalChapters = await this.prisma.chapter.count({
-        where: { 
-          subject_id: currentChapter.subject_id,
-          standard_id: currentChapter.standard_id
-        }
-      });
-
-      this.logger.log(`Total chapters in subject/standard: ${totalChapters}`);
-
-      // Validate newPosition
-      if (newPosition < 1 || newPosition > totalChapters) {
-        throw new ConflictException(`New position must be between 1 and ${totalChapters}`);
-      }
-
-      const currentPosition = currentChapter.sequential_chapter_number;
-
+      const { currentChapter, currentPosition } = await this.validateChapterAndPosition(chapterId, newPosition);
+      
       // If the positions are the same, no need to reorder
       if (currentPosition === newPosition) {
         return await this.findOne(chapterId);
@@ -322,42 +377,15 @@ export class ChapterService {
 
       try {
         await this.prisma.$transaction(async (tx) => {
-          // First move to temporary position
+          // First move chapter to temporary position to avoid constraints
           this.logger.log(`Moving chapter ${chapterId} to temporary position`);
           await tx.chapter.update({
             where: { id: chapterId },
             data: { sequential_chapter_number: 999 }
           });
 
-          if (currentPosition < newPosition) {
-            // Moving to a later position
-            for (let i = currentPosition + 1; i <= newPosition; i++) {
-              await tx.chapter.updateMany({
-                where: {
-                  subject_id: currentChapter.subject_id,
-                  standard_id: currentChapter.standard_id,
-                  sequential_chapter_number: i
-                },
-                data: {
-                  sequential_chapter_number: i - 1
-                }
-              });
-            }
-          } else {
-            // Moving to an earlier position
-            for (let i = currentPosition - 1; i >= newPosition; i--) {
-              await tx.chapter.updateMany({
-                where: {
-                  subject_id: currentChapter.subject_id,
-                  standard_id: currentChapter.standard_id,
-                  sequential_chapter_number: i
-                },
-                data: {
-                  sequential_chapter_number: i + 1
-                }
-              });
-            }
-          }
+          // Update positions of other chapters
+          await this.updateChapterPositions(tx, currentChapter, currentPosition, newPosition);
 
           // Finally, move to new position
           this.logger.log(`Moving chapter to final position ${newPosition}`);

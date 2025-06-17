@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateMediumStandardSubjectDto, GetMssQueryDto } from './dto/medium-standard-subject.dto';
-import { Prisma } from '@prisma/client';
+import { CreateMediumStandardSubjectDto } from './dto/medium-standard-subject.dto';
 import { parseQueryParams } from '../../utils/queryParams';
 
 @Injectable()
@@ -37,12 +36,12 @@ export class MediumStandardSubjectService {
   async create(createDto: CreateMediumStandardSubjectDto) {
     try {
       // Get instruction medium with its board
-      const instructionMedium = await this.prisma.instruction_Medium.findUnique({
+      const medium = await this.prisma.instruction_Medium.findUnique({
         where: { id: createDto.instruction_medium_id },
         include: { board: true }
       });
 
-      if (!instructionMedium) {
+      if (!medium) {
         throw new NotFoundException(`Instruction medium with ID ${createDto.instruction_medium_id} not found`);
       }
 
@@ -67,11 +66,11 @@ export class MediumStandardSubjectService {
       }
 
       // Check if all components belong to the same board
-      if (instructionMedium.board_id !== standard.board_id || 
+      if (medium.board_id !== standard.board_id || 
           standard.board_id !== subject.board_id) {
         throw new BadRequestException(
           'Invalid combination: Instruction medium, standard, and subject must belong to the same board. ' +
-          `Instruction Medium Board: ${instructionMedium.board.name}, ` +
+          `Instruction Medium Board: ${medium.board.name}, ` +
           `Standard Board: ${standard.board.name}, ` +
           `Subject Board: ${subject.board.name}`
         );

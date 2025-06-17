@@ -1,8 +1,7 @@
 import { IsString, IsInt, IsOptional, IsNotEmpty, IsBoolean, IsArray, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { PaginationDto, SortField, SortOrder } from '../../../common/dto/pagination.dto';
-import { Transform } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+import { PaginationDto } from '../../../common/dto/pagination.dto';
 
 // DTO for creating MCQ options
 export class CreateMcqOptionDto {
@@ -257,6 +256,6 @@ export enum QuestionTextSortField {
   QUESTION_ID = 'question_id',
   QUESTION_TEXT = 'question_text',
   // Include the standard sort fields
-  CREATED_AT = SortField.CREATED_AT,
-  UPDATED_AT = SortField.UPDATED_AT
+  CREATED_AT = 'created_at',
+  UPDATED_AT = 'updated_at'
 } 

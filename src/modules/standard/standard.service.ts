@@ -1,11 +1,8 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
-import { ReorderStandardDto } from './dto/reorder-standard.dto';
-import { Standard } from '@prisma/client';
-import { Prisma } from '@prisma/client';
+import { Standard, Prisma } from '@prisma/client';
 
-import { toTitleCase } from '../../utils/titleCase';
 
 @Injectable()
 export class StandardService {

@@ -1,6 +1,6 @@
-import { Controller, Post, Delete, Body, Param, UseInterceptors, UploadedFile, ParseIntPipe, BadRequestException, Query, Logger, Get, Req, UploadedFiles } from '@nestjs/common';
+import { Controller, Post, Delete, Body, Param, UseInterceptors, ParseIntPipe, BadRequestException, Query, Logger, Get, Req, UploadedFiles } from '@nestjs/common';
 import { TestPaperHtmlService } from './test-paper-html.service';
-import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiQuery, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { TestPaperDto } from './dto/create-test-paper.dto';
 
@@ -195,145 +195,14 @@ export class TestPaperHtmlController {
     this.logger.debug('==== START REQUEST DEBUGGING ====');
     this.logger.debug(`Request Query: userId=${userId}, schoolId=${schoolId}`);
     
-    // Log raw body data with types
-    this.logger.debug('Raw Request Body Data Types:');
-    for (const key in request.body) {
-      this.logger.debug(`${key}: ${typeof request.body[key]}, Value: ${request.body[key]}`);
-    }
+    // Log initial request data
+    this.logRequestData(request, testPaperDto);
     
-    this.logger.debug(`Raw Body Object: ${JSON.stringify(testPaperDto)}`);
+    // Process and fix data
+    this.processRequestData(testPaperDto, request.body);
     
-    // Log chapters data as received
-    this.logger.debug('Chapters as received:');
-    if (request.body.chapters) {
-      this.logger.debug(`Type: ${typeof request.body.chapters}`);
-      this.logger.debug(`Raw value: ${request.body.chapters}`);
-    } else {
-      this.logger.debug('Not present in raw body');
-    }
-    
-    // Log weightages data as received
-    this.logger.debug('Weightages as received:');
-    if (request.body.weightages) {
-      this.logger.debug(`Type: ${typeof request.body.weightages}`);
-      this.logger.debug(`Raw value: ${request.body.weightages}`);
-    } else {
-      this.logger.debug('Not present in raw body');
-    }
-    
-    this.logger.debug('DTO chapters as received:');
-    if (testPaperDto.chapters) {
-      this.logger.debug(`Type: ${typeof testPaperDto.chapters}`);
-      this.logger.debug(`Is Array: ${Array.isArray(testPaperDto.chapters)}`);
-      this.logger.debug(`Value: ${JSON.stringify(testPaperDto.chapters)}`);
-    } else {
-      this.logger.debug('Not present in DTO');
-    }
-    
-    this.logger.debug('DTO weightages as received:');
-    if (testPaperDto.weightages) {
-      this.logger.debug(`Type: ${typeof testPaperDto.weightages}`);
-      this.logger.debug(`Is Array: ${Array.isArray(testPaperDto.weightages)}`);
-      this.logger.debug(`Value: ${JSON.stringify(testPaperDto.weightages)}`);
-    } else {
-      this.logger.debug('Not present in DTO');
-    }
-    
-    // Log instruction mediums data as received
-    this.logger.debug('Instruction Mediums as received:');
-    if (request.body.instruction_mediums) {
-      this.logger.debug(`Type: ${typeof request.body.instruction_mediums}`);
-      this.logger.debug(`Raw value: ${request.body.instruction_mediums}`);
-    } else {
-      this.logger.debug('Not present in raw body');
-    }
-    
-    this.logger.debug('DTO instruction_mediums as received:');
-    if (testPaperDto.instruction_mediums) {
-      this.logger.debug(`Type: ${typeof testPaperDto.instruction_mediums}`);
-      this.logger.debug(`Is Array: ${Array.isArray(testPaperDto.instruction_mediums)}`);
-      this.logger.debug(`Value: ${JSON.stringify(testPaperDto.instruction_mediums)}`);
-    } else {
-      this.logger.debug('Not present in DTO');
-    }
-    
-    // Fix instruction_mediums
-    if (request.body.instruction_mediums && typeof request.body.instruction_mediums === 'string') {
-      try {
-        // Try to manually parse the raw string
-        this.logger.debug('Attempting to manually parse instruction_mediums from raw string');
-        const manuallyParsed = JSON.parse(request.body.instruction_mediums);
-        this.logger.debug(`Manually parsed: ${JSON.stringify(manuallyParsed)}`);
-        
-        if (Array.isArray(manuallyParsed) && manuallyParsed.length > 0) {
-          testPaperDto.instruction_mediums = manuallyParsed;
-          this.logger.debug('Successfully replaced instruction_mediums with manually parsed value');
-        }
-      } catch (error) {
-        this.logger.debug(`Error manually parsing instruction_mediums: ${error.message}`);
-      }
-    }
-    
-    // Fix chapters
-    if (request.body.chapters && typeof request.body.chapters === 'string') {
-      try {
-        // Try to manually parse the raw string
-        this.logger.debug('Attempting to manually parse chapters from raw string');
-        const manuallyParsed = JSON.parse(request.body.chapters);
-        this.logger.debug(`Manually parsed: ${JSON.stringify(manuallyParsed)}`);
-        
-        if (Array.isArray(manuallyParsed) && manuallyParsed.length > 0) {
-          testPaperDto.chapters = manuallyParsed;
-          this.logger.debug('Successfully replaced chapters with manually parsed value');
-        }
-      } catch (error) {
-        this.logger.debug(`Error manually parsing chapters: ${error.message}`);
-      }
-    }
-    
-    // Fallback fixes if the arrays are still not valid
-    if (!testPaperDto.instruction_mediums || !Array.isArray(testPaperDto.instruction_mediums) || testPaperDto.instruction_mediums.length === 0) {
-      this.logger.debug('Using fallback for instruction_mediums');
-      testPaperDto.instruction_mediums = [5]; // Using ID 5 as a fallback
-    }
-    
-    if (!testPaperDto.chapters || !Array.isArray(testPaperDto.chapters) || testPaperDto.chapters.length === 0) {
-      this.logger.debug('Using fallback for chapters');
-      testPaperDto.chapters = [1, 2];
-    }
-    
-    if (!testPaperDto.weightages || !Array.isArray(testPaperDto.weightages) || testPaperDto.weightages.length === 0) {
-      this.logger.debug('Using fallback for weightages');
-      testPaperDto.weightages = [50, 50];
-    }
-    
-    this.logger.debug('Final processed values:');
-    this.logger.debug(`instruction_mediums: ${JSON.stringify(testPaperDto.instruction_mediums)}`);
-    this.logger.debug(`chapters: ${JSON.stringify(testPaperDto.chapters)}`);
-    
-    // Log files details
-    this.logger.debug(`Received ${files ? files.length : 0} files`);
-    if (files && files.length > 0) {
-      files.forEach((file, index) => {
-        this.logger.debug(`File ${index}: ${file.originalname}, ${file.mimetype}, ${file.size} bytes`);
-      });
-    } else {
-      this.logger.debug('No files provided');
-    }
-    
-    // Validate that files are provided
-    if (!files || files.length === 0) {
-      this.logger.debug('No files provided - throwing BadRequestException');
-      throw new BadRequestException('At least one PDF file is required');
-    }
-    
-    // Validate that the number of files matches the number of instruction mediums
-    if (files.length !== testPaperDto.instruction_mediums.length) {
-      this.logger.debug(`Mismatch: ${files.length} files vs ${testPaperDto.instruction_mediums.length} instruction mediums`);
-      throw new BadRequestException(
-        `Number of files (${files.length}) does not match number of instruction mediums (${testPaperDto.instruction_mediums.length})`
-      );
-    }
+    // Validate files
+    this.validateFiles(files, testPaperDto);
 
     try {
       this.logger.debug('Calling service.createTestPaperWithContent');
@@ -350,6 +219,157 @@ export class TestPaperHtmlController {
       this.logger.error(`Error creating test paper: ${error.message}`, error.stack);
       this.logger.debug('==== END REQUEST DEBUGGING (WITH ERROR) ====');
       throw error;
+    }
+  }
+
+  /**
+   * Log detailed request data for debugging purposes
+   */
+  private logRequestData(request: any, testPaperDto: TestPaperDto): void {
+    // Log raw body data with types
+    this.logger.debug('Raw Request Body Data Types:');
+    for (const key in request.body) {
+      this.logger.debug(`${key}: ${typeof request.body[key]}, Value: ${request.body[key]}`);
+    }
+    
+    this.logger.debug(`Raw Body Object: ${JSON.stringify(testPaperDto)}`);
+    
+    // Log chapters data
+    this.logFieldData('Chapters', request.body.chapters, testPaperDto.chapters);
+    
+    // Log weightages data
+    this.logFieldData('Weightages', request.body.weightages, testPaperDto.weightages);
+    
+    // Log instruction mediums data
+    this.logFieldData('Instruction Mediums', request.body.instruction_mediums, testPaperDto.instruction_mediums);
+  }
+
+  /**
+   * Log detailed information about a specific field from both raw body and DTO
+   */
+  private logFieldData(fieldName: string, rawValue: any, dtoValue: any): void {
+    // Log raw data
+    this.logger.debug(`${fieldName} as received:`);
+    if (rawValue) {
+      this.logger.debug(`Type: ${typeof rawValue}`);
+      this.logger.debug(`Raw value: ${rawValue}`);
+    } else {
+      this.logger.debug('Not present in raw body');
+    }
+    
+    // Log DTO data
+    this.logger.debug(`DTO ${fieldName.toLowerCase()} as received:`);
+    if (dtoValue) {
+      this.logger.debug(`Type: ${typeof dtoValue}`);
+      this.logger.debug(`Is Array: ${Array.isArray(dtoValue)}`);
+      this.logger.debug(`Value: ${JSON.stringify(dtoValue)}`);
+    } else {
+      this.logger.debug('Not present in DTO');
+    }
+  }
+
+  /**
+   * Process and fix request data, handling string-to-array conversions and fallbacks
+   */
+  private processRequestData(testPaperDto: TestPaperDto, rawBody: any): void {
+    // Fix instruction mediums
+    this.tryParseArrayField(testPaperDto, rawBody, 'instruction_mediums');
+    
+    // Fix chapters
+    this.tryParseArrayField(testPaperDto, rawBody, 'chapters');
+    
+    // Set fallbacks if needed
+    this.setFallbackValues(testPaperDto);
+    
+    // Log final values
+    this.logger.debug('Final processed values:');
+    this.logger.debug(`instruction_mediums: ${JSON.stringify(testPaperDto.instruction_mediums)}`);
+    this.logger.debug(`chapters: ${JSON.stringify(testPaperDto.chapters)}`);
+  }
+
+  /**
+   * Try to parse a string field into an array and update the DTO
+   */
+  private tryParseArrayField(testPaperDto: TestPaperDto, rawBody: any, fieldName: string): void {
+    if (rawBody[fieldName] && typeof rawBody[fieldName] === 'string') {
+      try {
+        this.logger.debug(`Attempting to manually parse ${fieldName} from raw string`);
+        const manuallyParsed = JSON.parse(rawBody[fieldName]);
+        this.logger.debug(`Manually parsed: ${JSON.stringify(manuallyParsed)}`);
+        
+        if (Array.isArray(manuallyParsed) && manuallyParsed.length > 0) {
+          testPaperDto[fieldName] = manuallyParsed;
+          this.logger.debug(`Successfully replaced ${fieldName} with manually parsed value`);
+        }
+      } catch (error) {
+        this.logger.debug(`Error manually parsing ${fieldName}: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Set fallback values for missing or invalid arrays
+   */
+  private setFallbackValues(testPaperDto: TestPaperDto): void {
+    // Fallback for instruction_mediums
+    if (!this.isValidArray(testPaperDto.instruction_mediums)) {
+      this.logger.debug('Using fallback for instruction_mediums');
+      testPaperDto.instruction_mediums = [5]; // Using ID 5 as a fallback
+    }
+    
+    // Fallback for chapters
+    if (!this.isValidArray(testPaperDto.chapters)) {
+      this.logger.debug('Using fallback for chapters');
+      testPaperDto.chapters = [1, 2];
+    }
+    
+    // Fallback for weightages
+    if (!this.isValidArray(testPaperDto.weightages)) {
+      this.logger.debug('Using fallback for weightages');
+      testPaperDto.weightages = [50, 50];
+    }
+  }
+
+  /**
+   * Check if a value is a valid non-empty array
+   */
+  private isValidArray(value: any): boolean {
+    return value && Array.isArray(value) && value.length > 0;
+  }
+
+  /**
+   * Validate uploaded files against requirements
+   */
+  private validateFiles(files: Array<Express.Multer.File>, testPaperDto: TestPaperDto): void {
+    // Log files details
+    this.logFilesInfo(files);
+    
+    // Validate that files are provided
+    if (!files || files.length === 0) {
+      this.logger.debug('No files provided - throwing BadRequestException');
+      throw new BadRequestException('At least one PDF file is required');
+    }
+    
+    // Validate that the number of files matches the number of instruction mediums
+    if (files.length !== testPaperDto.instruction_mediums.length) {
+      this.logger.debug(`Mismatch: ${files.length} files vs ${testPaperDto.instruction_mediums.length} instruction mediums`);
+      throw new BadRequestException(
+        `Number of files (${files.length}) does not match number of instruction mediums (${testPaperDto.instruction_mediums.length})`
+      );
+    }
+  }
+
+  /**
+   * Log information about uploaded files
+   */
+  private logFilesInfo(files: Array<Express.Multer.File>): void {
+    this.logger.debug(`Received ${files ? files.length : 0} files`);
+    if (files && files.length > 0) {
+      files.forEach((file, index) => {
+        this.logger.debug(`File ${index}: ${file.originalname}, ${file.mimetype}, ${file.size} bytes`);
+      });
+    } else {
+      this.logger.debug('No files provided');
     }
   }
 

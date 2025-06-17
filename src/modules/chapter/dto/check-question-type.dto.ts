@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsInt, IsNotEmpty, IsNumber } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsArray, IsNotEmpty, IsNumber } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CheckQuestionTypeDto {
   @ApiProperty({ 

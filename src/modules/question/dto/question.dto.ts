@@ -1,8 +1,7 @@
 import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsEnum, IsString, ValidateNested, Min, Max } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { SortField, SortOrder } from '../../../common/dto/pagination.dto';
-import { Transform } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+import { SortOrder } from '../../../common/dto/pagination.dto';
 
 // Update the enum for question-specific sort fields
 export enum QuestionSortField {

@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateSchoolDto, UpdateSchoolDto } from './dto/school.dto';
+import { CreateSchoolDto, UpdateSchoolDto, UpsertSchoolDto } from './dto/school.dto';
 import { Prisma } from '@prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
@@ -490,6 +490,177 @@ export class SchoolService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete school');
+    }
+  }
+
+  async upsertSchool(upsertDto: UpsertSchoolDto) {
+    try {
+      return await this.prisma.$transaction(async (prisma) => {
+        let addressId: number;
+        let schoolId: number | undefined = upsertDto.id;
+
+        // Check if board exists
+        const board = await prisma.board.findUnique({
+          where: { id: upsertDto.board_id }
+        });
+
+        if (!board) {
+          throw new NotFoundException(`Board with ID ${upsertDto.board_id} not found`);
+        }
+
+        // Handle address creation/update
+        if (schoolId) {
+          // Update operation - get existing school to find address
+          const existingSchool = await prisma.school.findUnique({
+            where: { id: schoolId },
+            include: { address: true }
+          });
+
+          if (!existingSchool) {
+            throw new NotFoundException(`School with ID ${schoolId} not found`);
+          }
+
+          // Update the existing address
+          const updatedAddress = await prisma.address.update({
+            where: { id: existingSchool.address_id },
+            data: {
+              street: upsertDto.address.street,
+              postal_code: upsertDto.address.postal_code,
+              city_id: upsertDto.address.city_id,
+            }
+          });
+          addressId = updatedAddress.id;
+        } else {
+          // Create operation - create new address
+          const newAddress = await prisma.address.create({
+            data: {
+              street: upsertDto.address.street,
+              postal_code: upsertDto.address.postal_code,
+              city_id: upsertDto.address.city_id,
+            }
+          });
+          addressId = newAddress.id;
+        }
+
+        // Handle school creation/update
+        let school;
+        if (schoolId) {
+          // Update existing school
+          school = await prisma.school.update({
+            where: { id: schoolId },
+            data: {
+              name: toTitleCase(upsertDto.name),
+              board_id: upsertDto.board_id,
+              principal_name: toTitleCase(upsertDto.principal_name),
+              email: upsertDto.email,
+              contact_number: upsertDto.contact_number,
+              alternate_contact_number: upsertDto.alternate_contact_number,
+            }
+          });
+        } else {
+          // Create new school
+          school = await prisma.school.create({
+            data: {
+              name: toTitleCase(upsertDto.name),
+              board_id: upsertDto.board_id,
+              address_id: addressId,
+              principal_name: toTitleCase(upsertDto.principal_name),
+              email: upsertDto.email,
+              contact_number: upsertDto.contact_number,
+              alternate_contact_number: upsertDto.alternate_contact_number,
+            }
+          });
+          schoolId = school.id;
+        }
+
+        // Handle instruction medium mappings
+        // Delete existing mappings
+        await prisma.school_Instruction_Medium.deleteMany({
+          where: { school_id: schoolId }
+        });
+
+        // Create new mappings
+        const instructionMediumMappings = upsertDto.instruction_medium_ids.map(mediumId => ({
+          school_id: schoolId!,
+          instruction_medium_id: mediumId,
+        }));
+
+        await prisma.school_Instruction_Medium.createMany({
+          data: instructionMediumMappings
+        });
+
+        // Handle standard mappings
+        // Delete existing mappings
+        await prisma.school_Standard.deleteMany({
+          where: { school_id: schoolId }
+        });
+
+        // Create new mappings
+        const standardMappings = upsertDto.standard_ids.map(standardId => ({
+          school_id: schoolId!,
+          standard_id: standardId,
+        }));
+
+        await prisma.school_Standard.createMany({
+          data: standardMappings
+        });
+
+        // Return the complete school data
+        return await prisma.school.findUnique({
+          where: { id: schoolId },
+          include: {
+            address: {
+              include: {
+                city: {
+                  include: {
+                    state: {
+                      include: {
+                        country: true
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            board: true,
+            school_instruction_mediums: {
+              orderBy: {
+                instruction_medium: {
+                  instruction_medium: 'asc'
+                }
+              },
+              include: {
+                instruction_medium: true
+              }
+            },
+            school_standards: {
+              orderBy: {
+                standard: {
+                  sequence_number: 'asc'
+                }
+              },
+              include: {
+                standard: true
+              }
+            }
+          }
+        });
+      });
+    } catch (error) {
+      this.logger.error('Failed to upsert school:', error);
+      if (error instanceof NotFoundException || 
+          error instanceof ConflictException) {
+        throw error;
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('School with this name already exists');
+        }
+        if (error.code === 'P2003') {
+          throw new NotFoundException('Referenced entity not found (board, city, instruction medium, or standard)');
+        }
+      }
+      throw new InternalServerErrorException('Failed to upsert school');
     }
   }
 }

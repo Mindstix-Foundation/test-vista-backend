@@ -7,7 +7,6 @@ import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
 describe('BoardService', () => {
   let service: BoardService;
-  let prisma: PrismaService;
 
   const mockPrismaService = {
     board: {
@@ -48,7 +47,6 @@ describe('BoardService', () => {
     }).compile();
 
     service = module.get<BoardService>(BoardService);
-    prisma = module.get<PrismaService>(PrismaService);
     jest.clearAllMocks();
   });
 

@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AwsS3Service } from '../aws/aws-s3.service';
-import { TestPaperDto, ChapterWeightageDto, InstructionMediumPdfDto } from './dto/create-test-paper.dto';
+import { TestPaperDto } from './dto/create-test-paper.dto';
 
 @Injectable()
 export class TestPaperHtmlService {
@@ -590,7 +590,7 @@ export class TestPaperHtmlService {
         content_url: uploadResult.url,
         file_size: uploadResult.metadata.fileSize,
         is_pdf: true,
-        is_default_medium: isDefaultMedium !== undefined ? isDefaultMedium : htmlFilesCount === 0, // Mark as default if specified or if it's the first one
+        is_default_medium: isDefaultMedium ?? htmlFilesCount === 0, // Mark as default if specified or if it's the first one
       },
     });
   }
@@ -603,13 +603,15 @@ export class TestPaperHtmlService {
     let minutes = 0;
     
     // Extract hours
-    const hoursMatch = examTimeStr.match(/(\d+)\s*hour/i);
+    const hoursRegex = /(\d+)\s*hour/i;
+    const hoursMatch = hoursRegex.exec(examTimeStr);
     if (hoursMatch) {
       hours = parseInt(hoursMatch[1], 10);
     }
     
     // Extract minutes
-    const minutesMatch = examTimeStr.match(/(\d+)\s*minute/i);
+    const minutesRegex = /(\d+)\s*minute/i;
+    const minutesMatch = minutesRegex.exec(examTimeStr);
     if (minutesMatch) {
       minutes = parseInt(minutesMatch[1], 10);
     }
@@ -628,93 +630,146 @@ export class TestPaperHtmlService {
 
   async getFilteredTestPapers(userId?: number, schoolId?: number) {
     try {
-      // Build the filter object based on provided parameters
-      const filterConditions: any = {};
-      
-      if (userId !== undefined) {
-        filterConditions.user_id = userId;
-      }
-      
-      if (schoolId !== undefined) {
-        filterConditions.school_id = schoolId;
-      }
+      // Build the filter conditions
+      const filterConditions = this.buildFilterConditions(userId, schoolId);
 
-      // Execute query with constructed filter
-      const testPapers = await this.prisma.test_Paper.findMany({
-        where: filterConditions,
-        include: {
-          html_files: {
-            include: {
-              instruction_medium: true
-            }
-          },
-          test_paper_chapters: {
-            include: {
-              chapter: true
-            }
-          },
-          pattern: true,
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email_id: true
-            }
-          },
-          school: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
-        },
-        orderBy: {
-          created_at: 'desc' // Most recent first
-        }
-      });
-
+      // Fetch test papers with the constructed filter
+      const testPapers = await this.fetchTestPapers(filterConditions);
+      
+      // Handle case when no test papers are found
       if (testPapers.length === 0) {
-        // Construct appropriate error message based on the filters applied
-        let filterDesc = [];
-        if (userId !== undefined) filterDesc.push(`user ID ${userId}`);
-        if (schoolId !== undefined) filterDesc.push(`school ID ${schoolId}`);
-        
-        const errorMsg = filterDesc.length > 0 
-          ? `No test papers found for ${filterDesc.join(' and ')}`
-          : 'No test papers found';
-        
+        const errorMsg = this.createNotFoundErrorMessage(userId, schoolId);
         throw new NotFoundException(errorMsg);
       }
       
-      // Generate presigned URLs for HTML files
-      if (testPapers.length > 0) {
-        for (const testPaper of testPapers) {
-          if (testPaper.html_files && testPaper.html_files.length > 0) {
-            for (const htmlFile of testPaper.html_files) {
-              try {
-                if (!htmlFile.content_url) {
-                  this.logger.warn(`HTML file ${htmlFile.id} has no content_url`);
-                  continue;
-                }
-                
-                // Generate a presigned URL that expires in 1 hour (3600 seconds)
-                const presignedUrl = await this.awsS3Service.generatePresignedUrl(htmlFile.content_url, 3600);
-                
-                // Add the presigned URL to the file object
-                htmlFile['presigned_url'] = presignedUrl;
-              } catch (error) {
-                this.logger.error(`Error generating presigned URL for file ${htmlFile.id}: ${error.message}`);
-                // Continue with other files even if this one fails
-              }
-            }
-          }
-        }
-      }
+      // Add presigned URLs to test paper files
+      await this.addPresignedUrlsToTestPapers(testPapers);
 
       return testPapers;
     } catch (error) {
       this.logger.error(`Error fetching filtered test papers: ${error.message}`, error.stack);
       throw error;
+    }
+  }
+
+  /**
+   * Builds filter conditions based on provided parameters
+   */
+  private buildFilterConditions(userId?: number, schoolId?: number): any {
+    const filterConditions: any = {};
+    
+    if (userId !== undefined) {
+      filterConditions.user_id = userId;
+    }
+    
+    if (schoolId !== undefined) {
+      filterConditions.school_id = schoolId;
+    }
+    
+    return filterConditions;
+  }
+
+  /**
+   * Fetches test papers based on filter conditions
+   */
+  private async fetchTestPapers(filterConditions: any) {
+    return this.prisma.test_Paper.findMany({
+      where: filterConditions,
+      include: {
+        html_files: {
+          include: {
+            instruction_medium: true
+          }
+        },
+        test_paper_chapters: {
+          include: {
+            chapter: true
+          }
+        },
+        pattern: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email_id: true
+          }
+        },
+        school: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      },
+      orderBy: {
+        created_at: 'desc' // Most recent first
+      }
+    });
+  }
+
+  /**
+   * Creates an appropriate error message when no test papers are found
+   */
+  private createNotFoundErrorMessage(userId?: number, schoolId?: number): string {
+    const filterDesc: string[] = [];
+    
+    if (userId !== undefined) {
+      filterDesc.push(`user ID ${userId}`);
+    }
+    
+    if (schoolId !== undefined) {
+      filterDesc.push(`school ID ${schoolId}`);
+    }
+    
+    return filterDesc.length > 0 
+      ? `No test papers found for ${filterDesc.join(' and ')}`
+      : 'No test papers found';
+  }
+
+  /**
+   * Adds presigned URLs to test paper HTML files
+   */
+  private async addPresignedUrlsToTestPapers(testPapers: any[]): Promise<void> {
+    if (testPapers.length === 0) {
+      return;
+    }
+    
+    for (const testPaper of testPapers) {
+      await this.addPresignedUrlsToTestPaper(testPaper);
+    }
+  }
+
+  /**
+   * Adds presigned URLs to a single test paper's HTML files
+   */
+  private async addPresignedUrlsToTestPaper(testPaper: any): Promise<void> {
+    if (!testPaper.html_files || testPaper.html_files.length === 0) {
+      return;
+    }
+    
+    for (const htmlFile of testPaper.html_files) {
+      await this.addPresignedUrlToHtmlFile(htmlFile);
+    }
+  }
+
+  /**
+   * Adds a presigned URL to a single HTML file
+   */
+  private async addPresignedUrlToHtmlFile(htmlFile: any): Promise<void> {
+    if (!htmlFile.content_url) {
+      this.logger.warn(`HTML file ${htmlFile.id} has no content_url`);
+      return;
+    }
+    
+    try {
+      // Generate a presigned URL that expires in 1 hour (3600 seconds)
+      const presignedUrl = await this.awsS3Service.generatePresignedUrl(htmlFile.content_url, 3600);
+      
+      // Add the presigned URL to the file object
+      htmlFile['presigned_url'] = presignedUrl;
+    } catch (error) {
+      this.logger.error(`Error generating presigned URL for file ${htmlFile.id}: ${error.message}`);
+      // Continue with other files even if this one fails
     }
   }
 } 
