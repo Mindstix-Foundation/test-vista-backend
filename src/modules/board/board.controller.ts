@@ -9,12 +9,12 @@ import { PaginationDto, SortField, SortOrder } from '../../common/dto/pagination
 
 @ApiTags('boards')
 @Controller('boards')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
 export class BoardController {
   constructor(private readonly boardService: BoardService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new board' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Board created successfully' })
@@ -25,7 +25,6 @@ export class BoardController {
   }
 
   @Get()
-  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all boards with optional pagination, sorting and search' })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (starts from 1). If not provided, returns all boards.' })
   @ApiQuery({ name: 'page_size', required: false, type: Number, description: 'Number of items per page' })
@@ -46,6 +45,8 @@ export class BoardController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
     summary: 'Get a board by id',
@@ -61,6 +62,8 @@ export class BoardController {
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Update a board' })
   update(@Param('id', ParseIntPipe) id: number, @Body() updateBoardDto: UpdateBoardDto) {
@@ -68,6 +71,8 @@ export class BoardController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Delete a board' })
   remove(@Param('id', ParseIntPipe) id: number) {

@@ -27,12 +27,12 @@ class OptionalParseIntPipe implements PipeTransform<string | undefined, number |
 
 @ApiTags('school-standards')
 @Controller('school-standards')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
 export class SchoolStandardController {
   constructor(private readonly service: SchoolStandardService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Create a new school standard mapping' })
   @ApiResponse({ status: HttpStatus.CREATED, description: 'Successfully created', type: SchoolStandardDto })
@@ -43,6 +43,8 @@ export class SchoolStandardController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get all school standard mappings' })
   @ApiQuery({ name: 'standardId', required: false, type: Number })
@@ -56,7 +58,6 @@ export class SchoolStandardController {
   }
 
   @Get('school/:schoolId')
-  @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get standards for a specific school' })
   @ApiQuery({ name: 'hasSyllabus', required: false, type: Boolean })
   @ApiResponse({ status: HttpStatus.OK, description: 'List of standards for the school', type: [SchoolStandardSimplifiedDto] })
@@ -69,6 +70,8 @@ export class SchoolStandardController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
   @Roles('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a school standard mapping' })

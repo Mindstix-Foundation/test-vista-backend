@@ -459,6 +459,40 @@ export class AuthService {
                 }
               }
             }
+          },
+          student: {
+            select: {
+              id: true,
+              student_id: true,
+              date_of_birth: true,
+              enrollment_date: true,
+              status: true,
+              school_standard: {
+                select: {
+                  id: true,
+                  school: {
+                    select: {
+                      id: true,
+                      name: true,
+                      board: {
+                        select: {
+                          id: true,
+                          name: true,
+                          abbreviation: true
+                        }
+                      }
+                    }
+                  },
+                  standard: {
+                    select: {
+                      id: true,
+                      name: true,
+                      sequence_number: true
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       });
@@ -467,6 +501,32 @@ export class AuthService {
         throw new NotFoundException(`User with ID ${userId} not found`);
       }
 
+      // Get user roles
+      const roles = user.user_roles.map(ur => ur.role.role_name);
+      
+      // Check if user is a student
+      const isStudent = roles.includes('STUDENT');
+      
+      if (isStudent && user.student) {
+        // Return student-specific profile
+        return {
+          id: user.id,
+          name: user.name,
+          email_id: user.email_id,
+          contact_number: user.contact_number,
+          alternate_contact_number: user.alternate_contact_number,
+          student_id: user.student.student_id,
+          date_of_birth: user.student.date_of_birth,
+          school_name: user.student.school_standard.school.name,
+          standard: user.student.school_standard.standard.name,
+          roles: user.user_roles.map(ur => ({
+            id: ur.role.id,
+            name: ur.role.role_name
+          }))
+        };
+      }
+
+      // For admin and teacher roles, return the existing detailed profile
       // Transform the data to a more consumable format
       // Sort teaching subjects first by standard sequence number, then alphabetically by subject name
       const sortedTeachingSubjects = [...user.teacher_subjects]
