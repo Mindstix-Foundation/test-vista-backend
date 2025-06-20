@@ -516,6 +516,7 @@ export class AuthService {
           contact_number: user.contact_number,
           alternate_contact_number: user.alternate_contact_number,
           student_id: user.student.student_id,
+          date_of_birth: user.student.date_of_birth,
           school_name: user.student.school_standard.school.name,
           standard: user.student.school_standard.standard.name,
           roles: user.user_roles.map(ur => ({
