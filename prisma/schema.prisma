@@ -235,6 +235,9 @@ model Teacher_Subject {
   created_at         DateTime        @default(now()) @db.Timestamptz()
   updated_at         DateTime        @updatedAt @db.Timestamptz()
 
+  // Relations for student enrollment system
+  student_enrollments  Student_Subject_Enrollment[]
+
   @@unique([user_id, school_standard_id, subject_id])
 }
 
@@ -524,8 +527,29 @@ model Student {
   student_results       Student_Result[]
   student_analytics     Student_Analytics?
   student_notifications Student_Notification[]
+  subject_enrollments   Student_Subject_Enrollment[]
 
   @@unique([student_id, school_standard_id])
+}
+
+// Student subject enrollment (handles both requests and approved enrollments)
+model Student_Subject_Enrollment {
+  id                    Int             @id @default(autoincrement())
+  student               Student         @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  student_id            Int
+  teacher_subject       Teacher_Subject @relation(fields: [teacher_subject_id], references: [id], onDelete: Cascade)
+  teacher_subject_id    Int
+  status                String          @default("pending") @db.VarChar // pending, approved, rejected, active, inactive, completed
+  request_message       String?         @db.Text // Optional message from student when requesting
+  teacher_response      String?         @db.Text // Optional response from teacher
+  academic_year         String          @db.VarChar // 2024-2025 format
+  requested_at          DateTime        @default(now()) @db.Timestamptz()
+  responded_at          DateTime?       @db.Timestamptz() // When teacher responded to request
+  enrollment_date       DateTime?       @db.Date // When approved and enrolled
+  created_at            DateTime        @default(now()) @db.Timestamptz()
+  updated_at            DateTime        @updatedAt @db.Timestamptz()
+
+  @@unique([student_id, teacher_subject_id])
 }
 
 // Test assignments for students

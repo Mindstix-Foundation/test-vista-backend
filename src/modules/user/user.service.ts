@@ -487,7 +487,48 @@ export class UserService {
 
   async findByEmail(email: string) {
     const user = await this.prisma.user.findUnique({
-      where: { email_id: email }
+      where: { email_id: email },
+      include: {
+        user_roles: {
+          include: {
+            role: true
+          }
+        },
+        user_schools: {
+          include: {
+            school: {
+              include: {
+                board: true
+              }
+            }
+          }
+        },
+        teacher_subjects: {
+          include: {
+            school_standard: {
+              include: {
+                school: true,
+                standard: true
+              }
+            },
+            subject: true
+          }
+        },
+        student: {
+          include: {
+            school_standard: {
+              include: {
+                school: {
+                  include: {
+                    board: true
+                  }
+                },
+                standard: true
+              }
+            }
+          }
+        }
+      }
     });
 
     if (!user) {
