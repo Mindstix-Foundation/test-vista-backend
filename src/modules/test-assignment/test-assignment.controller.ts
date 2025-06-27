@@ -30,7 +30,8 @@ import {
   GetTestAssignmentsQueryDto,
   RemoveTestAssignmentDto,
   BulkRemoveTestAssignmentDto,
-  TestAssignmentResponseDto
+  TestAssignmentResponseDto,
+  StudentAssignedTestDto
 } from './dto/test-assignment.dto';
 
 @ApiTags('test-assignments')
@@ -240,6 +241,39 @@ export class TestAssignmentController {
     @Request() req: any
   ) {
     return await this.testAssignmentService.getTeacherTestAssignments(req.user.id, query);
+  }
+
+  @Get('student/my-tests')
+  @Roles('STUDENT')
+  @ApiOperation({ 
+    summary: 'Get student\'s assigned tests',
+    description: 'Student can see their own assigned tests with status filtering'
+  })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by test status (upcoming, active, completed, absent)' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Student\'s assigned tests',
+    type: [StudentAssignedTestDto]
+  })
+  @ApiResponse({ 
+    status: HttpStatus.UNAUTHORIZED, 
+    description: 'Unauthorized - Student authentication required'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.FORBIDDEN, 
+    description: 'Forbidden - Student role required'
+  })
+  async getStudentAssignedTests(
+    @Request() req: any,
+    @Query('status') status?: string
+  ) {
+    try {
+      const userId = req.user.id;
+      return await this.testAssignmentService.getStudentAssignedTests(userId, status);
+    } catch (error) {
+      console.error('Error in getStudentAssignedTests:', error);
+      throw error;
+    }
   }
 
   @Get(':id')

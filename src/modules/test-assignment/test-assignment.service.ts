@@ -6,7 +6,8 @@ import {
   GetTestAssignmentsQueryDto,
   RemoveTestAssignmentDto,
   BulkRemoveTestAssignmentDto,
-  TestAssignmentResponseDto
+  TestAssignmentResponseDto,
+  StudentAssignedTestDto
 } from './dto/test-assignment.dto';
 
 @Injectable()
@@ -485,6 +486,154 @@ export class TestAssignmentService {
       return assignments;
     } catch (error) {
       throw new BadRequestException('Failed to fetch teacher test assignments');
+    }
+  }
+
+  async getStudentAssignedTests(userId: number, statusFilter?: string): Promise<StudentAssignedTestDto[]> {
+    try {
+      // First, get the student record from the user ID
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId },
+        select: { id: true }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student profile not found');
+      }
+
+      // Get all test assignments for this student
+      const assignments = await this.prisma.test_Assignment.findMany({
+        where: {
+          student_id: student.id
+        },
+        include: {
+          test_paper: {
+            include: {
+              pattern: {
+                include: {
+                  subject: true,
+                  standard: true
+                }
+              },
+              test_paper_questions: {
+                select: {
+                  id: true
+                }
+              }
+            }
+          },
+          assigned_by: {
+            select: {
+              name: true
+            }
+          },
+          test_attempts: {
+            select: {
+              id: true,
+              status: true,
+              started_at: true,
+              submitted_at: true,
+              student_answers: {
+                select: {
+                  id: true,
+                  selected_option_id: true
+                }
+              }
+            },
+            orderBy: {
+              started_at: 'desc'
+            }
+          }
+        },
+        orderBy: {
+          assigned_date: 'desc'
+        }
+      });
+
+      const now = new Date();
+      
+      // Transform assignments to the required format
+      const transformedAssignments = assignments.map(assignment => {
+        const availableFrom = new Date(assignment.available_from);
+        const dueDate = new Date(assignment.due_date);
+        
+        // Determine status based on the logic provided
+        let status: string;
+        const hasCompletedAttempts = assignment.test_attempts.some(attempt => attempt.status === 'completed');
+        
+        if (hasCompletedAttempts) {
+          status = 'completed';
+        } else if (availableFrom > now) {
+          status = 'upcoming';
+        } else if (availableFrom <= now && now <= dueDate) {
+          status = 'active';
+        } else { // due_date < now
+          status = 'absent';
+        }
+
+        // Calculate progress based on current attempt
+        let progress = 0;
+        let remainingTime = '';
+        
+        const currentAttempt = assignment.test_attempts.find(attempt => attempt.status === 'in_progress');
+        const totalQuestions = assignment.test_paper.test_paper_questions.length;
+        
+        if (currentAttempt && totalQuestions > 0) {
+          const answeredQuestions = currentAttempt.student_answers.filter(answer => answer.selected_option_id !== null).length;
+          progress = Math.round((answeredQuestions / totalQuestions) * 100);
+          
+          // Calculate remaining time
+          const testDurationMs = (assignment.time_limit_minutes || assignment.test_paper.duration_minutes || 0) * 60 * 1000;
+          const elapsedMs = now.getTime() - new Date(currentAttempt.started_at).getTime();
+          const remainingMs = Math.max(0, testDurationMs - elapsedMs);
+          
+          if (remainingMs > 0) {
+            const remainingMinutes = Math.floor(remainingMs / (1000 * 60));
+            const remainingSeconds = Math.floor((remainingMs % (1000 * 60)) / 1000);
+            remainingTime = `${remainingMinutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+          } else {
+            remainingTime = '0:00';
+          }
+        }
+
+        return {
+          id: assignment.id,
+          title: assignment.test_paper.name,
+          status,
+          dueDate: dueDate.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+          }),
+          availableDate: availableFrom.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          }),
+          duration: assignment.time_limit_minutes || assignment.test_paper.duration_minutes || 0,
+          questions: totalQuestions,
+          maxScore: assignment.test_paper.pattern.total_marks,
+          progress,
+          remainingTime,
+          subject: assignment.test_paper.pattern.subject.name,
+          standard: assignment.test_paper.pattern.standard.name,
+          assignedBy: assignment.assigned_by.name
+        };
+      });
+
+      // Filter by status if provided
+      if (statusFilter) {
+        return transformedAssignments.filter(assignment => assignment.status === statusFilter);
+      }
+
+      return transformedAssignments;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to fetch student assigned tests');
     }
   }
 } 

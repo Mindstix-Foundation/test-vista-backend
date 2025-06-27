@@ -271,7 +271,6 @@ export class StudentDetailDto {
   @ApiPropertyOptional()
   analytics?: {
     total_tests_taken: number;
-    total_practice_tests: number;
     average_score?: number;
     best_score?: number;
     worst_score?: number;

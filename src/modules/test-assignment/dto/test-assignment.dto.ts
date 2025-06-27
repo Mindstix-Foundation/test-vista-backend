@@ -186,4 +186,45 @@ export class BulkRemoveTestAssignmentDto {
   @IsNumber()
   @IsNotEmpty()
   test_paper_id: number;
+}
+
+export class StudentAssignedTestDto {
+  @ApiProperty({ example: 1 })
+  id: number;
+
+  @ApiProperty({ example: 'Mathematics Test' })
+  title: string;
+
+  @ApiProperty({ example: 'active', enum: ['upcoming', 'active', 'completed', 'absent'] })
+  status: string;
+
+  @ApiProperty({ example: 'Dec 25, 2024' })
+  dueDate: string;
+
+  @ApiProperty({ example: 'Dec 20, 2024 at 9:00 AM' })
+  availableDate: string;
+
+  @ApiProperty({ example: 60 })
+  duration: number;
+
+  @ApiProperty({ example: 50 })
+  questions: number;
+
+  @ApiProperty({ example: 100 })
+  maxScore: number;
+
+  @ApiProperty({ example: 75 })
+  progress: number;
+
+  @ApiProperty({ example: '45:30' })
+  remainingTime: string;
+
+  @ApiProperty({ example: 'Mathematics' })
+  subject: string;
+
+  @ApiProperty({ example: 'Class 10' })
+  standard: string;
+
+  @ApiProperty({ example: 'John Doe' })
+  assignedBy: string;
 } 

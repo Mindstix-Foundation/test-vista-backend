@@ -353,7 +353,6 @@ export class StudentService {
           student_analytics: {
             select: {
               total_tests_taken: true,
-              total_practice_tests: true,
               average_score: true,
               best_score: true,
               worst_score: true,
