@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsString, IsOptional, IsEnum, IsNotEmpty } from 'class-validator';
+import { IsNumber, IsString, IsOptional, IsEnum, IsNotEmpty, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export enum EnrollmentStatus {
@@ -152,5 +152,104 @@ export class StudentSubjectEnrollmentResponseDto {
         name: string;
       };
     };
+  };
+}
+
+export class GetEnrolledStudentsQueryDto {
+  @ApiProperty({ 
+    example: 1,
+    description: 'Standard ID to filter students'
+  })
+  @IsNumber()
+  @IsNotEmpty()
+  @Transform(({ value }) => parseInt(value))
+  standard_id: number;
+
+  @ApiProperty({ 
+    example: 1,
+    description: 'Subject ID to filter students'
+  })
+  @IsNumber()
+  @IsNotEmpty()
+  @Transform(({ value }) => parseInt(value))
+  subject_id: number;
+
+  @ApiPropertyOptional({ 
+    example: 1,
+    description: 'Test paper ID to filter students by assignment status'
+  })
+  @IsNumber()
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  paper_id?: number;
+
+  @ApiPropertyOptional({ 
+    example: true,
+    description: 'Filter students by assignment status - true for assigned students, false for non-assigned students. Only works when paper_id is provided.'
+  })
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+    return Boolean(value);
+  })
+  assigned_only?: boolean;
+}
+
+export class EnrolledStudentResponseDto {
+  @ApiProperty({ example: 1 })
+  id: number;
+
+  @ApiProperty({ example: 1 })
+  student_id: number;
+
+  @ApiProperty({ example: 'STU001' })
+  student_roll_number: string;
+
+  @ApiProperty({ example: 'John Doe' })
+  student_name: string;
+
+  @ApiProperty({ example: 'john.doe@example.com' })
+  student_email: string;
+
+  @ApiProperty({ example: '2024-2025' })
+  academic_year: string;
+
+  @ApiProperty({ example: '2024-01-16' })
+  enrollment_date: Date;
+
+  @ApiProperty({ 
+    example: {
+      id: 1,
+      name: 'Mathematics'
+    }
+  })
+  subject: {
+    id: number;
+    name: string;
+  };
+
+  @ApiProperty({ 
+    example: {
+      id: 1,
+      name: 'Standard 10'
+    }
+  })
+  standard: {
+    id: number;
+    name: string;
+  };
+
+  @ApiProperty({ 
+    example: {
+      id: 1,
+      name: 'ABC School'
+    }
+  })
+  school: {
+    id: number;
+    name: string;
   };
 } 
