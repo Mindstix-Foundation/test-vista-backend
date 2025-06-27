@@ -75,7 +75,6 @@ model Standard {
   medium_standard_subjects Medium_Standard_Subject[]
   patterns                 Pattern[]
   chapters                 Chapter[]
-  practice_attempts        Practice_Attempt[]
 
   @@unique([board_id, name])
   @@unique([board_id, sequence_number])
@@ -93,7 +92,6 @@ model Subject {
   patterns                 Pattern[]
   chapters                 Chapter[]
   teacher_subjects         Teacher_Subject[]
-  practice_attempts        Practice_Attempt[]
 
   @@unique([board_id, name])
 }
@@ -254,7 +252,6 @@ model Chapter {
 
   topics              Topic[]
   test_paper_chapters Test_Paper_Chapter[]
-  practice_attempts   Practice_Attempt[]
 
   @@unique([subject_id, standard_id, sequential_chapter_number])
 }
@@ -269,7 +266,6 @@ model Topic {
   updated_at              DateTime @updatedAt @db.Timestamptz()
 
   question_topics Question_Topic[]
-  practice_attempts Practice_Attempt[]
 }
 
 model Question_Type {
@@ -373,7 +369,6 @@ model Question {
   question_texts       Question_Text[]
   question_topics      Question_Topic[]
   student_answers      Student_Answer[]
-  practice_answers     Practice_Answer[]
   test_paper_questions Test_Paper_Question[]
 }
 
@@ -390,7 +385,6 @@ model Question_Text {
   match_pairs          Match_Pair[]
   question_text_topics Question_Text_Topic_Medium[]
   student_answers      Student_Answer[]
-  practice_answers     Practice_Answer[]
   test_paper_questions Test_Paper_Question[]
 }
 
@@ -434,7 +428,6 @@ model Mcq_Option {
   created_at       DateTime      @default(now()) @db.Timestamptz()
   updated_at       DateTime      @updatedAt @db.Timestamptz()
   student_answers  Student_Answer[]
-  practice_answers Practice_Answer[]
 }
 
 model Match_Pair {
@@ -554,10 +547,8 @@ model Student {
   // Relations
   test_assignments      Test_Assignment[]
   test_attempts         Test_Attempt[]
-  practice_attempts     Practice_Attempt[]
   student_results       Student_Result[]
   student_analytics     Student_Analytics?
-  student_notifications Student_Notification[]
   subject_enrollments   Student_Subject_Enrollment[]
 
   @@unique([student_id, school_standard_id])
@@ -620,40 +611,12 @@ model Test_Attempt {
   time_taken_seconds    Int?            // Actual time taken in seconds
   status                String          @default("in_progress") @db.VarChar // in_progress, completed, abandoned, auto_submitted
   current_question      Int?            // For resuming tests
-  is_practice           Boolean         @default(false)
   created_at            DateTime        @default(now()) @db.Timestamptz()
   updated_at            DateTime        @updatedAt @db.Timestamptz()
 
   // Relations
   student_answers       Student_Answer[]
   student_result        Student_Result?
-}
-
-// Practice test attempts (for unlimited practice)
-model Practice_Attempt {
-  id                    Int      @id @default(autoincrement())
-  student               Student  @relation(fields: [student_id], references: [id], onDelete: Cascade)
-  student_id            Int
-  subject               Subject  @relation(fields: [subject_id], references: [id], onDelete: Cascade)
-  subject_id            Int
-  standard              Standard @relation(fields: [standard_id], references: [id], onDelete: Cascade)
-  standard_id           Int
-  chapter               Chapter? @relation(fields: [chapter_id], references: [id], onDelete: SetNull)
-  chapter_id            Int?     // Optional - for chapter-specific practice
-  topic                 Topic?   @relation(fields: [topic_id], references: [id], onDelete: SetNull)
-  topic_id              Int?     // Optional - for topic-specific practice
-  total_questions       Int
-  started_at            DateTime @default(now()) @db.Timestamptz()
-  completed_at          DateTime? @db.Timestamptz()
-  time_taken_seconds    Int?
-  score_percentage      Float?
-  correct_answers       Int?
-  wrong_answers         Int?
-  skipped_answers       Int?
-  created_at            DateTime @default(now()) @db.Timestamptz()
-
-  // Relations
-  practice_answers      Practice_Answer[]
 }
 
 // Student answers for assigned tests (MCQ only)
@@ -674,24 +637,6 @@ model Student_Answer {
   answered_at           DateTime     @default(now()) @db.Timestamptz()
 
   @@unique([test_attempt_id, question_id])
-}
-
-// Student answers for practice tests (MCQ only)
-model Practice_Answer {
-  id                    Int              @id @default(autoincrement())
-  practice_attempt      Practice_Attempt @relation(fields: [practice_attempt_id], references: [id], onDelete: Cascade)
-  practice_attempt_id   Int
-  question              Question         @relation(fields: [question_id], references: [id], onDelete: Cascade)
-  question_id           Int
-  question_text         Question_Text    @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
-  question_text_id      Int
-  selected_option       Mcq_Option?      @relation(fields: [selected_option_id], references: [id], onDelete: SetNull)
-  selected_option_id    Int?             // For MCQ questions
-  is_correct            Boolean?         // Calculated after submission
-  time_spent_seconds    Int?             // Time spent on this question
-  answered_at           DateTime         @default(now()) @db.Timestamptz()
-
-  @@unique([practice_attempt_id, question_id])
 }
 
 // Student test results and performance tracking
@@ -728,26 +673,10 @@ model Student_Analytics {
   student               Student  @relation(fields: [student_id], references: [id], onDelete: Cascade)
   student_id            Int      @unique
   total_tests_taken     Int      @default(0)
-  total_practice_tests  Int      @default(0)
   average_score         Float?
   best_score            Float?
   worst_score           Float?
   last_score            Float?
   created_at            DateTime @default(now()) @db.Timestamptz()
   updated_at            DateTime @updatedAt @db.Timestamptz()
-}
-
-// Student notifications and announcements
-model Student_Notification {
-  id                    Int      @id @default(autoincrement())
-  student               Student  @relation(fields: [student_id], references: [id], onDelete: Cascade)
-  student_id            Int
-  title                 String   @db.VarChar
-  message               String   @db.Text
-  type                  String   @db.VarChar // test_assigned, result_published, reminder, announcement
-  priority              String   @default("normal") @db.VarChar // high, normal, low
-  is_read               Boolean  @default(false)
-  action_url            String?  @db.VarChar // Link to relevant page
-  expires_at            DateTime? @db.Timestamptz()
-  created_at            DateTime @default(now()) @db.Timestamptz()
 }

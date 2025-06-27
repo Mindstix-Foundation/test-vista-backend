@@ -9,28 +9,7 @@
 -- ============================================================================
 -- 2. QUESTION TYPES - USING ON CONFLICT DO NOTHING
 -- ============================================================================
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(1, 'MCQ') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(2, 'Odd One Out') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(3, 'Complete the Correlation') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(4, 'True or False') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(5, 'Match the Pairs') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(6, 'Fill in the Blanks') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(7, 'One-Word Answer') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(8, 'Give Scientific Reasons') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(9, 'Short Answer Question') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(10, 'Complete and Identify Reaction') ON CONFLICT (id) DO NOTHING;
-INSERT INTO "Question_Type" (id, type_name) VALUES 
-(11, 'Short Note') ON CONFLICT (id) DO NOTHING;
+
 
 -- ============================================================================
 -- 3. INSERT ADDRESS FOR BOARD AND SCHOOL

@@ -42,32 +42,10 @@ CREATE TABLE "Test_Attempt" (
     "time_taken_seconds" INTEGER,
     "status" VARCHAR NOT NULL DEFAULT 'in_progress',
     "current_question" INTEGER,
-    "is_practice" BOOLEAN NOT NULL DEFAULT false,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT "Test_Attempt_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Practice_Attempt" (
-    "id" SERIAL NOT NULL,
-    "student_id" INTEGER NOT NULL,
-    "subject_id" INTEGER NOT NULL,
-    "standard_id" INTEGER NOT NULL,
-    "chapter_id" INTEGER,
-    "topic_id" INTEGER,
-    "total_questions" INTEGER NOT NULL,
-    "started_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completed_at" TIMESTAMPTZ,
-    "time_taken_seconds" INTEGER,
-    "score_percentage" DOUBLE PRECISION,
-    "correct_answers" INTEGER,
-    "wrong_answers" INTEGER,
-    "skipped_answers" INTEGER,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Practice_Attempt_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -84,20 +62,6 @@ CREATE TABLE "Student_Answer" (
     "answered_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Student_Answer_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Practice_Answer" (
-    "id" SERIAL NOT NULL,
-    "practice_attempt_id" INTEGER NOT NULL,
-    "question_id" INTEGER NOT NULL,
-    "question_text_id" INTEGER NOT NULL,
-    "selected_option_id" INTEGER,
-    "is_correct" BOOLEAN,
-    "time_spent_seconds" INTEGER,
-    "answered_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Practice_Answer_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -133,7 +97,6 @@ CREATE TABLE "Student_Analytics" (
     "id" SERIAL NOT NULL,
     "student_id" INTEGER NOT NULL,
     "total_tests_taken" INTEGER NOT NULL DEFAULT 0,
-    "total_practice_tests" INTEGER NOT NULL DEFAULT 0,
     "average_score" DOUBLE PRECISION,
     "best_score" DOUBLE PRECISION,
     "worst_score" DOUBLE PRECISION,
@@ -142,22 +105,6 @@ CREATE TABLE "Student_Analytics" (
     "updated_at" TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT "Student_Analytics_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Student_Notification" (
-    "id" SERIAL NOT NULL,
-    "student_id" INTEGER NOT NULL,
-    "title" VARCHAR NOT NULL,
-    "message" TEXT NOT NULL,
-    "type" VARCHAR NOT NULL,
-    "priority" VARCHAR NOT NULL DEFAULT 'normal',
-    "is_read" BOOLEAN NOT NULL DEFAULT false,
-    "action_url" VARCHAR,
-    "expires_at" TIMESTAMPTZ,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Student_Notification_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -171,9 +118,6 @@ CREATE UNIQUE INDEX "Test_Assignment_student_id_test_paper_id_key" ON "Test_Assi
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Student_Answer_test_attempt_id_question_id_key" ON "Student_Answer"("test_attempt_id", "question_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Practice_Answer_practice_attempt_id_question_id_key" ON "Practice_Answer"("practice_attempt_id", "question_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Student_Result_test_attempt_id_key" ON "Student_Result"("test_attempt_id");
@@ -203,21 +147,6 @@ ALTER TABLE "Test_Attempt" ADD CONSTRAINT "Test_Attempt_student_id_fkey" FOREIGN
 ALTER TABLE "Test_Attempt" ADD CONSTRAINT "Test_Attempt_test_assignment_id_fkey" FOREIGN KEY ("test_assignment_id") REFERENCES "Test_Assignment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Practice_Attempt" ADD CONSTRAINT "Practice_Attempt_student_id_fkey" FOREIGN KEY ("student_id") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Attempt" ADD CONSTRAINT "Practice_Attempt_subject_id_fkey" FOREIGN KEY ("subject_id") REFERENCES "Subject"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Attempt" ADD CONSTRAINT "Practice_Attempt_standard_id_fkey" FOREIGN KEY ("standard_id") REFERENCES "Standard"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Attempt" ADD CONSTRAINT "Practice_Attempt_chapter_id_fkey" FOREIGN KEY ("chapter_id") REFERENCES "Chapter"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Attempt" ADD CONSTRAINT "Practice_Attempt_topic_id_fkey" FOREIGN KEY ("topic_id") REFERENCES "Topic"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "Student_Answer" ADD CONSTRAINT "Student_Answer_test_attempt_id_fkey" FOREIGN KEY ("test_attempt_id") REFERENCES "Test_Attempt"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -230,18 +159,6 @@ ALTER TABLE "Student_Answer" ADD CONSTRAINT "Student_Answer_question_text_id_fke
 ALTER TABLE "Student_Answer" ADD CONSTRAINT "Student_Answer_selected_option_id_fkey" FOREIGN KEY ("selected_option_id") REFERENCES "Mcq_Option"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Practice_Answer" ADD CONSTRAINT "Practice_Answer_practice_attempt_id_fkey" FOREIGN KEY ("practice_attempt_id") REFERENCES "Practice_Attempt"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Answer" ADD CONSTRAINT "Practice_Answer_question_id_fkey" FOREIGN KEY ("question_id") REFERENCES "Question"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Answer" ADD CONSTRAINT "Practice_Answer_question_text_id_fkey" FOREIGN KEY ("question_text_id") REFERENCES "Question_Text"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Practice_Answer" ADD CONSTRAINT "Practice_Answer_selected_option_id_fkey" FOREIGN KEY ("selected_option_id") REFERENCES "Mcq_Option"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "Student_Result" ADD CONSTRAINT "Student_Result_student_id_fkey" FOREIGN KEY ("student_id") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -249,9 +166,6 @@ ALTER TABLE "Student_Result" ADD CONSTRAINT "Student_Result_test_attempt_id_fkey
 
 -- AddForeignKey
 ALTER TABLE "Student_Analytics" ADD CONSTRAINT "Student_Analytics_student_id_fkey" FOREIGN KEY ("student_id") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Student_Notification" ADD CONSTRAINT "Student_Notification_student_id_fkey" FOREIGN KEY ("student_id") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Insert STUDENT role if it doesn't exist
 INSERT INTO "Role" ("role_name") 
