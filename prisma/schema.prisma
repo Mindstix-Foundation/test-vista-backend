@@ -374,6 +374,7 @@ model Question {
   question_topics      Question_Topic[]
   student_answers      Student_Answer[]
   practice_answers     Practice_Answer[]
+  test_paper_questions Test_Paper_Question[]
 }
 
 model Question_Text {
@@ -390,6 +391,7 @@ model Question_Text {
   question_text_topics Question_Text_Topic_Medium[]
   student_answers      Student_Answer[]
   practice_answers     Practice_Answer[]
+  test_paper_questions Test_Paper_Question[]
 }
 
 model Question_Text_Topic_Medium {
@@ -467,10 +469,19 @@ model Test_Paper {
   pattern               Pattern            @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
   pattern_id            Int
   test_paper_origin_type TestPaperOriginType?
+  // Online test fields
+  duration_minutes      Int?
+  instructions          String?            @db.Text
+  is_online             Boolean            @default(false)
+  negative_marking      Boolean            @default(false)
+  negative_marks_per_question Float?
+  randomize_questions   Boolean            @default(false)
+  randomize_options     Boolean            @default(false)
   created_at            DateTime           @default(now()) @db.Timestamptz()
   updated_at            DateTime           @updatedAt @db.Timestamptz()
   
   test_paper_chapters   Test_Paper_Chapter[]
+  test_paper_questions  Test_Paper_Question[]
   html_files            HTML_File[]
   test_assignments      Test_Assignment[]
 }
@@ -502,6 +513,26 @@ model Test_Paper_Chapter {
   chapter_id        Int
   weightage         Int
   created_at        DateTime   @default(now()) @db.Timestamptz()
+}
+
+// Test Paper Question model for online tests
+model Test_Paper_Question {
+  id                    Int           @id @default(autoincrement())
+  test_paper            Test_Paper    @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+  test_paper_id         Int
+  question              Question      @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  question_id           Int
+  question_text         Question_Text @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  question_text_id      Int
+  section_id            Int
+  subsection_id         Int
+  question_order        Int
+  marks                 Float
+  is_mandatory          Boolean       @default(true)
+  created_at            DateTime      @default(now()) @db.Timestamptz()
+
+  @@unique([test_paper_id, question_id, question_text_id])
+  @@index([test_paper_id, section_id, question_order])
 }
 
 // Student-related models based on hollow prototype analysis

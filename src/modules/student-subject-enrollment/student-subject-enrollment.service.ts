@@ -4,6 +4,7 @@ import {
   CreateStudentSubjectEnrollmentDto, 
   UpdateEnrollmentStatusDto, 
   GetEnrollmentsQueryDto,
+  GetEnrolledStudentsQueryDto,
   EnrollmentStatus 
 } from './dto/student-subject-enrollment.dto';
 
@@ -467,6 +468,183 @@ export class StudentSubjectEnrollmentService {
         throw error;
       }
       throw new BadRequestException('Failed to fetch enrollment');
+    }
+  }
+
+  async getEnrolledStudentsForTeacher(teacherId: number, query: GetEnrolledStudentsQueryDto) {
+    try {
+      console.log('getEnrolledStudentsForTeacher called with:', { teacherId, query });
+
+      // First, verify that the teacher teaches this subject in this standard
+      const teacherSubject = await this.prisma.teacher_Subject.findFirst({
+        where: {
+          user_id: teacherId,
+          subject_id: query.subject_id,
+          school_standard: {
+            standard_id: query.standard_id
+          }
+        },
+        include: {
+          subject: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          school_standard: {
+            include: {
+              standard: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              },
+              school: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!teacherSubject) {
+        throw new NotFoundException(
+          `Teacher does not teach the specified subject in the specified standard`
+        );
+      }
+
+      console.log('Found teacher subject:', teacherSubject.id);
+
+      // Build the where clause for filtering enrollments
+      const where: any = {
+        teacher_subject_id: teacherSubject.id,
+        status: {
+          in: [EnrollmentStatus.APPROVED, EnrollmentStatus.ACTIVE]
+        }
+      };
+
+      // Get enrolled students
+      const enrollments = await this.prisma.student_Subject_Enrollment.findMany({
+        where,
+        select: {
+          id: true,
+          student_id: true,
+          academic_year: true,
+          enrollment_date: true,
+          student: {
+            select: {
+              id: true,
+              student_id: true, // This is the roll number
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email_id: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: [
+          {
+            student: {
+              student_id: 'asc' // Sort by roll number
+            }
+          },
+          {
+            student: {
+              user: {
+                name: 'asc' // Then by name
+              }
+            }
+          }
+        ]
+      });
+
+      console.log('Found enrolled students:', enrollments.length);
+
+      // If paper_id is provided, filter by assignment status
+      let filteredEnrollments = enrollments;
+      let assignedStudentIds = new Set<number>();
+      
+      if (query.paper_id) {
+        // First verify the test paper belongs to the teacher
+        const testPaper = await this.prisma.test_Paper.findFirst({
+          where: {
+            id: query.paper_id,
+            user_id: teacherId
+          }
+        });
+
+        if (!testPaper) {
+          throw new NotFoundException('Test paper not found or does not belong to the teacher');
+        }
+
+        // Get all assignments for this test paper
+        const assignments = await this.prisma.test_Assignment.findMany({
+          where: {
+            test_paper_id: query.paper_id,
+            assigned_by_user_id: teacherId
+          },
+          select: {
+            student_id: true
+          }
+        });
+
+        assignedStudentIds = new Set(assignments.map(a => a.student_id));
+
+        // Filter based on assigned_only parameter
+        if (query.assigned_only === true) {
+          // Return only students who are assigned this test
+          filteredEnrollments = enrollments.filter(enrollment => 
+            assignedStudentIds.has(enrollment.student.id)
+          );
+        } else if (query.assigned_only === false) {
+          // Return only students who are NOT assigned this test
+          filteredEnrollments = enrollments.filter(enrollment => 
+            !assignedStudentIds.has(enrollment.student.id)
+          );
+        }
+        // If assigned_only is undefined, return all students with assignment status
+      }
+
+      // Transform the data to match the response DTO
+      const enrolledStudents = filteredEnrollments.map(enrollment => {
+        const baseData = {
+          id: enrollment.id,
+          student_id: enrollment.student.id,
+          student_roll_number: enrollment.student.student_id,
+          student_name: enrollment.student.user.name,
+          student_email: enrollment.student.user.email_id,
+          academic_year: enrollment.academic_year,
+          enrollment_date: enrollment.enrollment_date,
+          subject: teacherSubject.subject,
+          standard: teacherSubject.school_standard.standard,
+          school: teacherSubject.school_standard.school
+        };
+
+        // Add assignment status if paper_id is provided
+        if (query.paper_id) {
+          return {
+            ...baseData,
+            is_assigned: assignedStudentIds.has(enrollment.student.id)
+          };
+        }
+
+        return baseData;
+      });
+
+      console.log('Transformed enrolled students:', enrolledStudents.length);
+      return enrolledStudents;
+    } catch (error) {
+      console.error('Error in getEnrolledStudentsForTeacher:', error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(`Failed to fetch enrolled students: ${error.message}`);
     }
   }
 } 

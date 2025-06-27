@@ -36,12 +36,14 @@ import { MulterModule } from '@nestjs/platform-express';
 import { AwsModule } from './modules/aws/aws.module';
 import { QuestionTextTopicMediumModule } from './modules/question_text_topic_medium/question-text-topic-medium.module';
 import { PatternFilterModule } from './modules/pattern-filter/pattern-filter.module';
+import { McqPatternFilterModule } from './modules/mcq-pattern-filter/mcq-pattern-filter.module';
 import { CreateTestPaperModule } from './modules/create_test_paper/create-test-paper.module';
 import { ChapterMarksDistributionModule } from './modules/chapter-marks-distribution/chapter-marks-distribution.module';
 import { ChapterMarksRangeModule } from './modules/chapter-marks-range/chapter-marks-range.module';
 import { TestPaperHtmlModule } from './modules/test-paper-html/test-paper-html.module';
 import { StudentModule } from './modules/student/student.module';
 import { StudentSubjectEnrollmentModule } from './modules/student-subject-enrollment/student-subject-enrollment.module';
+import { TestAssignmentModule } from './modules/test-assignment/test-assignment.module';
 
 @Module({
   imports: [
@@ -80,12 +82,14 @@ import { StudentSubjectEnrollmentModule } from './modules/student-subject-enroll
     McqOptionModule,
     QuestionTextTopicMediumModule,
     PatternFilterModule,
+    McqPatternFilterModule,
     CreateTestPaperModule,
     ChapterMarksDistributionModule,
     ChapterMarksRangeModule,
     TestPaperHtmlModule,
     StudentModule,
     StudentSubjectEnrollmentModule,
+    TestAssignmentModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB

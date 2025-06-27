@@ -29,7 +29,9 @@ import {
   CreateStudentSubjectEnrollmentDto, 
   UpdateEnrollmentStatusDto, 
   GetEnrollmentsQueryDto,
-  StudentSubjectEnrollmentResponseDto 
+  GetEnrolledStudentsQueryDto,
+  StudentSubjectEnrollmentResponseDto,
+  EnrolledStudentResponseDto
 } from './dto/student-subject-enrollment.dto';
 
 @ApiTags('student-subject-enrollments')
@@ -263,5 +265,35 @@ export class StudentSubjectEnrollmentController {
   })
   async getEnrollmentById(@Param('id') id: string) {
     return await this.enrollmentService.getEnrollmentById(+id);
+  }
+
+  @Get('teacher/enrolled-students')
+  @Roles('TEACHER')
+  @ApiOperation({ 
+    summary: 'Get enrolled students for teacher by standard and subject',
+    description: 'Returns students who are enrolled and approved for the teacher\'s subject in a specific standard. Used for test assignment.'
+  })
+  @ApiQuery({ name: 'standard_id', description: 'Standard ID to filter students', type: Number })
+  @ApiQuery({ name: 'subject_id', description: 'Subject ID to filter students', type: Number })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'List of enrolled students for the teacher',
+    type: [EnrolledStudentResponseDto]
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Teacher does not teach the specified subject in the specified standard'
+  })
+  async getEnrolledStudentsForTeacher(
+    @Query() query: GetEnrolledStudentsQueryDto,
+    @Request() req: any
+  ) {
+    try {
+      const teacherId = req.user.id;
+      return await this.enrollmentService.getEnrolledStudentsForTeacher(teacherId, query);
+    } catch (error) {
+      console.error('Error in getEnrolledStudentsForTeacher:', error);
+      throw error;
+    }
   }
 } 
