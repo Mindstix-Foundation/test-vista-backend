@@ -7,7 +7,16 @@ import {
   RemoveTestAssignmentDto,
   BulkRemoveTestAssignmentDto,
   TestAssignmentResponseDto,
-  StudentAssignedTestDto
+  StudentAssignedTestDto,
+  ExamInstructionsDto,
+  ExamDataDto,
+  StartExamDto,
+  SubmitAnswerDto,
+  SubmitExamDto,
+  ExamResultDto,
+  DetailedReportDto,
+  TestAttemptStatusDto,
+  SubmitExamResponseDto
 } from './dto/test-assignment.dto';
 
 @Injectable()
@@ -560,8 +569,10 @@ export class TestAssignmentService {
         // Determine status based on the logic provided
         let status: string;
         const hasCompletedAttempts = assignment.test_attempts.some(attempt => attempt.status === 'completed');
+        const totalAttempts = assignment.test_attempts.length;
+        const maxAttemptsReached = totalAttempts >= assignment.max_attempts;
         
-        if (hasCompletedAttempts) {
+        if (hasCompletedAttempts || maxAttemptsReached) {
           status = 'completed';
         } else if (availableFrom > now) {
           status = 'upcoming';
@@ -634,6 +645,919 @@ export class TestAssignmentService {
         throw error;
       }
       throw new BadRequestException('Failed to fetch student assigned tests');
+    }
+  }
+
+  async getTestAssignmentById(id: number): Promise<TestAssignmentResponseDto> {
+    try {
+      const assignment = await this.prisma.test_Assignment.findUnique({
+        where: { id },
+        select: this.assignmentSelect
+      });
+
+      if (!assignment) {
+        throw new NotFoundException(`Test assignment with ID ${id} not found`);
+      }
+
+      return assignment;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to retrieve test assignment');
+    }
+  }
+
+  // New student exam methods
+
+  async getExamInstructions(userId: number, assignmentId: number): Promise<ExamInstructionsDto> {
+    try {
+      // First get the student record
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Get the assignment and verify it belongs to this student
+      const assignment = await this.prisma.test_Assignment.findFirst({
+        where: {
+          id: assignmentId,
+          student_id: student.id
+        },
+        include: {
+          test_paper: {
+            include: {
+              pattern: {
+                include: {
+                  subject: true,
+                  standard: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!assignment) {
+        throw new NotFoundException('Test assignment not found or not assigned to you');
+      }
+
+      // Check if exam is available
+      const now = new Date();
+      if (now < assignment.available_from) {
+        throw new BadRequestException('Exam is not yet available');
+      }
+
+      if (now > assignment.due_date) {
+        throw new BadRequestException('Exam deadline has passed');
+      }
+
+      // Get existing attempts count
+      const existingAttempts = await this.prisma.test_Attempt.count({
+        where: {
+          student_id: student.id,
+          test_assignment_id: assignment.id
+        }
+      });
+
+      // Calculate attempts left
+      const attemptsLeft = Math.max(0, assignment.max_attempts - existingAttempts);
+
+      // Get question count from test paper
+      const questionCount = await this.prisma.test_Paper_Question.count({
+        where: { test_paper_id: assignment.test_paper_id }
+      });
+
+      return {
+        id: assignment.id,
+        title: assignment.test_paper.name,
+        subject: assignment.test_paper.pattern.subject.name,
+        standard: assignment.test_paper.pattern.standard.name,
+        duration_minutes: assignment.time_limit_minutes || assignment.test_paper.duration_minutes || 60,
+        total_questions: questionCount,
+        total_marks: assignment.test_paper.pattern.total_marks,
+        instructions: assignment.test_paper.instructions,
+        negative_marking: assignment.test_paper.negative_marking,
+        negative_marks_per_question: assignment.test_paper.negative_marks_per_question,
+        max_attempts: assignment.max_attempts,
+        attempts_left: attemptsLeft,
+        available_from: assignment.available_from,
+        due_date: assignment.due_date,
+        status: assignment.status
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get exam instructions');
+    }
+  }
+
+  // Helper method to create a seeded random number generator
+  private createSeededRandom(seed: number) {
+    let x = Math.sin(seed) * 10000;
+    return function() {
+      x = Math.sin(x) * 10000;
+      return x - Math.floor(x);
+    };
+  }
+
+  // Helper method to shuffle array using seeded random
+  private shuffleArray<T>(array: T[], seed: number): T[] {
+    const shuffled = [...array];
+    const random = this.createSeededRandom(seed);
+    
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    
+    return shuffled;
+  }
+
+  // Helper method to randomize questions based on student ID
+  private randomizeQuestions(questions: any[], studentId: number, shouldRandomize: boolean) {
+    if (!shouldRandomize) {
+      return questions.sort((a, b) => a.question_order - b.question_order);
+    }
+    
+    // Use student ID as seed for consistent randomization per student
+    const seed = studentId * 1000; // Multiply to get better distribution
+    return this.shuffleArray(questions, seed);
+  }
+
+  // Helper method to randomize options based on student ID and question ID
+  private randomizeOptions(options: any[], optionIds: any[], optionImages: any[], studentId: number, questionId: number, shouldRandomize: boolean) {
+    if (!shouldRandomize || options.length <= 1) {
+      return { options, optionIds, optionImages };
+    }
+    
+    // Create combined array to maintain relationships
+    const combined = options.map((option, index) => ({
+      option: option,
+      optionId: optionIds[index],
+      optionImage: optionImages[index]
+    }));
+    
+    // Use student ID + question ID as seed for unique randomization per question per student
+    const seed = studentId * 10000 + questionId;
+    const shuffled = this.shuffleArray(combined, seed);
+    
+    return {
+      options: shuffled.map(item => item.option),
+      optionIds: shuffled.map(item => item.optionId),
+      optionImages: shuffled.map(item => item.optionImage)
+    };
+  }
+
+  async startExam(userId: number, dto: StartExamDto): Promise<ExamDataDto> {
+    try {
+      // Get student record
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Verify assignment belongs to student
+      const assignment = await this.prisma.test_Assignment.findFirst({
+        where: {
+          id: dto.assignment_id,
+          student_id: student.id
+        },
+        include: {
+          test_paper: {
+            include: {
+              pattern: {
+                include: {
+                  subject: true,
+                  standard: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!assignment) {
+        throw new NotFoundException('Test assignment not found');
+      }
+
+      // Check if exam is available
+      const now = new Date();
+      if (now < assignment.available_from) {
+        throw new BadRequestException('Exam is not yet available');
+      }
+
+      if (now > assignment.due_date) {
+        throw new BadRequestException('Exam deadline has passed');
+      }
+
+      // Check for ongoing attempt first - if exists, return it instead of creating new one
+      const ongoingAttempt = await this.prisma.test_Attempt.findFirst({
+        where: {
+          student_id: student.id,
+          test_assignment_id: assignment.id,
+          status: 'in_progress'
+        }
+      });
+
+      if (ongoingAttempt) {
+        // Resume existing attempt - get questions and return exam data
+        const questions = await this.prisma.test_Paper_Question.findMany({
+          where: { test_paper_id: assignment.test_paper_id },
+          include: {
+            question_text: {
+              include: {
+                image: true,
+                mcq_options: {
+                  include: {
+                    image: true
+                  },
+                  orderBy: { id: 'asc' }
+                }
+              }
+            }
+          },
+          orderBy: { question_order: 'asc' }
+        });
+
+        // Apply randomization based on test paper settings
+        const randomizedQuestions = this.randomizeQuestions(
+          questions, 
+          student.id, 
+          assignment.test_paper.randomize_questions
+        );
+
+        const examQuestions = randomizedQuestions.map(q => {
+          const baseOptions = q.question_text.mcq_options.map(opt => opt.option_text || '');
+          const baseOptionIds = q.question_text.mcq_options.map(opt => opt.id);
+          const baseOptionImages = q.question_text.mcq_options.map(opt => opt.image?.image_url || null);
+
+          // Apply option randomization
+          const { options, optionIds, optionImages } = this.randomizeOptions(
+            baseOptions,
+            baseOptionIds,
+            baseOptionImages,
+            student.id,
+            q.question_id,
+            assignment.test_paper.randomize_options
+          );
+
+          return {
+            id: q.id,
+            question_id: q.question_id,
+            question_text_id: q.question_text_id,
+            question_text: q.question_text.question_text,
+            question_image: q.question_text.image?.image_url,
+            options,
+            option_ids: optionIds,
+            option_images: optionImages,
+            section_id: q.section_id,
+            subsection_id: q.subsection_id,
+            question_order: q.question_order,
+            marks: q.marks,
+            is_mandatory: q.is_mandatory
+          };
+        });
+
+        return {
+          assignment_id: assignment.id,
+          test_paper_id: assignment.test_paper_id,
+          title: assignment.test_paper.name,
+          subject: assignment.test_paper.pattern.subject.name,
+          standard: assignment.test_paper.pattern.standard.name,
+          duration_minutes: assignment.time_limit_minutes || assignment.test_paper.duration_minutes || 60,
+          total_marks: assignment.test_paper.pattern.total_marks,
+          instructions: assignment.test_paper.instructions,
+          negative_marking: assignment.test_paper.negative_marking,
+          negative_marks_per_question: assignment.test_paper.negative_marks_per_question,
+          randomize_questions: assignment.test_paper.randomize_questions,
+          randomize_options: assignment.test_paper.randomize_options,
+          questions: examQuestions,
+          start_time: ongoingAttempt.started_at,
+          attempt_number: ongoingAttempt.attempt_number,
+          attemptId: ongoingAttempt.id
+        };
+      }
+
+      // Check completed attempts only (not in_progress attempts)
+      const completedAttempts = await this.prisma.test_Attempt.count({
+        where: {
+          student_id: student.id,
+          test_assignment_id: assignment.id,
+          status: 'completed'
+        }
+      });
+
+      if (completedAttempts >= assignment.max_attempts) {
+        throw new BadRequestException('Maximum attempts exceeded');
+      }
+
+      // Get total attempts (for attempt number)
+      const totalAttempts = await this.prisma.test_Attempt.count({
+        where: {
+          student_id: student.id,
+          test_assignment_id: assignment.id
+        }
+      });
+
+      // Create new attempt
+      const attempt = await this.prisma.test_Attempt.create({
+        data: {
+          student_id: student.id,
+          test_assignment_id: assignment.id,
+          attempt_number: totalAttempts + 1,
+          status: 'in_progress'
+        }
+      });
+
+      // Get questions for the exam
+      const questions = await this.prisma.test_Paper_Question.findMany({
+        where: { test_paper_id: assignment.test_paper_id },
+        include: {
+          question_text: {
+            include: {
+              image: true,
+              mcq_options: {
+                include: {
+                  image: true
+                },
+                orderBy: { id: 'asc' }
+              }
+            }
+          }
+        },
+        orderBy: { question_order: 'asc' }
+      });
+
+      // Apply randomization based on test paper settings
+      const randomizedQuestions = this.randomizeQuestions(
+        questions, 
+        student.id, 
+        assignment.test_paper.randomize_questions
+      );
+
+      const examQuestions = randomizedQuestions.map(q => {
+        const baseOptions = q.question_text.mcq_options.map(opt => opt.option_text || '');
+        const baseOptionIds = q.question_text.mcq_options.map(opt => opt.id);
+        const baseOptionImages = q.question_text.mcq_options.map(opt => opt.image?.image_url || null);
+
+        // Apply option randomization
+        const { options, optionIds, optionImages } = this.randomizeOptions(
+          baseOptions,
+          baseOptionIds,
+          baseOptionImages,
+          student.id,
+          q.question_id,
+          assignment.test_paper.randomize_options
+        );
+
+        return {
+          id: q.id,
+          question_id: q.question_id,
+          question_text_id: q.question_text_id,
+          question_text: q.question_text.question_text,
+          question_image: q.question_text.image?.image_url,
+          options,
+          option_ids: optionIds,
+          option_images: optionImages,
+          section_id: q.section_id,
+          subsection_id: q.subsection_id,
+          question_order: q.question_order,
+          marks: q.marks,
+          is_mandatory: q.is_mandatory
+        };
+      });
+
+      // Update assignment status to active
+      await this.prisma.test_Assignment.update({
+        where: { id: assignment.id },
+        data: { status: 'active' }
+      });
+
+      return {
+        assignment_id: assignment.id,
+        test_paper_id: assignment.test_paper_id,
+        title: assignment.test_paper.name,
+        subject: assignment.test_paper.pattern.subject.name,
+        standard: assignment.test_paper.pattern.standard.name,
+        duration_minutes: assignment.time_limit_minutes || assignment.test_paper.duration_minutes || 60,
+        total_marks: assignment.test_paper.pattern.total_marks,
+        instructions: assignment.test_paper.instructions,
+        negative_marking: assignment.test_paper.negative_marking,
+        negative_marks_per_question: assignment.test_paper.negative_marks_per_question,
+        randomize_questions: assignment.test_paper.randomize_questions,
+        randomize_options: assignment.test_paper.randomize_options,
+        questions: examQuestions,
+        start_time: attempt.started_at,
+        attempt_number: attempt.attempt_number,
+        attemptId: attempt.id
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to start exam');
+    }
+  }
+
+  private calculateRemainingTime(startedAt: Date, durationMinutes: number): number {
+    const now = new Date();
+    const elapsedMs = now.getTime() - startedAt.getTime();
+    const durationMs = durationMinutes * 60 * 1000;
+    const remainingMs = Math.max(0, durationMs - elapsedMs);
+    return Math.floor(remainingMs / 1000); // Return remaining seconds
+  }
+
+  async getExamAttemptStatus(userId: number, attemptId: number): Promise<TestAttemptStatusDto> {
+    try {
+      // Get student record
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Get attempt
+      const attempt = await this.prisma.test_Attempt.findFirst({
+        where: {
+          id: attemptId,
+          student_id: student.id
+        },
+        include: {
+          test_assignment: {
+            include: {
+              test_paper: true
+            }
+          }
+        }
+      });
+
+      if (!attempt) {
+        throw new NotFoundException('Test attempt not found');
+      }
+
+      // Count answered questions
+      const answeredCount = await this.prisma.student_Answer.count({
+        where: {
+          test_attempt_id: attemptId,
+          selected_option_id: { not: null }
+        }
+      });
+
+      // Get total questions
+      const totalQuestions = await this.prisma.test_Paper_Question.count({
+        where: { test_paper_id: attempt.test_assignment.test_paper_id }
+      });
+
+      // Calculate time remaining
+      const durationMs = (attempt.test_assignment.time_limit_minutes || attempt.test_assignment.test_paper.duration_minutes || 60) * 60 * 1000;
+      const elapsedMs = Date.now() - attempt.started_at.getTime();
+      const timeRemainingSeconds = Math.max(0, Math.floor((durationMs - elapsedMs) / 1000));
+
+      return {
+        test_attempt_id: attempt.id,
+        status: attempt.status,
+        current_question: attempt.current_question,
+        time_remaining_seconds: timeRemainingSeconds,
+        questions_answered: answeredCount,
+        total_questions: totalQuestions
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get exam attempt status');
+    }
+  }
+
+  async submitAnswer(userId: number, dto: SubmitAnswerDto): Promise<{ message: string }> {
+    try {
+      console.log('submitAnswer called with:', { userId, dto });
+      
+      // Get student record
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      console.log('Student found:', student ? { id: student.id, student_id: student.student_id } : 'null');
+
+      if (!student) {
+        console.error('Student record not found for user_id:', userId);
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Verify attempt belongs to student and is in progress
+      const attempt = await this.prisma.test_Attempt.findFirst({
+        where: {
+          id: dto.test_attempt_id,
+          student_id: student.id,
+          status: 'in_progress'
+        }
+      });
+
+      console.log('Test attempt found:', attempt ? { id: attempt.id, status: attempt.status, student_id: attempt.student_id } : 'null');
+
+      if (!attempt) {
+        // Check if attempt exists but with different status
+        const anyAttempt = await this.prisma.test_Attempt.findFirst({
+          where: {
+            id: dto.test_attempt_id,
+            student_id: student.id
+          }
+        });
+        
+        if (anyAttempt) {
+          console.error('Test attempt found but status is:', anyAttempt.status);
+          throw new BadRequestException(`Test attempt is not in progress. Current status: ${anyAttempt.status}`);
+        } else {
+          console.error('No test attempt found for attempt_id:', dto.test_attempt_id, 'and student_id:', student.id);
+          throw new NotFoundException('Active test attempt not found');
+        }
+      }
+
+      console.log('Attempting to upsert answer...');
+
+      // Upsert the answer
+      await this.prisma.student_Answer.upsert({
+        where: {
+          test_attempt_id_question_id: {
+            test_attempt_id: dto.test_attempt_id,
+            question_id: dto.question_id
+          }
+        },
+        update: {
+          selected_option_id: dto.selected_option_id,
+          time_spent_seconds: dto.time_spent_seconds,
+          is_flagged: dto.is_flagged || false,
+          answered_at: new Date()
+        },
+        create: {
+          test_attempt_id: dto.test_attempt_id,
+          question_id: dto.question_id,
+          question_text_id: dto.question_text_id,
+          selected_option_id: dto.selected_option_id,
+          time_spent_seconds: dto.time_spent_seconds,
+          is_flagged: dto.is_flagged || false
+        }
+      });
+
+      console.log('Answer upserted successfully');
+      return { message: 'Answer submitted successfully' };
+    } catch (error) {
+      console.error('Error in submitAnswer:', error);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to submit answer');
+    }
+  }
+
+  async submitExam(userId: number, dto: SubmitExamDto): Promise<SubmitExamResponseDto> {
+    try {
+      console.log('=== SUBMIT EXAM DEBUG ===');
+      console.log('userId:', userId);
+      console.log('dto:', dto);
+
+      // Find student
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Verify attempt exists and is in progress
+      const attempt = await this.prisma.test_Attempt.findFirst({
+        where: {
+          id: dto.test_attempt_id,
+          student_id: student.id,
+          status: 'in_progress'
+        },
+        include: {
+          test_assignment: true
+        }
+      });
+
+      if (!attempt) {
+        throw new NotFoundException('Active test attempt not found');
+      }
+
+      // Simply mark the exam as completed
+      const submittedAt = new Date();
+      const timeTakenSeconds = Math.floor((submittedAt.getTime() - attempt.started_at.getTime()) / 1000);
+
+      await this.prisma.test_Attempt.update({
+        where: { id: dto.test_attempt_id },
+        data: {
+          status: 'completed',
+          submitted_at: submittedAt,
+          time_taken_seconds: timeTakenSeconds
+        }
+      });
+
+      // Update assignment status to completed
+      await this.prisma.test_Assignment.update({
+        where: { id: attempt.test_assignment_id },
+        data: { status: 'completed' }
+      });
+
+      console.log('Exam submitted successfully');
+
+      return {
+        message: 'Exam submitted successfully',
+        test_attempt_id: dto.test_attempt_id,
+        submitted_at: submittedAt
+      };
+
+    } catch (error) {
+      console.error('Error in submitExam:', error);
+      throw error;
+    }
+  }
+
+  async getExamResult(userId: number, attemptId: number): Promise<ExamResultDto> {
+    try {
+      // Get student record
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Get the test attempt
+      const attempt = await this.prisma.test_Attempt.findFirst({
+        where: {
+          id: attemptId,
+          student_id: student.id,
+          status: 'completed'
+        },
+        include: {
+          test_assignment: {
+            include: {
+              test_paper: {
+                include: {
+                  pattern: {
+                    include: {
+                      subject: true,
+                      standard: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!attempt) {
+        throw new NotFoundException('Completed test attempt not found');
+      }
+
+      // Check if result already exists
+      let existingResult = await this.prisma.student_Result.findFirst({
+        where: {
+          test_attempt_id: attemptId,
+          student_id: student.id
+        }
+      });
+
+      // If result exists, return it
+      if (existingResult) {
+        return {
+          id: existingResult.id,
+          test_attempt_id: existingResult.test_attempt_id,
+          title: attempt.test_assignment.test_paper.name,
+          subject: attempt.test_assignment.test_paper.pattern.subject.name,
+          total_questions: existingResult.total_questions,
+          attempted_questions: existingResult.attempted_questions,
+          correct_answers: existingResult.correct_answers,
+          wrong_answers: existingResult.wrong_answers,
+          skipped_questions: existingResult.skipped_questions,
+          total_marks: existingResult.total_marks,
+          obtained_marks: existingResult.obtained_marks,
+          percentage: existingResult.percentage,
+          grade: existingResult.grade,
+          rank_in_standard: existingResult.rank_in_standard,
+          time_taken_seconds: existingResult.time_taken_seconds,
+          performance_level: existingResult.performance_level,
+          chapter_wise_analysis: existingResult.chapter_wise_analysis,
+          strengths: existingResult.strengths as string[],
+          weaknesses: existingResult.weaknesses as string[],
+          recommendations: existingResult.recommendations as string[],
+          submitted_at: attempt.submitted_at || existingResult.created_at
+        };
+      }
+
+      // Calculate results on-demand
+      const questions = await this.prisma.test_Paper_Question.findMany({
+        where: { test_paper_id: attempt.test_assignment.test_paper_id },
+        include: {
+          question_text: {
+            include: {
+              mcq_options: true
+            }
+          }
+        }
+      });
+
+      const answers = await this.prisma.student_Answer.findMany({
+        where: { test_attempt_id: attemptId },
+        include: {
+          question_text: {
+            include: {
+              mcq_options: true
+            }
+          }
+        }
+      });
+
+      let correctAnswers = 0;
+      let wrongAnswers = 0;
+      let obtainedMarks = 0;
+
+      // Calculate scores
+      for (const answer of answers) {
+        if (answer.selected_option_id !== null && answer.selected_option_id !== undefined) {
+          const correctOption = answer.question_text.mcq_options.find(opt => opt.is_correct);
+          const selectedOption = answer.question_text.mcq_options.find(opt => opt.id === answer.selected_option_id);
+          
+          if (correctOption && selectedOption && selectedOption.is_correct) {
+            correctAnswers++;
+            const questionData = questions.find(q => q.question_id === answer.question_id);
+            const marks = questionData?.marks || 0;
+            obtainedMarks += marks;
+            
+            // Update answer with correct status
+            await this.prisma.student_Answer.update({
+              where: { id: answer.id },
+              data: {
+                is_correct: true,
+                marks_obtained: marks
+              }
+            });
+          } else {
+            wrongAnswers++;
+            let deduction = 0;
+            if (attempt.test_assignment.test_paper.negative_marking) {
+              deduction = attempt.test_assignment.test_paper.negative_marks_per_question || 0;
+              obtainedMarks -= deduction;
+            }
+            
+            // Update answer with incorrect status
+            await this.prisma.student_Answer.update({
+              where: { id: answer.id },
+              data: {
+                is_correct: false,
+                marks_obtained: -deduction
+              }
+            });
+          }
+        }
+      }
+
+      const totalQuestions = questions.length;
+      const attemptedQuestions = answers.filter(a => a.selected_option_id !== null).length;
+      const skippedQuestions = totalQuestions - attemptedQuestions;
+      const totalMarks = attempt.test_assignment.test_paper.pattern.total_marks;
+      const percentage = totalMarks > 0 ? (obtainedMarks / totalMarks) * 100 : 0;
+
+      // Determine performance level
+      let performanceLevel = 'poor';
+      if (percentage >= 90) performanceLevel = 'excellent';
+      else if (percentage >= 75) performanceLevel = 'good';
+      else if (percentage >= 60) performanceLevel = 'average';
+
+      // Create result record for future use
+      const result = await this.prisma.student_Result.create({
+        data: {
+          student_id: student.id,
+          test_attempt_id: attemptId,
+          total_questions: totalQuestions,
+          attempted_questions: attemptedQuestions,
+          correct_answers: correctAnswers,
+          wrong_answers: wrongAnswers,
+          skipped_questions: skippedQuestions,
+          total_marks: totalMarks,
+          obtained_marks: obtainedMarks,
+          percentage: percentage,
+          time_taken_seconds: attempt.time_taken_seconds || 0,
+          performance_level: performanceLevel
+        }
+      });
+
+      return {
+        id: result.id,
+        test_attempt_id: attemptId,
+        title: attempt.test_assignment.test_paper.name,
+        subject: attempt.test_assignment.test_paper.pattern.subject.name,
+        total_questions: totalQuestions,
+        attempted_questions: attemptedQuestions,
+        correct_answers: correctAnswers,
+        wrong_answers: wrongAnswers,
+        skipped_questions: skippedQuestions,
+        total_marks: totalMarks,
+        obtained_marks: obtainedMarks,
+        percentage: percentage,
+        grade: result.grade,
+        rank_in_standard: result.rank_in_standard,
+        time_taken_seconds: attempt.time_taken_seconds || 0,
+        performance_level: performanceLevel,
+        chapter_wise_analysis: result.chapter_wise_analysis,
+        strengths: result.strengths as string[],
+        weaknesses: result.weaknesses as string[],
+        recommendations: result.recommendations as string[],
+        submitted_at: attempt.submitted_at || result.created_at
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get exam result');
+    }
+  }
+
+  async getDetailedReport(userId: number, attemptId: number): Promise<DetailedReportDto> {
+    try {
+      // Get student record
+      const student = await this.prisma.student.findUnique({
+        where: { user_id: userId }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Student record not found');
+      }
+
+      // Get result
+      const result = await this.getExamResult(userId, attemptId);
+
+      // Get detailed answers
+      const answers = await this.prisma.student_Answer.findMany({
+        where: {
+          test_attempt_id: attemptId,
+          test_attempt: {
+            student_id: student.id
+          }
+        },
+        include: {
+          question_text: {
+            include: {
+              image: true,
+              mcq_options: {
+                include: {
+                  image: true
+                },
+                orderBy: { id: 'asc' }
+              }
+            }
+          }
+        },
+        orderBy: { question_id: 'asc' }
+      });
+
+      const detailedQuestions = answers.map(answer => {
+        const correctOptionIndex = answer.question_text.mcq_options.findIndex(opt => opt.is_correct);
+        const selectedOptionIndex = answer.selected_option_id ? 
+          answer.question_text.mcq_options.findIndex(opt => opt.id === answer.selected_option_id) : 
+          -1;
+        
+        return {
+          question_id: answer.question_id,
+          question_text: answer.question_text.question_text,
+          question_image: answer.question_text.image?.image_url,
+          options: answer.question_text.mcq_options.map(opt => opt.option_text || ''),
+          option_images: answer.question_text.mcq_options.map(opt => opt.image?.image_url || null),
+          option_ids: answer.question_text.mcq_options.map(opt => opt.id),
+          correct_option: correctOptionIndex,
+          selected_option: answer.selected_option_id,
+          selected_option_index: selectedOptionIndex,
+          is_correct: answer.is_correct,
+          marks_obtained: answer.marks_obtained || 0,
+          time_spent_seconds: answer.time_spent_seconds,
+          is_flagged: answer.is_flagged
+        };
+      });
+
+      return {
+        result,
+        questions: detailedQuestions
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get detailed report');
     }
   }
 } 
