@@ -135,6 +135,34 @@ export class AuthService {
         }
       }
 
+      // Also check for user-specific invalidation
+      try {
+        const decoded = this.jwtService.decode(token);
+        if (decoded && typeof decoded === 'object' && decoded.sub) {
+          const userId = decoded.sub;
+          
+          // Check if there's a user invalidation token for this user
+          const userInvalidationTokens = await this.prisma.blacklisted_Token.findMany({
+            where: {
+              token: {
+                startsWith: `USER_INVALIDATION_${userId}_`
+              },
+              expires_at: {
+                gt: new Date()
+              }
+            }
+          });
+
+          if (userInvalidationTokens.length > 0) {
+            // User has been invalidated, blacklist this token too
+            this.tokenBlacklist.add(token);
+            return true;
+          }
+        }
+      } catch (decodeError) {
+        this.logger.warn('Failed to decode token for user invalidation check:', decodeError);
+      }
+
       return false;
     } catch (error) {
       this.logger.error('Error checking token blacklist:', error);
@@ -399,6 +427,36 @@ export class AuthService {
       // Implementation depends on your token management strategy
     } catch (error) {
       this.logger.error('Failed to invalidate tokens:', error);
+    }
+  }
+
+  /**
+   * Invalidate all tokens for a specific user by blacklisting them
+   * This will effectively log out the user from all devices
+   */
+  async invalidateAllUserTokens(userId: number): Promise<void> {
+    try {
+      // Since we can't easily track all tokens for a user without a session store,
+      // we'll implement a user-based blacklist approach by creating a special entry
+      
+      // Create a special blacklist entry that will invalidate all tokens for this user
+      // We'll use a special token format to indicate user-wide invalidation
+      const userInvalidationToken = `USER_INVALIDATION_${userId}_${Date.now()}`;
+      
+      await this.prisma.blacklisted_Token.create({
+        data: {
+          token: userInvalidationToken,
+          expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year from now
+        }
+      });
+
+      // Also add to in-memory blacklist
+      this.tokenBlacklist.add(userInvalidationToken);
+
+      this.logger.log(`Invalidated all tokens for user ID: ${userId}`);
+    } catch (error) {
+      this.logger.error('Failed to invalidate user tokens:', error);
+      throw error;
     }
   }
 

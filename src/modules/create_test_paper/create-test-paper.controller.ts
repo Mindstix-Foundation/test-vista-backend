@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, UseGuards, Request, Param } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Query, UseGuards, Request, Param, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { CreateTestPaperService } from './create-test-paper.service';
 import { CreateTestPaperFilterDto, CreateTestPaperResponseDto } from './dto/create-test-paper.dto';
@@ -410,5 +410,39 @@ export class CreateTestPaperController {
     @Request() req: any
   ) {
     return this.createTestPaperService.getTestPaperQuestions(testPaperId, req.user.id);
+  }
+
+  @Delete('online/:id')
+  @ApiOperation({ 
+    summary: 'Delete an online test paper',
+    description: 'Deletes an online test paper and all associated data including questions, assignments, and student attempts. Only the creator of the test paper can delete it.'
+  })
+  @ApiParam({
+    name: 'id',
+    required: true,
+    description: 'The ID of the online test paper to delete',
+    type: Number
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The online test paper has been successfully deleted',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Online test paper deleted successfully' },
+        deleted_questions_count: { type: 'number', example: 25 },
+        deleted_assignments_count: { type: 'number', example: 5 },
+        deleted_attempts_count: { type: 'number', example: 12 }
+      }
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Test paper not found or access denied' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 400, description: 'Cannot delete test paper with active student attempts' })
+  async deleteOnlineTestPaper(
+    @Param('id', ParseIntPipe) testPaperId: number,
+    @Request() req: any
+  ) {
+    return this.createTestPaperService.deleteOnlineTestPaper(testPaperId, req.user.id);
   }
 } 

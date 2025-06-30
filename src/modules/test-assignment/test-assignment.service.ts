@@ -16,7 +16,9 @@ import {
   ExamResultDto,
   DetailedReportDto,
   TestAttemptStatusDto,
-  SubmitExamResponseDto
+  SubmitExamResponseDto,
+  TestPaperResultsResponseDto,
+  TestPaperResultDto
 } from './dto/test-assignment.dto';
 
 @Injectable()
@@ -111,7 +113,8 @@ export class TestAssignmentService {
               subject: true,
               standard: true
             }
-          }
+          },
+          school: true
         }
       });
 
@@ -191,7 +194,8 @@ export class TestAssignmentService {
               subject: true,
               standard: true
             }
-          }
+          },
+          school: true
         }
       });
 
@@ -231,23 +235,18 @@ export class TestAssignmentService {
         throw new NotFoundException(`Students not found: ${missingIds.join(', ')}`);
       }
 
-      // Verify teacher teaches this subject to all students
+      // For ITI students workflow: Allow assignment to all students in the same standard and school
+      // Skip teacher-student enrollment verification as ITI students don't go through enrollment
       const validStudents = [];
       const failedStudents = [];
 
       for (const student of students) {
-        const teacherSubject = await this.prisma.teacher_Subject.findFirst({
-          where: {
-            user_id: teacherId,
-            subject_id: testPaper.pattern.subject.id,
-            school_standard: {
-              standard_id: testPaper.pattern.standard.id,
-              school_id: student.school_standard.school.id
-            }
-          }
-        });
+        // Verify student is in the correct standard and school for this test paper
+        const isCorrectStandardAndSchool = 
+          student.school_standard.standard.id === testPaper.pattern.standard.id &&
+          student.school_standard.school.id === testPaper.school.id;
 
-        if (teacherSubject) {
+        if (isCorrectStandardAndSchool) {
           // Check if assignment already exists
           const existingAssignment = await this.prisma.test_Assignment.findUnique({
             where: {
@@ -271,7 +270,7 @@ export class TestAssignmentService {
           failedStudents.push({
             student_id: student.id,
             student_name: student.user?.name || 'Unknown',
-            reason: 'Teacher does not teach this subject to this student'
+            reason: 'Student is not in the correct standard or school for this test'
           });
         }
       }
@@ -1558,6 +1557,177 @@ export class TestAssignmentService {
         throw error;
       }
       throw new BadRequestException('Failed to get detailed report');
+    }
+  }
+
+  async getTestPaperResults(teacherId: number, testPaperId: number): Promise<TestPaperResultsResponseDto> {
+    try {
+      // Verify test paper exists and belongs to teacher
+      const testPaper = await this.prisma.test_Paper.findUnique({
+        where: { id: testPaperId },
+        include: {
+          pattern: {
+            include: {
+              subject: true,
+              standard: true
+            }
+          }
+        }
+      });
+
+      if (!testPaper) {
+        throw new NotFoundException(`Test paper with ID ${testPaperId} not found`);
+      }
+
+      if (testPaper.user_id !== teacherId) {
+        throw new BadRequestException('You can only view results for your own test papers');
+      }
+
+      // Get all assignments for this test paper
+      const assignments = await this.prisma.test_Assignment.findMany({
+        where: { 
+          test_paper_id: testPaperId,
+          assigned_by_user_id: teacherId
+        },
+        include: {
+          student: {
+            include: {
+              user: true
+            }
+          },
+          test_attempts: {
+            include: {
+              student_result: true
+            },
+            orderBy: { attempt_number: 'desc' },
+            take: 1 // Get latest attempt
+          }
+        }
+      });
+
+      const results: TestPaperResultDto[] = [];
+      const completedResults: Array<{ marks: number; time: number; percentage: number }> = [];
+
+      // Process each assignment
+      for (const assignment of assignments) {
+        const latestAttempt = assignment.test_attempts[0];
+        
+        if (latestAttempt && latestAttempt.status === 'completed' && latestAttempt.student_result) {
+          const result = latestAttempt.student_result;
+          completedResults.push({
+            marks: result.obtained_marks,
+            time: result.time_taken_seconds,
+            percentage: result.percentage
+          });
+
+          results.push({
+            rank: 0, // Will be calculated later
+            student_name: assignment.student.user.name,
+            roll_number: assignment.student.student_id,
+            marks_obtained: result.obtained_marks,
+            total_marks: result.total_marks,
+            time_taken_seconds: result.time_taken_seconds,
+            percentage: result.percentage,
+            status: 'completed',
+            submitted_at: latestAttempt.submitted_at,
+            student_id: assignment.student.id,
+            test_attempt_id: latestAttempt.id
+          });
+        } else {
+          // Student hasn't completed the test
+          results.push({
+            rank: 0,
+            student_name: assignment.student.user.name,
+            roll_number: assignment.student.student_id,
+            marks_obtained: 0,
+            total_marks: testPaper.pattern.total_marks,
+            time_taken_seconds: 0,
+            percentage: 0,
+            status: 'pending',
+            student_id: assignment.student.id
+          });
+        }
+      }
+
+      // Sort results: pending students first (rank 0), then completed students by marks (desc) and time (asc)
+      results.sort((a, b) => {
+        if (a.status === 'pending' && b.status === 'completed') return -1;
+        if (a.status === 'completed' && b.status === 'pending') return 1;
+        if (a.status === 'pending' && b.status === 'pending') return 0;
+        
+        // Both completed - sort by marks (desc), then by time (asc)
+        if (a.marks_obtained !== b.marks_obtained) {
+          return b.marks_obtained - a.marks_obtained;
+        }
+        return a.time_taken_seconds - b.time_taken_seconds;
+      });
+
+      // Assign ranks
+      let currentRank = 1;
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].status === 'pending') {
+          results[i].rank = 0;
+        } else {
+          if (i > 0 && results[i].status === 'completed' && results[i-1].status === 'completed') {
+            // If marks and time are same as previous, keep same rank
+            if (results[i].marks_obtained === results[i-1].marks_obtained && 
+                results[i].time_taken_seconds === results[i-1].time_taken_seconds) {
+              results[i].rank = results[i-1].rank;
+            } else {
+              results[i].rank = currentRank;
+            }
+          } else {
+            results[i].rank = currentRank;
+          }
+          currentRank++;
+        }
+      }
+
+      // Calculate statistics
+      const totalStudents = assignments.length;
+      const completedStudents = completedResults.length;
+      const pendingStudents = totalStudents - completedStudents;
+      
+      let highestScore = 0;
+      let averageScore = 0;
+      let lowestScore = 0;
+      let passRate = 0;
+
+      if (completedResults.length > 0) {
+        // Use marks for highest/lowest/average (not percentage)
+        const marks = completedResults.map(r => r.marks);
+        const percentages = completedResults.map(r => r.percentage);
+        
+        highestScore = Math.max(...marks);
+        lowestScore = Math.min(...marks);
+        averageScore = marks.reduce((sum, mark) => sum + mark, 0) / marks.length;
+        
+        // Pass rate based on percentage >= 40%
+        const passedStudents = percentages.filter(percentage => percentage >= 40).length;
+        passRate = (passedStudents / completedStudents) * 100;
+      }
+
+      return {
+        test_paper_id: testPaperId,
+        test_paper_name: testPaper.name,
+        subject: testPaper.pattern.subject.name,
+        standard: testPaper.pattern.standard.name,
+        total_marks: testPaper.pattern.total_marks,
+        duration_minutes: testPaper.duration_minutes || 0,
+        total_students: totalStudents,
+        completed_students: completedStudents,
+        pending_students: pendingStudents,
+        highest_score: Math.round(highestScore * 100) / 100,
+        average_score: Math.round(averageScore * 100) / 100,
+        lowest_score: Math.round(lowestScore * 100) / 100,
+        pass_rate: Math.round(passRate * 100) / 100,
+        results: results
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get test paper results');
     }
   }
 } 
