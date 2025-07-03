@@ -412,4 +412,63 @@ export class ItiMocktestService {
       data: students
     };
   }
+
+  async deleteAllStudentsBySchoolAndStandard(schoolId: number, standardId: number) {
+    try {
+      // First, find all students in this school-standard combination
+      const students = await this.prisma.student.findMany({
+        where: {
+          school_standard: {
+            school_id: schoolId,
+            standard_id: standardId
+          }
+        },
+        include: {
+          user: true
+        }
+      });
+
+      if (students.length === 0) {
+        return {
+          message: 'No students found to delete',
+          statusCode: 200,
+          deleted_count: 0
+        };
+      }
+
+      const userIds = students.map(student => student.user_id);
+      const studentCount = students.length;
+
+      // Delete all students and their associated users in a transaction
+      await this.prisma.$transaction(async (prisma) => {
+        // Delete all students first (this will cascade delete related records)
+        await prisma.student.deleteMany({
+          where: {
+            school_standard: {
+              school_id: schoolId,
+              standard_id: standardId
+            }
+          }
+        });
+
+        // Delete all associated users
+        await prisma.user.deleteMany({
+          where: {
+            id: {
+              in: userIds
+            }
+          }
+        });
+      });
+
+      return {
+        message: `Successfully deleted all ${studentCount} students`,
+        statusCode: 200,
+        deleted_count: studentCount
+      };
+    } catch (error) {
+      console.error('Error deleting all students:', error);
+      throw new BadRequestException('Failed to delete all students');
+    }
+  }
 } 

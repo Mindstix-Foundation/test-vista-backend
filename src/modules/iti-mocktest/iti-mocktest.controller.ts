@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, ParseIntPipe, HttpStatus, UseGuards, Request, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, ParseIntPipe, HttpStatus, UseGuards, Request, Query, BadRequestException, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ItiMocktestService } from './iti-mocktest.service';
@@ -75,5 +75,25 @@ export class ItiMocktestController {
     }
     
     return this.itiMocktestService.getStudentsBySchoolAndStandard(schoolIdNum, standardIdNum);
+  }
+
+  @Delete('students/all')
+  @ApiOperation({ summary: 'Delete all ITI students by school and standard' })
+  @ApiQuery({ name: 'schoolId', type: 'number', description: 'School ID' })
+  @ApiQuery({ name: 'standardId', type: 'number', description: 'Standard ID' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'All students deleted successfully' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid schoolId or standardId' })
+  async deleteAllStudentsBySchoolAndStandard(
+    @Query('schoolId') schoolId: string,
+    @Query('standardId') standardId: string,
+  ) {
+    const schoolIdNum = parseInt(schoolId, 10);
+    const standardIdNum = parseInt(standardId, 10);
+    
+    if (isNaN(schoolIdNum) || isNaN(standardIdNum)) {
+      throw new BadRequestException('Invalid schoolId or standardId');
+    }
+    
+    return this.itiMocktestService.deleteAllStudentsBySchoolAndStandard(schoolIdNum, standardIdNum);
   }
 } 
