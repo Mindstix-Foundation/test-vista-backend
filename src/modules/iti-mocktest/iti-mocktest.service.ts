@@ -48,6 +48,17 @@ export class ItiMocktestService {
     // Generate a simple email from roll number and school name
     const email = `${dto.roll_no.toLowerCase()}@${schoolStandard.school.name.toLowerCase().replace(/\s+/g, '')}.edu`;
     
+    // Check if user with this email already exists
+    const existingUser = await this.prisma.user.findUnique({
+      where: {
+        email_id: email
+      }
+    });
+
+    if (existingUser) {
+      throw new ConflictException('A student with this roll number already exists in this college. Please use a different roll number or contact your administrator.');
+    }
+    
     // Generate a simple password (roll number)
     const password = dto.roll_no;
     const hashedPassword = await bcrypt.hash(password, 10);
