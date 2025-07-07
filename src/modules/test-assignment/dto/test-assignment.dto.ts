@@ -227,6 +227,9 @@ export class StudentAssignedTestDto {
 
   @ApiProperty({ example: 'John Doe' })
   assignedBy: string;
+
+  @ApiPropertyOptional({ example: 123, description: 'Test attempt ID for completed tests' })
+  test_attempt_id?: number;
 }
 
 // New DTOs for student exam functionality
@@ -628,6 +631,23 @@ export class TestPaperResultsResponseDto {
 
   @ApiProperty({ example: 72.0 })
   pass_rate: number;
+
+  @ApiProperty({ 
+    example: [
+      {
+        chapterName: 'Algebra',
+        total: 10,
+        correct: 7.5,
+        wrong: 1.8,
+        skipped: 0.7,
+        percentage: 75.0,
+        totalMarks: 20,
+        obtainedMarks: 15.0,
+        performanceLevel: 'good'
+      }
+    ]
+  })
+  chapter_wise_analysis?: any[];
 
   @ApiProperty({ type: [TestPaperResultDto] })
   results: TestPaperResultDto[];
