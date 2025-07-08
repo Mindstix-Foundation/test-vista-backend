@@ -138,10 +138,11 @@ export class AuthService {
       // Also check for user-specific invalidation
       try {
         const decoded = this.jwtService.decode(token);
-        if (decoded && typeof decoded === 'object' && decoded.sub) {
+        if (decoded && typeof decoded === 'object' && decoded.sub && decoded.iat) {
           const userId = decoded.sub;
+          const tokenIssuedAt = new Date(decoded.iat * 1000); // Convert JWT iat to Date
           
-          // Check if there's a user invalidation token for this user
+          // Check if there's a user invalidation token for this user that was created AFTER this token was issued
           const userInvalidationTokens = await this.prisma.blacklisted_Token.findMany({
             where: {
               token: {
@@ -149,12 +150,15 @@ export class AuthService {
               },
               expires_at: {
                 gt: new Date()
+              },
+              created_at: {
+                gt: tokenIssuedAt // Only invalidate if the invalidation was created after this token
               }
             }
           });
 
           if (userInvalidationTokens.length > 0) {
-            // User has been invalidated, blacklist this token too
+            // User has been invalidated after this token was issued, blacklist this token too
             this.tokenBlacklist.add(token);
             return true;
           }
@@ -431,11 +435,38 @@ export class AuthService {
   }
 
   /**
+   * Clean up expired user invalidation tokens to prevent database bloat
+   */
+  private async cleanupExpiredUserInvalidationTokens(): Promise<void> {
+    try {
+      const result = await this.prisma.blacklisted_Token.deleteMany({
+        where: {
+          token: {
+            startsWith: 'USER_INVALIDATION_'
+          },
+          expires_at: {
+            lt: new Date()
+          }
+        }
+      });
+      
+      if (result.count > 0) {
+        this.logger.log(`Cleaned up ${result.count} expired user invalidation tokens`);
+      }
+    } catch (error) {
+      this.logger.error('Failed to cleanup expired user invalidation tokens:', error);
+    }
+  }
+
+  /**
    * Invalidate all tokens for a specific user by blacklisting them
    * This will effectively log out the user from all devices
    */
   async invalidateAllUserTokens(userId: number): Promise<void> {
     try {
+      // Clean up expired tokens first
+      await this.cleanupExpiredUserInvalidationTokens();
+      
       // Since we can't easily track all tokens for a user without a session store,
       // we'll implement a user-based blacklist approach by creating a special entry
       
