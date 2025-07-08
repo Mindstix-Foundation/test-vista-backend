@@ -16,7 +16,9 @@ import {
   ExamResultDto,
   DetailedReportDto,
   TestAttemptStatusDto,
-  SubmitExamResponseDto
+  SubmitExamResponseDto,
+  TestPaperResultsResponseDto,
+  TestPaperResultDto
 } from './dto/test-assignment.dto';
 
 @Injectable()
@@ -111,7 +113,8 @@ export class TestAssignmentService {
               subject: true,
               standard: true
             }
-          }
+          },
+          school: true
         }
       });
 
@@ -191,7 +194,8 @@ export class TestAssignmentService {
               subject: true,
               standard: true
             }
-          }
+          },
+          school: true
         }
       });
 
@@ -231,23 +235,18 @@ export class TestAssignmentService {
         throw new NotFoundException(`Students not found: ${missingIds.join(', ')}`);
       }
 
-      // Verify teacher teaches this subject to all students
+      // For ITI students workflow: Allow assignment to all students in the same standard and school
+      // Skip teacher-student enrollment verification as ITI students don't go through enrollment
       const validStudents = [];
       const failedStudents = [];
 
       for (const student of students) {
-        const teacherSubject = await this.prisma.teacher_Subject.findFirst({
-          where: {
-            user_id: teacherId,
-            subject_id: testPaper.pattern.subject.id,
-            school_standard: {
-              standard_id: testPaper.pattern.standard.id,
-              school_id: student.school_standard.school.id
-            }
-          }
-        });
+        // Verify student is in the correct standard and school for this test paper
+        const isCorrectStandardAndSchool = 
+          student.school_standard.standard.id === testPaper.pattern.standard.id &&
+          student.school_standard.school.id === testPaper.school.id;
 
-        if (teacherSubject) {
+        if (isCorrectStandardAndSchool) {
           // Check if assignment already exists
           const existingAssignment = await this.prisma.test_Assignment.findUnique({
             where: {
@@ -271,7 +270,7 @@ export class TestAssignmentService {
           failedStudents.push({
             student_id: student.id,
             student_name: student.user?.name || 'Unknown',
-            reason: 'Teacher does not teach this subject to this student'
+            reason: 'Student is not in the correct standard or school for this test'
           });
         }
       }
@@ -585,9 +584,16 @@ export class TestAssignmentService {
         // Calculate progress based on current attempt
         let progress = 0;
         let remainingTime = '';
+        let testAttemptId: number | undefined;
         
         const currentAttempt = assignment.test_attempts.find(attempt => attempt.status === 'in_progress');
+        const completedAttempt = assignment.test_attempts.find(attempt => attempt.status === 'completed');
         const totalQuestions = assignment.test_paper.test_paper_questions.length;
+        
+        // If test is completed, get the attempt ID for viewing results
+        if (status === 'completed' && completedAttempt) {
+          testAttemptId = completedAttempt.id;
+        }
         
         if (currentAttempt && totalQuestions > 0) {
           const answeredQuestions = currentAttempt.student_answers.filter(answer => answer.selected_option_id !== null).length;
@@ -630,7 +636,8 @@ export class TestAssignmentService {
           remainingTime,
           subject: assignment.test_paper.pattern.subject.name,
           standard: assignment.test_paper.pattern.standard.name,
-          assignedBy: assignment.assigned_by.name
+          assignedBy: assignment.assigned_by.name,
+          test_attempt_id: testAttemptId
         };
       });
 
@@ -1161,6 +1168,18 @@ export class TestAssignmentService {
           id: dto.test_attempt_id,
           student_id: student.id,
           status: 'in_progress'
+        },
+        include: {
+          test_assignment: {
+            include: {
+              test_paper: {
+                select: {
+                  negative_marking: true,
+                  negative_marks_per_question: true
+                }
+              }
+            }
+          }
         }
       });
 
@@ -1184,9 +1203,53 @@ export class TestAssignmentService {
         }
       }
 
+      // Get question data to calculate marks
+      let isCorrect = null;
+      let marksObtained = 0;
+
+      if (dto.selected_option_id !== null && dto.selected_option_id !== undefined) {
+        // Get the question details to check correctness and marks
+        const questionData = await this.prisma.test_Paper_Question.findFirst({
+          where: {
+            test_paper_id: attempt.test_assignment.test_paper_id,
+            question_id: dto.question_id,
+            question_text_id: dto.question_text_id
+          },
+          include: {
+            question_text: {
+              include: {
+                mcq_options: true
+              }
+            }
+          }
+        });
+
+        if (questionData) {
+          // Check if the selected option is correct
+          const correctOption = questionData.question_text.mcq_options.find(opt => opt.is_correct);
+          const selectedOption = questionData.question_text.mcq_options.find(opt => opt.id === dto.selected_option_id);
+          
+          if (correctOption && selectedOption && selectedOption.is_correct) {
+            isCorrect = true;
+            marksObtained = questionData.marks;
+            console.log(`Question ${dto.question_id}: Correct answer, marks awarded: ${marksObtained}`);
+          } else {
+            isCorrect = false;
+            // Apply negative marking if enabled
+            if (attempt.test_assignment.test_paper.negative_marking) {
+              const deduction = attempt.test_assignment.test_paper.negative_marks_per_question || 0;
+              marksObtained = -deduction;
+            } else {
+              marksObtained = 0;
+            }
+            console.log(`Question ${dto.question_id}: Wrong answer, marks: ${marksObtained}`);
+          }
+        }
+      }
+
       console.log('Attempting to upsert answer...');
 
-      // Upsert the answer
+      // Upsert the answer with calculated marks
       await this.prisma.student_Answer.upsert({
         where: {
           test_attempt_id_question_id: {
@@ -1196,6 +1259,8 @@ export class TestAssignmentService {
         },
         update: {
           selected_option_id: dto.selected_option_id,
+          is_correct: isCorrect,
+          marks_obtained: marksObtained,
           time_spent_seconds: dto.time_spent_seconds,
           is_flagged: dto.is_flagged || false,
           answered_at: new Date()
@@ -1205,12 +1270,14 @@ export class TestAssignmentService {
           question_id: dto.question_id,
           question_text_id: dto.question_text_id,
           selected_option_id: dto.selected_option_id,
+          is_correct: isCorrect,
+          marks_obtained: marksObtained,
           time_spent_seconds: dto.time_spent_seconds,
           is_flagged: dto.is_flagged || false
         }
       });
 
-      console.log('Answer upserted successfully');
+      console.log('Answer upserted successfully with marks:', marksObtained);
       return { message: 'Answer submitted successfully' };
     } catch (error) {
       console.error('Error in submitAnswer:', error);
@@ -1387,43 +1454,18 @@ export class TestAssignmentService {
       let wrongAnswers = 0;
       let obtainedMarks = 0;
 
-      // Calculate scores
+      // Calculate scores using pre-calculated marks from Student_Answer table
       for (const answer of answers) {
         if (answer.selected_option_id !== null && answer.selected_option_id !== undefined) {
-          const correctOption = answer.question_text.mcq_options.find(opt => opt.is_correct);
-          const selectedOption = answer.question_text.mcq_options.find(opt => opt.id === answer.selected_option_id);
-          
-          if (correctOption && selectedOption && selectedOption.is_correct) {
+          // Use the pre-calculated values from submitAnswer
+          if (answer.is_correct === true) {
             correctAnswers++;
-            const questionData = questions.find(q => q.question_id === answer.question_id);
-            const marks = questionData?.marks || 0;
-            obtainedMarks += marks;
-            
-            // Update answer with correct status
-            await this.prisma.student_Answer.update({
-              where: { id: answer.id },
-              data: {
-                is_correct: true,
-                marks_obtained: marks
-              }
-            });
-          } else {
+          } else if (answer.is_correct === false) {
             wrongAnswers++;
-            let deduction = 0;
-            if (attempt.test_assignment.test_paper.negative_marking) {
-              deduction = attempt.test_assignment.test_paper.negative_marks_per_question || 0;
-              obtainedMarks -= deduction;
-            }
-            
-            // Update answer with incorrect status
-            await this.prisma.student_Answer.update({
-              where: { id: answer.id },
-              data: {
-                is_correct: false,
-                marks_obtained: -deduction
-              }
-            });
           }
+          
+          // Add the marks obtained (could be positive for correct, negative for wrong with negative marking, or 0)
+          obtainedMarks += answer.marks_obtained || 0;
         }
       }
 
@@ -1435,9 +1477,15 @@ export class TestAssignmentService {
 
       // Determine performance level
       let performanceLevel = 'poor';
-      if (percentage >= 90) performanceLevel = 'excellent';
-      else if (percentage >= 75) performanceLevel = 'good';
-      else if (percentage >= 60) performanceLevel = 'average';
+      if (percentage >= 70) performanceLevel = 'excellent';
+      else if (percentage >= 50) performanceLevel = 'good';
+      else if (percentage >= 30) performanceLevel = 'average';
+
+      // Calculate chapter-wise analysis
+      const chapterWiseAnalysis = await this.calculateChapterWiseAnalysis(attemptId, answers, questions);
+      
+      // Calculate strengths and weaknesses based on chapter performance
+      const { strengths, weaknesses, recommendations } = this.calculateStrengthsAndWeaknesses(chapterWiseAnalysis);
 
       // Create result record for future use
       const result = await this.prisma.student_Result.create({
@@ -1453,7 +1501,11 @@ export class TestAssignmentService {
           obtained_marks: obtainedMarks,
           percentage: percentage,
           time_taken_seconds: attempt.time_taken_seconds || 0,
-          performance_level: performanceLevel
+          performance_level: performanceLevel,
+          chapter_wise_analysis: chapterWiseAnalysis,
+          strengths: strengths,
+          weaknesses: weaknesses,
+          recommendations: recommendations
         }
       });
 
@@ -1502,13 +1554,29 @@ export class TestAssignmentService {
       // Get result
       const result = await this.getExamResult(userId, attemptId);
 
-      // Get detailed answers
-      const answers = await this.prisma.student_Answer.findMany({
+      // Get the test attempt to find the test paper ID
+      const testAttempt = await this.prisma.test_Attempt.findFirst({
         where: {
-          test_attempt_id: attemptId,
-          test_attempt: {
-            student_id: student.id
+          id: attemptId,
+          student_id: student.id
+        },
+        include: {
+          test_assignment: {
+            select: {
+              test_paper_id: true
+            }
           }
+        }
+      });
+
+      if (!testAttempt) {
+        throw new NotFoundException('Test attempt not found');
+      }
+
+      // Get all questions from the test paper
+      const testPaperQuestions = await this.prisma.test_Paper_Question.findMany({
+        where: {
+          test_paper_id: testAttempt.test_assignment.test_paper_id
         },
         include: {
           question_text: {
@@ -1523,30 +1591,68 @@ export class TestAssignmentService {
             }
           }
         },
-        orderBy: { question_id: 'asc' }
+        orderBy: { question_order: 'asc' }
       });
 
-      const detailedQuestions = answers.map(answer => {
-        const correctOptionIndex = answer.question_text.mcq_options.findIndex(opt => opt.is_correct);
-        const selectedOptionIndex = answer.selected_option_id ? 
-          answer.question_text.mcq_options.findIndex(opt => opt.id === answer.selected_option_id) : 
-          -1;
+      // Get student answers
+      const answers = await this.prisma.student_Answer.findMany({
+        where: {
+          test_attempt_id: attemptId,
+          test_attempt: {
+            student_id: student.id
+          }
+        }
+      });
+
+      // Create a map of answers by question_id for quick lookup
+      const answerMap = new Map();
+      answers.forEach(answer => {
+        answerMap.set(answer.question_id, answer);
+      });
+
+      const detailedQuestions = testPaperQuestions.map(tpq => {
+        const answer = answerMap.get(tpq.question_id);
+        const correctOptionIndex = tpq.question_text.mcq_options.findIndex(opt => opt.is_correct);
         
-        return {
-          question_id: answer.question_id,
-          question_text: answer.question_text.question_text,
-          question_image: answer.question_text.image?.image_url,
-          options: answer.question_text.mcq_options.map(opt => opt.option_text || ''),
-          option_images: answer.question_text.mcq_options.map(opt => opt.image?.image_url || null),
-          option_ids: answer.question_text.mcq_options.map(opt => opt.id),
-          correct_option: correctOptionIndex,
-          selected_option: answer.selected_option_id,
-          selected_option_index: selectedOptionIndex,
-          is_correct: answer.is_correct,
-          marks_obtained: answer.marks_obtained || 0,
-          time_spent_seconds: answer.time_spent_seconds,
-          is_flagged: answer.is_flagged
-        };
+        if (answer) {
+          // Question was attempted
+          const selectedOptionIndex = answer.selected_option_id ? 
+            tpq.question_text.mcq_options.findIndex(opt => opt.id === answer.selected_option_id) : 
+            -1;
+          
+          return {
+            question_id: tpq.question_id,
+            question_text: tpq.question_text.question_text,
+            question_image: tpq.question_text.image?.image_url,
+            options: tpq.question_text.mcq_options.map(opt => opt.option_text || ''),
+            option_images: tpq.question_text.mcq_options.map(opt => opt.image?.image_url || null),
+            option_ids: tpq.question_text.mcq_options.map(opt => opt.id),
+            correct_option: correctOptionIndex,
+            selected_option: answer.selected_option_id,
+            selected_option_index: selectedOptionIndex,
+            is_correct: answer.is_correct,
+            marks_obtained: answer.marks_obtained || 0,
+            time_spent_seconds: answer.time_spent_seconds,
+            is_flagged: answer.is_flagged
+          };
+        } else {
+          // Question was not attempted
+          return {
+            question_id: tpq.question_id,
+            question_text: tpq.question_text.question_text,
+            question_image: tpq.question_text.image?.image_url,
+            options: tpq.question_text.mcq_options.map(opt => opt.option_text || ''),
+            option_images: tpq.question_text.mcq_options.map(opt => opt.image?.image_url || null),
+            option_ids: tpq.question_text.mcq_options.map(opt => opt.id),
+            correct_option: correctOptionIndex,
+            selected_option: null,
+            selected_option_index: -1,
+            is_correct: null,
+            marks_obtained: 0,
+            time_spent_seconds: 0,
+            is_flagged: false
+          };
+        }
       });
 
       return {
@@ -1558,6 +1664,589 @@ export class TestAssignmentService {
         throw error;
       }
       throw new BadRequestException('Failed to get detailed report');
+    }
+  }
+
+  // Helper method to calculate chapter-wise analysis
+  private async calculateChapterWiseAnalysis(attemptId: number, answers: any[], questions: any[]): Promise<any> {
+    try {
+      // Get the test attempt to find the test paper ID
+      const testAttempt = await this.prisma.test_Attempt.findUnique({
+        where: { id: attemptId },
+        include: {
+          test_assignment: {
+            select: {
+              test_paper_id: true
+            }
+          }
+        }
+      });
+
+      if (!testAttempt) {
+        return {};
+      }
+
+      // Get chapter information for each question through the question_topics relationship
+      const questionsWithChapters = await this.prisma.test_Paper_Question.findMany({
+        where: { 
+          test_paper_id: testAttempt.test_assignment.test_paper_id
+        },
+        include: {
+          question: {
+            include: {
+              question_topics: {
+                include: {
+                  topic: {
+                    include: {
+                      chapter: {
+                        select: {
+                          id: true,
+                          name: true,
+                          sequential_chapter_number: true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      // Create a map of question to chapter
+      const questionToChapterMap = new Map();
+      const chapterSequenceMap = new Map(); // Map to store chapter sequence numbers
+      questionsWithChapters.forEach(q => {
+        // Get the first topic's chapter (most questions belong to one chapter)
+        const firstTopic = q.question.question_topics[0];
+        if (firstTopic && firstTopic.topic && firstTopic.topic.chapter) {
+          const chapter = firstTopic.topic.chapter;
+          questionToChapterMap.set(q.question_id, chapter);
+          chapterSequenceMap.set(chapter.name, chapter.sequential_chapter_number);
+        }
+      });
+
+      // Debug logging for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('=== Chapter-wise Analysis Debug ===');
+        console.log('Total questions in test paper:', questions.length);
+        console.log('Questions with chapter mapping:', questionToChapterMap.size);
+        console.log('Chapter mapping debug:', Array.from(questionToChapterMap.entries()).map(([qId, chapter]) => ({
+          questionId: qId,
+          chapterName: chapter.name,
+          chapterId: chapter.id,
+          sequenceNumber: chapter.sequential_chapter_number
+        })));
+
+        console.log('Chapter sequence map:', Array.from(chapterSequenceMap.entries()).map(([name, seq]) => ({
+          chapterName: name,
+          sequenceNumber: seq
+        })));
+
+        // If no chapters found, let's debug the structure
+        if (questionToChapterMap.size === 0) {
+          console.log('No chapters found! Debugging question structure:');
+          questionsWithChapters.forEach((q, index) => {
+            console.log(`Question ${index + 1}:`, {
+              questionId: q.question_id,
+              questionTopicsCount: q.question.question_topics.length,
+              firstTopicDetails: q.question.question_topics[0] ? {
+                topicId: q.question.question_topics[0].topic_id,
+                topicName: q.question.question_topics[0].topic?.name,
+                chapterDetails: q.question.question_topics[0].topic?.chapter
+              } : 'No topics'
+            });
+          });
+        }
+      }
+
+      // Initialize chapter stats with all questions in each chapter
+      const chapterStats = new Map();
+      
+      // First, count all questions in each chapter (from the test paper)
+      questions.forEach(question => {
+        const chapter = questionToChapterMap.get(question.question_id);
+        if (!chapter) {
+          console.warn(`Question ${question.question_id} has no chapter mapping, skipping from chapter-wise analysis`);
+          return;
+        }
+        
+        const chapterName = chapter.name;
+        if (!chapterStats.has(chapterName)) {
+          chapterStats.set(chapterName, {
+            total: 0,
+            correct: 0,
+            wrong: 0,
+            skipped: 0,
+            totalMarks: 0,
+            obtainedMarks: 0
+          });
+        }
+        
+        const stats = chapterStats.get(chapterName);
+        stats.total++; // Count all questions in this chapter
+        stats.totalMarks += question.marks || 0; // Add total marks for this question
+      });
+
+      // Debug logging for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Processing answers. Total answers:', answers.length);
+        console.log('Question to chapter mapping size:', questionToChapterMap.size);
+        console.log('Chapter stats after counting all questions:', Array.from(chapterStats.entries()).map(([name, stats]) => ({
+          chapterName: name,
+          total: stats.total,
+          totalMarks: stats.totalMarks
+        })));
+        console.log('Sample answers:', answers.slice(0, 3).map(a => ({
+          questionId: a.question_id,
+          selectedOptionId: a.selected_option_id,
+          isCorrect: a.is_correct,
+          marksObtained: a.marks_obtained
+        })));
+      }
+      
+      // Now process student answers to update correct/wrong/skipped counts
+      // Create a map of all questions for faster lookup
+      const questionMap = new Map();
+      questions.forEach(q => questionMap.set(q.question_id, q));
+      
+      // For questions that have no student answer, they are considered skipped
+      questions.forEach(question => {
+        const chapter = questionToChapterMap.get(question.question_id);
+        if (!chapter) return;
+        
+        const chapterName = chapter.name;
+        const stats = chapterStats.get(chapterName);
+        if (!stats) return;
+        
+        // Check if student answered this question
+        const studentAnswer = answers.find(a => a.question_id === question.question_id);
+        
+        if (!studentAnswer || studentAnswer.selected_option_id === null || studentAnswer.selected_option_id === undefined) {
+          // Question was skipped
+          stats.skipped++;
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Question ${question.question_id} in chapter ${chapterName}: SKIPPED`);
+          }
+        } else {
+          // Question was attempted - use the pre-calculated values from submitAnswer
+          if (studentAnswer.is_correct === true) {
+            stats.correct++;
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`Question ${question.question_id} in chapter ${chapterName}: CORRECT, marks: ${studentAnswer.marks_obtained}`);
+            }
+          } else if (studentAnswer.is_correct === false) {
+            stats.wrong++;
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`Question ${question.question_id} in chapter ${chapterName}: WRONG, marks: ${studentAnswer.marks_obtained}`);
+            }
+          }
+          
+          // Add the marks obtained (pre-calculated in submitAnswer)
+          stats.obtainedMarks += studentAnswer.marks_obtained || 0;
+        }
+      });
+
+      // Debug logging for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Final chapter stats:', Array.from(chapterStats.entries()).map(([name, stats]) => ({
+          chapterName: name,
+          total: stats.total,
+          correct: stats.correct,
+          wrong: stats.wrong,
+          skipped: stats.skipped,
+          totalMarks: stats.totalMarks,
+          obtainedMarks: stats.obtainedMarks
+        })));
+      }
+
+      // Convert to final format with performance levels and sort by sequence
+      const chapterEntries = Array.from(chapterStats.entries()).map(([chapterName, stats]) => {
+        // Calculate percentage as correct answers out of total questions in chapter
+        const percentage = stats.total > 0 ? (stats.correct / stats.total) * 100 : 0;
+        let performanceLevel = 'poor';
+        if (percentage >= 70) performanceLevel = 'excellent';
+        else if (percentage >= 50) performanceLevel = 'good';
+        else if (percentage >= 30) performanceLevel = 'average';
+        
+        return {
+          chapterName,
+          sequenceNumber: chapterSequenceMap.get(chapterName) || 999, // Default to 999 if not found
+          stats: {
+            total: stats.total,
+            correct: stats.correct,
+            wrong: stats.wrong,
+            skipped: stats.skipped,
+            percentage: Math.round(percentage * 100) / 100,
+            totalMarks: stats.totalMarks,
+            obtainedMarks: stats.obtainedMarks,
+            performanceLevel: performanceLevel
+          }
+        };
+      });
+
+      // Debug logging for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Chapter entries before sorting:', chapterEntries.map(e => ({
+          name: e.chapterName,
+          sequenceNumber: e.sequenceNumber,
+          total: e.stats.total,
+          correct: e.stats.correct,
+          percentage: e.stats.percentage
+        })));
+      }
+
+      // Sort by sequence number
+      chapterEntries.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+      // Debug logging for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Chapter entries after sorting:', chapterEntries.map(e => ({
+          name: e.chapterName,
+          sequenceNumber: e.sequenceNumber,
+          total: e.stats.total,
+          correct: e.stats.correct,
+          percentage: e.stats.percentage
+        })));
+        
+        // Verify total questions match
+        const totalQuestionsInChapters = chapterEntries.reduce((sum, e) => sum + e.stats.total, 0);
+        console.log(`Total questions in chapters: ${totalQuestionsInChapters}, Expected: ${questions.length}`);
+        console.log('=== End Chapter-wise Analysis Debug ===');
+      }
+
+      // Return as array to preserve order
+      const chapterWiseAnalysis = chapterEntries.map(entry => ({
+        chapterName: entry.chapterName,
+        ...entry.stats
+      }));
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Final chapter-wise analysis:', chapterWiseAnalysis);
+      }
+      return chapterWiseAnalysis;
+    } catch (error) {
+      console.error('Error calculating chapter-wise analysis:', error);
+      return {};
+    }
+  }
+
+  // Helper method to calculate strengths and weaknesses
+  private calculateStrengthsAndWeaknesses(chapterWiseAnalysis: any): { strengths: string[], weaknesses: string[], recommendations: string[] } {
+    const strengths = [];
+    const weaknesses = [];
+    const averageChapters = [];
+    const recommendations = [];
+
+    if (Array.isArray(chapterWiseAnalysis)) {
+      chapterWiseAnalysis.forEach((chapter: any) => {
+        if (chapter.performanceLevel === 'excellent' || chapter.performanceLevel === 'good') {
+          strengths.push(chapter.chapterName);
+        } else if (chapter.performanceLevel === 'poor') {
+          weaknesses.push(chapter.chapterName);
+        } else if (chapter.performanceLevel === 'average') {
+          averageChapters.push(chapter.chapterName);
+        }
+      });
+    } else {
+      // Fallback for object format (backwards compatibility)
+      Object.entries(chapterWiseAnalysis).forEach(([chapterName, stats]: [string, any]) => {
+        if (stats.performanceLevel === 'excellent' || stats.performanceLevel === 'good') {
+          strengths.push(chapterName);
+        } else if (stats.performanceLevel === 'poor') {
+          weaknesses.push(chapterName);
+        } else if (stats.performanceLevel === 'average') {
+          averageChapters.push(chapterName);
+        }
+      });
+    }
+
+    // Create concise recommendations
+    if (weaknesses.length > 0) {
+      recommendations.push(`Need to improve on - ${weaknesses.join(', ')}`);
+    }
+    if (averageChapters.length > 0) {
+      recommendations.push(`Need to study more on - ${averageChapters.join(', ')}`);
+    }
+    if (strengths.length > 0) {
+      recommendations.push(`Keep practicing - ${strengths.join(', ')} to maintain performance`);
+    }
+
+    return { strengths, weaknesses, recommendations };
+  }
+
+  async getTestPaperResults(teacherId: number, testPaperId: number): Promise<TestPaperResultsResponseDto> {
+    try {
+      // Verify test paper exists and belongs to teacher
+      const testPaper = await this.prisma.test_Paper.findUnique({
+        where: { id: testPaperId },
+        include: {
+          pattern: {
+            include: {
+              subject: true,
+              standard: true
+            }
+          }
+        }
+      });
+
+      if (!testPaper) {
+        throw new NotFoundException(`Test paper with ID ${testPaperId} not found`);
+      }
+
+      if (testPaper.user_id !== teacherId) {
+        throw new BadRequestException('You can only view results for your own test papers');
+      }
+
+      // Get all assignments for this test paper
+      const assignments = await this.prisma.test_Assignment.findMany({
+        where: { 
+          test_paper_id: testPaperId,
+          assigned_by_user_id: teacherId
+        },
+        include: {
+          student: {
+            include: {
+              user: true
+            }
+          },
+          test_attempts: {
+            include: {
+              student_result: true
+            },
+            orderBy: { attempt_number: 'desc' },
+            take: 1 // Get latest attempt
+          }
+        }
+      });
+
+      const results: TestPaperResultDto[] = [];
+      const completedResults: Array<{ marks: number; time: number; percentage: number }> = [];
+      const completedStudentResults: any[] = [];
+
+      // Process each assignment
+      for (const assignment of assignments) {
+        const latestAttempt = assignment.test_attempts[0];
+        
+        if (latestAttempt && latestAttempt.status === 'completed' && latestAttempt.student_result) {
+          const result = latestAttempt.student_result;
+          completedResults.push({
+            marks: result.obtained_marks,
+            time: result.time_taken_seconds,
+            percentage: result.percentage
+          });
+
+          // Store completed student results for chapter-wise analysis
+          if (result.chapter_wise_analysis) {
+            completedStudentResults.push(result.chapter_wise_analysis);
+          }
+
+          results.push({
+            rank: 0, // Will be calculated later
+            student_name: assignment.student.user.name,
+            roll_number: assignment.student.student_id,
+            marks_obtained: result.obtained_marks,
+            total_marks: result.total_marks,
+            time_taken_seconds: result.time_taken_seconds,
+            percentage: result.percentage,
+            status: 'completed',
+            submitted_at: latestAttempt.submitted_at,
+            student_id: assignment.student.id,
+            test_attempt_id: latestAttempt.id
+          });
+        } else {
+          // Student hasn't completed the test
+          results.push({
+            rank: 0,
+            student_name: assignment.student.user.name,
+            roll_number: assignment.student.student_id,
+            marks_obtained: 0,
+            total_marks: testPaper.pattern.total_marks,
+            time_taken_seconds: 0,
+            percentage: 0,
+            status: 'pending',
+            student_id: assignment.student.id
+          });
+        }
+      }
+
+      // Sort results: pending students first (rank 0), then completed students by marks (desc) and time (asc)
+      results.sort((a, b) => {
+        if (a.status === 'pending' && b.status === 'completed') return -1;
+        if (a.status === 'completed' && b.status === 'pending') return 1;
+        if (a.status === 'pending' && b.status === 'pending') return 0;
+        
+        // Both completed - sort by marks (desc), then by time (asc)
+        if (a.marks_obtained !== b.marks_obtained) {
+          return b.marks_obtained - a.marks_obtained;
+        }
+        return a.time_taken_seconds - b.time_taken_seconds;
+      });
+
+      // Assign ranks
+      let currentRank = 1;
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].status === 'pending') {
+          results[i].rank = 0;
+        } else {
+          if (i > 0 && results[i].status === 'completed' && results[i-1].status === 'completed') {
+            // If marks and time are same as previous, keep same rank
+            if (results[i].marks_obtained === results[i-1].marks_obtained && 
+                results[i].time_taken_seconds === results[i-1].time_taken_seconds) {
+              results[i].rank = results[i-1].rank;
+            } else {
+              results[i].rank = currentRank;
+            }
+          } else {
+            results[i].rank = currentRank;
+          }
+          currentRank++;
+        }
+      }
+
+      // Calculate statistics
+      const totalStudents = assignments.length;
+      const completedStudents = completedResults.length;
+      const pendingStudents = totalStudents - completedStudents;
+      
+      let highestScore = 0;
+      let averageScore = 0;
+      let lowestScore = 0;
+      let passRate = 0;
+
+      if (completedResults.length > 0) {
+        // Use marks for highest/lowest/average (not percentage)
+        const marks = completedResults.map(r => r.marks);
+        const percentages = completedResults.map(r => r.percentage);
+        
+        highestScore = Math.max(...marks);
+        lowestScore = Math.min(...marks);
+        averageScore = marks.reduce((sum, mark) => sum + mark, 0) / marks.length;
+        
+        // Pass rate based on percentage >= 40%
+        const passedStudents = percentages.filter(perc => perc >= 40).length;
+        passRate = (passedStudents / completedStudents) * 100;
+      }
+
+      // Calculate aggregated chapter-wise analysis
+      const chapterWiseAnalysis = this.calculateAggregatedChapterWiseAnalysis(completedStudentResults);
+
+      return {
+        test_paper_id: testPaperId,
+        test_paper_name: testPaper.name,
+        subject: testPaper.pattern.subject.name,
+        standard: testPaper.pattern.standard.name,
+        total_marks: testPaper.pattern.total_marks,
+        duration_minutes: testPaper.duration_minutes || 0,
+        total_students: totalStudents,
+        completed_students: completedStudents,
+        pending_students: pendingStudents,
+        highest_score: Math.round(highestScore * 100) / 100,
+        average_score: Math.round(averageScore * 100) / 100,
+        lowest_score: Math.round(lowestScore * 100) / 100,
+        pass_rate: Math.round(passRate * 100) / 100,
+        chapter_wise_analysis: chapterWiseAnalysis,
+        results: results
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get test paper results');
+    }
+  }
+
+  // Helper method to calculate aggregated chapter-wise analysis
+  private calculateAggregatedChapterWiseAnalysis(completedStudentResults: any[]): any[] {
+    if (!completedStudentResults || completedStudentResults.length === 0) {
+      return [];
+    }
+
+    try {
+      // Map to store aggregated chapter data
+      const chapterAggregation = new Map<string, {
+        totalStudents: number;
+        totalQuestions: number;
+        totalCorrect: number;
+        totalWrong: number;
+        totalSkipped: number;
+        totalMarks: number;
+        totalObtainedMarks: number;
+        sequenceNumber?: number;
+      }>();
+
+      // Process each student's chapter-wise analysis
+      for (const studentChapterAnalysis of completedStudentResults) {
+        if (!Array.isArray(studentChapterAnalysis)) {
+          continue;
+        }
+
+        for (const chapterData of studentChapterAnalysis) {
+          const chapterName = chapterData.chapterName;
+          
+          if (!chapterAggregation.has(chapterName)) {
+            chapterAggregation.set(chapterName, {
+              totalStudents: 0,
+              totalQuestions: 0,
+              totalCorrect: 0,
+              totalWrong: 0,
+              totalSkipped: 0,
+              totalMarks: 0,
+              totalObtainedMarks: 0
+            });
+          }
+
+          const aggregatedData = chapterAggregation.get(chapterName)!;
+          aggregatedData.totalStudents++;
+          aggregatedData.totalQuestions += chapterData.total || 0;
+          aggregatedData.totalCorrect += chapterData.correct || 0;
+          aggregatedData.totalWrong += chapterData.wrong || 0;
+          aggregatedData.totalSkipped += chapterData.skipped || 0;
+          aggregatedData.totalMarks += chapterData.totalMarks || 0;
+          aggregatedData.totalObtainedMarks += chapterData.obtainedMarks || 0;
+        }
+      }
+
+      // Convert to final format with averages
+      const result = Array.from(chapterAggregation.entries()).map(([chapterName, data]) => {
+        const avgTotal = data.totalStudents > 0 ? data.totalQuestions / data.totalStudents : 0;
+        const avgCorrect = data.totalStudents > 0 ? data.totalCorrect / data.totalStudents : 0;
+        const avgWrong = data.totalStudents > 0 ? data.totalWrong / data.totalStudents : 0;
+        const avgSkipped = data.totalStudents > 0 ? data.totalSkipped / data.totalStudents : 0;
+        const avgTotalMarks = data.totalStudents > 0 ? data.totalMarks / data.totalStudents : 0;
+        const avgObtainedMarks = data.totalStudents > 0 ? data.totalObtainedMarks / data.totalStudents : 0;
+
+        // Calculate percentage based on average correct vs average total
+        const percentage = avgTotal > 0 ? (avgCorrect / avgTotal) * 100 : 0;
+
+        // Determine performance level
+        let performanceLevel = 'poor';
+        if (percentage >= 70) performanceLevel = 'excellent';
+        else if (percentage >= 50) performanceLevel = 'good';
+        else if (percentage >= 30) performanceLevel = 'average';
+
+        return {
+          chapterName,
+          total: Math.round(avgTotal * 100) / 100,
+          correct: Math.round(avgCorrect * 100) / 100,
+          wrong: Math.round(avgWrong * 100) / 100,
+          skipped: Math.round(avgSkipped * 100) / 100,
+          percentage: Math.round(percentage * 100) / 100,
+          totalMarks: Math.round(avgTotalMarks * 100) / 100,
+          obtainedMarks: Math.round(avgObtainedMarks * 100) / 100,
+          performanceLevel,
+          studentsCount: data.totalStudents
+        };
+      });
+
+      // Sort by chapter name for consistent ordering
+      result.sort((a, b) => a.chapterName.localeCompare(b.chapterName));
+
+      return result;
+    } catch (error) {
+      console.error('Error calculating aggregated chapter-wise analysis:', error);
+      return [];
     }
   }
 } 

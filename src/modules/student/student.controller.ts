@@ -139,14 +139,17 @@ export class StudentController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'TEACHER')
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a student' })
+  @ApiOperation({ 
+    summary: 'Delete a student',
+    description: 'Permanently delete a student and all related records. If the student is currently logged in, they will be logged out immediately.'
+  })
   @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Student deleted successfully' })
   @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'Student not found' })
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Unauthorized' })
-  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN role' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Forbidden - requires ADMIN or TEACHER role' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.studentService.remove(id);
   }

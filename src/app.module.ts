@@ -44,6 +44,7 @@ import { TestPaperHtmlModule } from './modules/test-paper-html/test-paper-html.m
 import { StudentModule } from './modules/student/student.module';
 import { StudentSubjectEnrollmentModule } from './modules/student-subject-enrollment/student-subject-enrollment.module';
 import { TestAssignmentModule } from './modules/test-assignment/test-assignment.module';
+import { ItiMocktestModule } from './modules/iti-mocktest/iti-mocktest.module';
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { TestAssignmentModule } from './modules/test-assignment/test-assignment.
     StudentModule,
     StudentSubjectEnrollmentModule,
     TestAssignmentModule,
+    ItiMocktestModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB

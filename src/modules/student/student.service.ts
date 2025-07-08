@@ -5,7 +5,9 @@ import {
   ConflictException, 
   InternalServerErrorException, 
   BadRequestException,
-  UnprocessableEntityException 
+  UnprocessableEntityException,
+  Inject,
+  forwardRef
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStudentDto, UpdateStudentDto } from './dto/student.dto';
@@ -13,6 +15,7 @@ import { hash } from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
+import { AuthService } from '../auth/auth.service';
 
 /**
  * Student search parameters for findAll method
@@ -33,7 +36,9 @@ export class StudentService {
   private readonly logger = new Logger(StudentService.name);
 
   constructor(
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => AuthService))
+    private readonly authService: AuthService
   ) {}
 
   async create(createDto: CreateStudentDto) {
@@ -522,6 +527,8 @@ export class StudentService {
         throw new NotFoundException(`Student with ID ${id} not found`);
       }
 
+      const userId = student.user_id;
+
       // Delete student and user in a transaction
       await this.prisma.$transaction(async (prisma) => {
         // Delete student (this will cascade delete related records)
@@ -531,9 +538,19 @@ export class StudentService {
 
         // Delete user (this will cascade delete user_roles and other related records)
         await prisma.user.delete({
-          where: { id: student.user_id }
+          where: { id: userId }
         });
       });
+
+      // After successful deletion, invalidate all tokens for this user
+      // This will log out the student from all devices if they're currently logged in
+      try {
+        await this.authService.invalidateAllUserTokens(userId);
+        this.logger.log(`Successfully invalidated all tokens for deleted student user ID: ${userId}`);
+      } catch (authError) {
+        // Log the error but don't fail the deletion
+        this.logger.warn(`Failed to invalidate tokens for deleted student user ID: ${userId}`, authError);
+      }
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;

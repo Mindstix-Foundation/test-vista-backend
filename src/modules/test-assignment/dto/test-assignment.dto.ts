@@ -227,6 +227,9 @@ export class StudentAssignedTestDto {
 
   @ApiProperty({ example: 'John Doe' })
   assignedBy: string;
+
+  @ApiPropertyOptional({ example: 123, description: 'Test attempt ID for completed tests' })
+  test_attempt_id?: number;
 }
 
 // New DTOs for student exam functionality
@@ -552,4 +555,100 @@ export class TestAttemptStatusDto {
 
   @ApiProperty({ example: 25 })
   total_questions: number;
+}
+
+export class TestPaperResultDto {
+  @ApiProperty({ example: 1 })
+  rank: number;
+
+  @ApiProperty({ example: 'John Doe' })
+  student_name: string;
+
+  @ApiProperty({ example: 'ST001' })
+  roll_number: string;
+
+  @ApiProperty({ example: 85.5 })
+  marks_obtained: number;
+
+  @ApiProperty({ example: 100 })
+  total_marks: number;
+
+  @ApiProperty({ example: 3420 })
+  time_taken_seconds: number;
+
+  @ApiProperty({ example: 85.5 })
+  percentage: number;
+
+  @ApiProperty({ example: 'completed', enum: ['completed', 'pending'] })
+  status: string;
+
+  @ApiProperty({ example: '2024-01-20T11:30:00Z' })
+  submitted_at?: Date;
+
+  @ApiProperty({ example: 1 })
+  student_id: number;
+
+  @ApiProperty({ example: 1 })
+  test_attempt_id?: number;
+}
+
+export class TestPaperResultsResponseDto {
+  @ApiProperty({ example: 1 })
+  test_paper_id: number;
+
+  @ApiProperty({ example: 'Mathematics Final Exam' })
+  test_paper_name: string;
+
+  @ApiProperty({ example: 'Mathematics' })
+  subject: string;
+
+  @ApiProperty({ example: 'Class 10' })
+  standard: string;
+
+  @ApiProperty({ example: 100 })
+  total_marks: number;
+
+  @ApiProperty({ example: 60 })
+  duration_minutes: number;
+
+  @ApiProperty({ example: 25 })
+  total_students: number;
+
+  @ApiProperty({ example: 18 })
+  completed_students: number;
+
+  @ApiProperty({ example: 7 })
+  pending_students: number;
+
+  @ApiProperty({ example: 92.5 })
+  highest_score: number;
+
+  @ApiProperty({ example: 76.8 })
+  average_score: number;
+
+  @ApiProperty({ example: 45.2 })
+  lowest_score: number;
+
+  @ApiProperty({ example: 72.0 })
+  pass_rate: number;
+
+  @ApiProperty({ 
+    example: [
+      {
+        chapterName: 'Algebra',
+        total: 10,
+        correct: 7.5,
+        wrong: 1.8,
+        skipped: 0.7,
+        percentage: 75.0,
+        totalMarks: 20,
+        obtainedMarks: 15.0,
+        performanceLevel: 'good'
+      }
+    ]
+  })
+  chapter_wise_analysis?: any[];
+
+  @ApiProperty({ type: [TestPaperResultDto] })
+  results: TestPaperResultDto[];
 } 

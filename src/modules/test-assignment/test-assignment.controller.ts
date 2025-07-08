@@ -40,7 +40,8 @@ import {
   ExamResultDto,
   DetailedReportDto,
   TestAttemptStatusDto,
-  SubmitExamResponseDto
+  SubmitExamResponseDto,
+  TestPaperResultsResponseDto
 } from './dto/test-assignment.dto';
 
 @ApiTags('test-assignments')
@@ -490,6 +491,49 @@ export class TestAssignmentController {
       return await this.testAssignmentService.getTestAssignmentById(parseInt(id));
     } catch (error) {
       console.error('Error in getTestAssignmentById:', error);
+      throw error;
+    }
+  }
+
+  @Get('test-paper/:testPaperId/results')
+  @Roles('TEACHER')
+  @ApiOperation({ 
+    summary: 'Get test paper results',
+    description: 'Get all student results for a specific test paper with ranking based on marks and time'
+  })
+  @ApiParam({ 
+    name: 'testPaperId', 
+    description: 'Test Paper ID',
+    example: 1
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Test paper results retrieved successfully',
+    type: TestPaperResultsResponseDto
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Test paper not found'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.BAD_REQUEST, 
+    description: 'You can only view results for your own test papers'
+  })
+  async getTestPaperResults(
+    @Request() req: any,
+    @Param('testPaperId') testPaperId: string
+  ) {
+    try {
+      const teacherId = req.user.id;
+      const testPaperIdNumber = parseInt(testPaperId);
+      
+      if (isNaN(testPaperIdNumber)) {
+        throw new BadRequestException('Invalid test paper ID');
+      }
+      
+      return await this.testAssignmentService.getTestPaperResults(teacherId, testPaperIdNumber);
+    } catch (error) {
+      console.error('Error in getTestPaperResults:', error);
       throw error;
     }
   }

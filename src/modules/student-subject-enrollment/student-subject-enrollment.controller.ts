@@ -31,7 +31,8 @@ import {
   GetEnrollmentsQueryDto,
   GetEnrolledStudentsQueryDto,
   StudentSubjectEnrollmentResponseDto,
-  EnrolledStudentResponseDto
+  EnrolledStudentResponseDto,
+  StandardSummaryDto
 } from './dto/student-subject-enrollment.dto';
 
 @ApiTags('student-subject-enrollments')
@@ -198,6 +199,7 @@ export class StudentSubjectEnrollmentController {
     description: 'Teacher can see enrollment requests for their subjects'
   })
   @ApiQuery({ name: 'status', required: false, description: 'Filter by enrollment status' })
+  @ApiQuery({ name: 'teacher_subject_id', required: false, description: 'Filter by teacher subject ID' })
   @ApiQuery({ name: 'academic_year', required: false, description: 'Filter by academic year' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
@@ -208,7 +210,32 @@ export class StudentSubjectEnrollmentController {
     @Query() query: Partial<GetEnrollmentsQueryDto>,
     @Request() req: any
   ) {
-    return await this.enrollmentService.getTeacherEnrollmentRequests(req.user.id, query);
+    try {
+      return await this.enrollmentService.getTeacherEnrollmentRequests(req.user.id, query);
+    } catch (error) {
+      console.error('Error in getMyEnrollmentRequests:', error);
+      throw error;
+    }
+  }
+
+  @Get('teacher/subjects-summary')
+  @Roles('TEACHER')
+  @ApiOperation({ 
+    summary: 'Get teacher\'s subjects with enrollment statistics',
+    description: 'Returns all subjects taught by the teacher grouped by standard with enrollment counts (pending, active, etc.) in a single API call'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Teacher\'s subjects grouped by standard with enrollment statistics',
+    type: [StandardSummaryDto]
+  })
+  async getTeacherSubjectsSummary(@Request() req: any) {
+    try {
+      return await this.enrollmentService.getTeacherSubjectsSummary(req.user.id);
+    } catch (error) {
+      console.error('Error in getTeacherSubjectsSummary:', error);
+      throw error;
+    }
   }
 
   @Delete(':id')

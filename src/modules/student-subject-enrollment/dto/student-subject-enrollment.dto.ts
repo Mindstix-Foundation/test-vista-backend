@@ -252,4 +252,70 @@ export class EnrolledStudentResponseDto {
     id: number;
     name: string;
   };
+}
+
+export class SubjectStatsDto {
+  @ApiProperty({ example: 2, description: 'Number of pending enrollment requests' })
+  pending: number;
+
+  @ApiProperty({ example: 5, description: 'Number of approved enrollment requests' })
+  approved: number;
+
+  @ApiProperty({ example: 8, description: 'Number of active enrollments' })
+  active: number;
+
+  @ApiProperty({ example: 1, description: 'Number of rejected enrollment requests' })
+  rejected: number;
+
+  @ApiProperty({ example: 0, description: 'Number of inactive enrollments' })
+  inactive: number;
+
+  @ApiProperty({ example: 0, description: 'Number of completed enrollments' })
+  completed: number;
+
+  @ApiProperty({ example: 16, description: 'Total number of enrollment requests' })
+  total: number;
+}
+
+export class TeacherSubjectSummaryDto {
+  @ApiProperty({ example: 1, description: 'Subject ID' })
+  id: number;
+
+  @ApiProperty({ example: 'Mathematics', description: 'Subject name' })
+  name: string;
+
+  @ApiProperty({ example: 3, description: 'Teacher Subject ID' })
+  teacherSubjectId: number;
+
+  @ApiProperty({ type: SubjectStatsDto, description: 'Enrollment statistics for this subject' })
+  stats: SubjectStatsDto;
+}
+
+export class StandardSummaryDto {
+  @ApiProperty({ example: 1, description: 'Standard ID' })
+  id: number;
+
+  @ApiProperty({ example: 'Standard 10', description: 'Standard name' })
+  name: string;
+
+  @ApiProperty({ example: 3, description: 'Number of subjects taught in this standard' })
+  subjectCount: number;
+
+  @ApiProperty({ 
+    example: {
+      id: 1,
+      name: 'ABC School'
+    },
+    description: 'School information'
+  })
+  school: {
+    id: number;
+    name: string;
+  };
+
+  @ApiProperty({ 
+    type: [TeacherSubjectSummaryDto], 
+    description: 'List of subjects with enrollment statistics' 
+  })
+  subjects: TeacherSubjectSummaryDto[];
 } 

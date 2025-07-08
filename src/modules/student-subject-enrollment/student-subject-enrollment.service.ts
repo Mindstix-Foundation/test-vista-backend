@@ -28,6 +28,7 @@ export class StudentSubjectEnrollmentService {
     student: {
       select: {
         id: true,
+        student_id: true, // Include roll number
         user: {
           select: {
             id: true,
@@ -293,6 +294,13 @@ export class StudentSubjectEnrollmentService {
         where.academic_year = query.academic_year;
       }
 
+      // Filter by specific teacher subject if provided
+      if (query?.teacher_subject_id) {
+        where.teacher_subject_id = typeof query.teacher_subject_id === 'string' 
+          ? parseInt(query.teacher_subject_id, 10) 
+          : query.teacher_subject_id;
+      }
+
       const enrollments = await this.prisma.student_Subject_Enrollment.findMany({
         where,
         select: this.enrollmentSelect,
@@ -303,7 +311,143 @@ export class StudentSubjectEnrollmentService {
 
       return enrollments;
     } catch (error) {
-      throw new BadRequestException('Failed to fetch teacher enrollment requests');
+      console.error('Error in getTeacherEnrollmentRequests:', error);
+      throw new BadRequestException(`Failed to fetch teacher enrollment requests: ${error.message}`);
+    }
+  }
+
+  async getTeacherSubjectsSummary(teacherId: number) {
+    try {
+      // Get all teacher subjects for this teacher
+      const teacherSubjects = await this.prisma.teacher_Subject.findMany({
+        where: {
+          user_id: teacherId
+        },
+        select: {
+          id: true,
+          subject: {
+            select: {
+              id: true,
+              name: true
+            }
+          },
+          school_standard: {
+            select: {
+              id: true,
+              standard: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              },
+              school: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: [
+          {
+            school_standard: {
+              standard: {
+                sequence_number: 'asc'
+              }
+            }
+          },
+          {
+            subject: {
+              name: 'asc'
+            }
+          }
+        ]
+      });
+
+      // Get all enrollment requests for this teacher
+      const allEnrollments = await this.prisma.student_Subject_Enrollment.findMany({
+        where: {
+          teacher_subject: {
+            user_id: teacherId
+          }
+        },
+        select: {
+          teacher_subject_id: true,
+          status: true
+        }
+      });
+
+      // Group enrollments by teacher_subject_id and count by status
+      const enrollmentStats = allEnrollments.reduce((acc, enrollment) => {
+        const teacherSubjectId = enrollment.teacher_subject_id;
+        if (!acc[teacherSubjectId]) {
+          acc[teacherSubjectId] = {
+            pending: 0,
+            approved: 0,
+            active: 0,
+            rejected: 0,
+            inactive: 0,
+            completed: 0,
+            total: 0
+          };
+        }
+        acc[teacherSubjectId][enrollment.status]++;
+        acc[teacherSubjectId].total++;
+        return acc;
+      }, {} as Record<number, Record<string, number>>);
+
+      // Group teacher subjects by standard
+      const standardsMap = new Map();
+
+      teacherSubjects.forEach(ts => {
+        const standardId = ts.school_standard.standard.id;
+        const standardName = ts.school_standard.standard.name;
+        
+        if (!standardsMap.has(standardId)) {
+          standardsMap.set(standardId, {
+            id: standardId,
+            name: standardName,
+            school: ts.school_standard.school,
+            subjects: []
+          });
+        }
+
+        const rawStats = enrollmentStats[ts.id] || {
+          pending: 0,
+          approved: 0,
+          active: 0,
+          rejected: 0,
+          inactive: 0,
+          completed: 0,
+          total: 0
+        };
+
+        // Combine approved and active counts for the active field
+        const stats = {
+          ...rawStats,
+          active: rawStats.active + rawStats.approved
+        };
+
+        standardsMap.get(standardId).subjects.push({
+          id: ts.subject.id,
+          name: ts.subject.name,
+          teacherSubjectId: ts.id,
+          stats
+        });
+      });
+
+      // Convert map to array
+      const standards = Array.from(standardsMap.values()).map(standard => ({
+        ...standard,
+        subjectCount: standard.subjects.length,
+        subjects: standard.subjects.sort((a, b) => a.name.localeCompare(b.name))
+      }));
+
+      return standards;
+    } catch (error) {
+      console.error('Error in getTeacherSubjectsSummary:', error);
+      throw new BadRequestException(`Failed to fetch teacher subjects summary: ${error.message}`);
     }
   }
 
@@ -538,6 +682,7 @@ export class StudentSubjectEnrollmentService {
             select: {
               id: true,
               student_id: true, // This is the roll number
+              created_at: true, // Include student registration timestamp
               user: {
                 select: {
                   id: true,
@@ -621,6 +766,7 @@ export class StudentSubjectEnrollmentService {
           student_email: enrollment.student.user.email_id,
           academic_year: enrollment.academic_year,
           enrollment_date: enrollment.enrollment_date,
+          student_registration_date: enrollment.student.created_at, // Add student registration timestamp
           subject: teacherSubject.subject,
           standard: teacherSubject.school_standard.standard,
           school: teacherSubject.school_standard.school

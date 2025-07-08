@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTestPaperFilterDto, CreateTestPaperResponseDto, SectionAllocationDto, SubsectionAllocationDto, ChapterMarksDto, ChapterInfoDto } from './dto/create-test-paper.dto';
 import { CreateOnlineTestPaperDto } from './dto/create-online-test-paper.dto';
@@ -1484,6 +1484,93 @@ export class CreateTestPaperService {
       }
       throw new BadRequestException(
         `Failed to fetch test paper questions: ${error.message}`,
+      );
+    }
+  }
+
+  async deleteOnlineTestPaper(testPaperId: number, userId: number) {
+    try {
+      // First verify that the test paper exists and belongs to the user
+      const testPaper = await this.prisma.test_Paper.findFirst({
+        where: {
+          id: testPaperId,
+          user_id: userId,
+          is_online: true,
+        },
+        include: {
+          test_paper_questions: {
+            select: { id: true }
+          },
+          test_assignments: {
+            select: { id: true }
+          },
+          _count: {
+            select: {
+              test_assignments: true,
+              test_paper_questions: true
+            }
+          }
+        },
+      });
+
+      if (!testPaper) {
+        throw new NotFoundException('Online test paper not found or you do not have permission to delete it');
+      }
+
+      // Check if there are any active test attempts that would prevent deletion
+      const activeAttempts = await this.prisma.test_Attempt.count({
+        where: {
+          test_assignment: {
+            test_paper_id: testPaperId
+          },
+          status: {
+            in: ['in_progress', 'completed']
+          }
+        }
+      });
+
+      if (activeAttempts > 0) {
+        throw new BadRequestException(
+          `Cannot delete test paper. It has ${activeAttempts} student attempt(s). Please contact students to complete or abandon their attempts first.`
+        );
+      }
+
+      // Count what will be deleted for the response
+      const questionsCount = testPaper._count.test_paper_questions;
+      const assignmentsCount = testPaper._count.test_assignments;
+      
+      // Count attempts that will be deleted (abandoned attempts)
+      const attemptsCount = await this.prisma.test_Attempt.count({
+        where: {
+          test_assignment: {
+            test_paper_id: testPaperId
+          }
+        }
+      });
+
+      // Delete the test paper - this will cascade delete:
+      // - test_paper_questions (onDelete: Cascade)
+      // - test_assignments (onDelete: Cascade) 
+      // - test_attempts (through test_assignments cascade)
+      // - student_answers (through test_attempts cascade)
+      // - student_results (through test_attempts cascade)
+      // - test_paper_chapters (onDelete: Cascade)
+      await this.prisma.test_Paper.delete({
+        where: { id: testPaperId }
+      });
+
+      return {
+        message: 'Online test paper deleted successfully',
+        deleted_questions_count: questionsCount,
+        deleted_assignments_count: assignmentsCount,
+        deleted_attempts_count: attemptsCount
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        `Failed to delete online test paper: ${error.message}`,
       );
     }
   }
