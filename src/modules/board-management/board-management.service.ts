@@ -2,7 +2,8 @@ import {
   Injectable, 
   Logger, 
   NotFoundException,
-  InternalServerErrorException 
+  InternalServerErrorException,
+  BadRequestException
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StandardService } from '../standard/standard.service';
@@ -251,14 +252,26 @@ export class BoardManagementService {
   }
 
   async update(id: number, updateDto: UpdateBoardManagementDto): Promise<BoardManagementData> {
+    // Log the incoming update data for debugging
+    this.logger.log(`🔍 Updating board ${id} with data:`, {
+      hasBoard: !!updateDto.board,
+      hasAddress: !!updateDto.address,
+      instructionMediums: updateDto.instructionMediums?.map(m => ({ id: m.id, name: m.name })) || [],
+      standards: updateDto.standards?.map(s => ({ id: s.id, name: s.name })) || [],
+      subjects: updateDto.subjects?.map(s => ({ id: s.id, name: s.name })) || [],
+      deleteInstructionMediumIds: updateDto.deleteInstructionMediumIds || [],
+      deleteStandardIds: updateDto.deleteStandardIds || [],
+      deleteSubjectIds: updateDto.deleteSubjectIds || []
+    });
+
     // First, collect standards that need reordering (before the transaction)
-    const standardsToReorder: Array<{ id: number; currentSequence: number; newSequence: number }> = [];
+    const standardsToReorder: Array<{ id: number; newSequence: number }> = [];
     
-    if (updateDto.standards && updateDto.standards.some(s => s.id && s.sequence_number !== undefined)) {
+    if (updateDto.standards && updateDto.standards.length > 0) {
       // Get current standards to determine which ones need reordering
       const currentStandards = await this.prisma.standard.findMany({
         where: { board_id: id },
-        select: { id: true, sequence_number: true },
+        select: { id: true, sequence_number: true, name: true },
         orderBy: { sequence_number: 'asc' }
       });
 
@@ -266,14 +279,14 @@ export class BoardManagementService {
         currentStandards.map(s => [s.id, s.sequence_number])
       );
 
-      // Identify standards that need reordering
-      updateDto.standards.forEach(standard => {
+      // Process only existing standards that need reordering
+      updateDto.standards.forEach((standard, index) => {
         if (standard.id && standard.sequence_number !== undefined) {
+          // Only handle existing standards with explicit sequence numbers
           const currentSequence = currentSequenceMap.get(standard.id);
           if (currentSequence !== undefined && currentSequence !== standard.sequence_number) {
             standardsToReorder.push({
               id: standard.id,
-              currentSequence,
               newSequence: standard.sequence_number
             });
           }
@@ -333,10 +346,10 @@ export class BoardManagementService {
 
     // Handle standards reordering outside the transaction using StandardService
     if (standardsToReorder.length > 0) {
-      this.logger.log(`Reordering ${standardsToReorder.length} standards for board ${id}`);
+      this.logger.log(`Reordering ${standardsToReorder.length} existing standards for board ${id}`);
       
       for (const reorderOp of standardsToReorder) {
-        this.logger.log(`Reordering standard ${reorderOp.id} from position ${reorderOp.currentSequence} to ${reorderOp.newSequence}`);
+        this.logger.log(`Reordering standard ${reorderOp.id} to position ${reorderOp.newSequence}`);
         await this.standardService.reorderStandard(reorderOp.id, reorderOp.newSequence, id);
       }
       
@@ -351,8 +364,21 @@ export class BoardManagementService {
    * Handles deletion of entities before updates
    */
   private async handleDeletions(boardId: number, updateDto: UpdateBoardManagementDto, prisma: any): Promise<void> {
-    // Delete instruction mediums
+    // Delete instruction mediums with logging
     if (updateDto.deleteInstructionMediumIds && updateDto.deleteInstructionMediumIds.length > 0) {
+      // 🛡️ SAFETY LOG: Log instruction medium deletions
+      const mediumsToDelete = await prisma.instruction_Medium.findMany({
+        where: {
+          id: { in: updateDto.deleteInstructionMediumIds },
+          board_id: boardId
+        }
+      });
+      
+      this.logger.warn(`⚠️ Deleting ${updateDto.deleteInstructionMediumIds.length} instruction mediums:`, {
+        mediumsToDelete: mediumsToDelete.map(m => ({ id: m.id, name: m.instruction_medium })),
+        boardId
+      });
+      
       // First delete related school instruction mediums
       await prisma.school_Instruction_Medium.deleteMany({
         where: { instruction_medium_id: { in: updateDto.deleteInstructionMediumIds } }
@@ -364,10 +390,25 @@ export class BoardManagementService {
           board_id: boardId 
         }
       });
+      
+      this.logger.log(`Successfully deleted ${updateDto.deleteInstructionMediumIds.length} instruction mediums`);
     }
 
-    // Delete standards
+    // Delete standards with logging
     if (updateDto.deleteStandardIds && updateDto.deleteStandardIds.length > 0) {
+      // 🛡️ SAFETY LOG: Log standard deletions
+      const standardsToDelete = await prisma.standard.findMany({
+        where: {
+          id: { in: updateDto.deleteStandardIds },
+          board_id: boardId
+        }
+      });
+      
+      this.logger.warn(`⚠️ Deleting ${updateDto.deleteStandardIds.length} standards:`, {
+        standardsToDelete: standardsToDelete.map(s => ({ id: s.id, name: s.name })),
+        boardId
+      });
+      
       // First delete related school standards
       await prisma.school_Standard.deleteMany({
         where: { standard_id: { in: updateDto.deleteStandardIds } }
@@ -379,16 +420,77 @@ export class BoardManagementService {
           board_id: boardId 
         }
       });
+      
+      this.logger.log(`Successfully deleted ${updateDto.deleteStandardIds.length} standards`);
     }
 
-    // Delete subjects
+    // Delete subjects with safety checks
     if (updateDto.deleteSubjectIds && updateDto.deleteSubjectIds.length > 0) {
+      // 🛡️ SAFETY CHECK: Check if subjects have questions before deletion
+      const subjectsWithQuestions = await prisma.subject.findMany({
+        where: {
+          id: { in: updateDto.deleteSubjectIds },
+          board_id: boardId
+        },
+        include: {
+          chapters: {
+            include: {
+              topics: {
+                include: {
+                  question_topics: {
+                    include: {
+                      question: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+
+      const subjectsWithQuestionsData = subjectsWithQuestions
+        .filter(subject => 
+          subject.chapters.some(chapter => 
+            chapter.topics.some(topic => 
+              topic.question_topics.length > 0
+            )
+          )
+        )
+        .map(subject => ({
+          id: subject.id,
+          name: subject.name,
+          questionCount: subject.chapters.reduce((total, chapter) => 
+            total + chapter.topics.reduce((topicTotal, topic) => 
+              topicTotal + topic.question_topics.length, 0
+            ), 0
+          )
+        }));
+
+      if (subjectsWithQuestionsData.length > 0) {
+        const subjectNames = subjectsWithQuestionsData.map(s => s.name).join(', ');
+        const totalQuestions = subjectsWithQuestionsData.reduce((sum, s) => sum + s.questionCount, 0);
+        
+        this.logger.error(`🚨 BLOCKED: Attempted to delete subjects with questions!`, {
+          subjectsWithQuestions: subjectsWithQuestionsData,
+          totalQuestions
+        });
+        
+        throw new BadRequestException(
+          `Cannot delete subjects (${subjectNames}) because they have ${totalQuestions} questions associated with them. ` +
+          `Please delete or move the questions first before deleting the subjects.`
+        );
+      }
+
+      // If no questions are associated, proceed with deletion
       await prisma.subject.deleteMany({
         where: { 
           id: { in: updateDto.deleteSubjectIds },
           board_id: boardId 
         }
       });
+      
+      this.logger.log(`Successfully deleted ${updateDto.deleteSubjectIds.length} subjects with no associated questions`);
     }
   }
 
@@ -397,64 +499,138 @@ export class BoardManagementService {
    */
   private async updateChildEntities(boardId: number, updateDto: UpdateBoardManagementDto, prisma?: any): Promise<void> {
     // Update instruction mediums if provided
-    if (updateDto.instructionMediums) {
+    if (updateDto.instructionMediums && updateDto.instructionMediums.length > 0) {
+      this.logger.log(`Updating ${updateDto.instructionMediums.length} instruction mediums for board ${boardId}`);
+      
       await Promise.all(
         updateDto.instructionMediums.map(async (medium: any) => {
-          return medium.id
-            ? prisma.instruction_Medium.update({
-                where: { id: medium.id },
-                data: { instruction_medium: medium.name }
-              })
-            : prisma.instruction_Medium.create({
-                data: {
-                  instruction_medium: medium.name,
-                  board_id: boardId,
-                }
-              });
-        }),
+          if (medium.id) {
+            // Update existing medium
+            this.logger.log(`Updating instruction medium ${medium.id}: ${medium.name}`);
+            return prisma.instruction_Medium.update({
+              where: { id: medium.id },
+              data: { instruction_medium: medium.name }
+            });
+          } else {
+            // Create new medium
+            this.logger.log(`Creating new instruction medium: ${medium.name}`);
+            // 🛡️ SAFETY CHECK: Check if medium with same name already exists
+            const existingMedium = await prisma.instruction_Medium.findFirst({
+              where: {
+                board_id: boardId,
+                instruction_medium: medium.name
+              }
+            });
+            
+            if (existingMedium) {
+              this.logger.warn(`Medium "${medium.name}" already exists for board ${boardId}, skipping creation`);
+              return existingMedium;
+            }
+            
+            return prisma.instruction_Medium.create({
+              data: {
+                instruction_medium: medium.name,
+                board_id: boardId
+              }
+            });
+          }
+        })
       );
     }
 
-    // Update standards if provided (but NOT sequence numbers - those are handled separately)
-    if (updateDto.standards) {
+    // Update standards if provided
+    if (updateDto.standards && updateDto.standards.length > 0) {
+      this.logger.log(`Updating ${updateDto.standards.length} standards for board ${boardId}`);
+      
       await Promise.all(
-        updateDto.standards.map(async (standard: any, index: number) => {
+        updateDto.standards.map(async (standard: any) => {
           if (standard.id) {
-            // Update existing standard - ONLY update name, not sequence_number
+            // Update existing standard - ONLY update name, not sequence_number to avoid conflicts
+            this.logger.log(`Updating standard ${standard.id}: ${standard.name}`);
             return prisma.standard.update({
               where: { id: standard.id },
-              data: { name: standard.name }
+              data: { 
+                name: standard.name
+                // 🛡️ FIX: Don't update sequence_number here to avoid unique constraint conflicts
+                // sequence_number will be handled separately after deletions are complete
+              }
             });
           } else {
-            // Create new standard with next available sequence number
+            // Create new standard
+            this.logger.log(`Creating new standard: ${standard.name}`);
+            // 🛡️ SAFETY CHECK: Check if standard with same name already exists
+            const existingStandard = await prisma.standard.findFirst({
+              where: {
+                board_id: boardId,
+                name: standard.name
+              }
+            });
+            
+            if (existingStandard) {
+              this.logger.warn(`Standard "${standard.name}" already exists for board ${boardId}, skipping creation`);
+              return existingStandard;
+            }
+            
+            // 🛡️ SIMPLIFIED: Auto-assign next available sequence number
+            const maxSequence = await prisma.standard.findFirst({
+              where: { board_id: boardId },
+              orderBy: { sequence_number: 'desc' },
+              select: { sequence_number: true }
+            });
+            
+            const nextSequenceNumber = (maxSequence?.sequence_number || 0) + 1;
+            
+            this.logger.log(`Assigning sequence number ${nextSequenceNumber} to new standard: ${standard.name}`);
+            
             return prisma.standard.create({
               data: {
                 name: standard.name,
                 board_id: boardId,
-                sequence_number: await this.getNextSequenceNumber(boardId, prisma),
+                sequence_number: nextSequenceNumber // Auto-assign next available sequence
               }
             });
           }
-        }),
+        })
       );
     }
 
     // Update subjects if provided
-    if (updateDto.subjects) {
+    if (updateDto.subjects && updateDto.subjects.length > 0) {
+      this.logger.log(`Updating ${updateDto.subjects.length} subjects for board ${boardId}`);
+      
       await Promise.all(
         updateDto.subjects.map(async (subject: any) => {
-          return subject.id
-            ? prisma.subject.update({
-                where: { id: subject.id },
-                data: { name: subject.name }
-              })
-            : prisma.subject.create({
-                data: {
-                  name: subject.name,
-                  board_id: boardId,
-                }
-              });
-        }),
+          if (subject.id) {
+            // Update existing subject
+            this.logger.log(`Updating subject ${subject.id}: ${subject.name}`);
+            return prisma.subject.update({
+              where: { id: subject.id },
+              data: { name: subject.name }
+            });
+          } else {
+            // Create new subject
+            this.logger.log(`Creating new subject: ${subject.name}`);
+            // 🛡️ SAFETY CHECK: Check if subject with same name already exists
+            const existingSubject = await prisma.subject.findFirst({
+              where: {
+                board_id: boardId,
+                name: subject.name
+              }
+            });
+            
+            if (existingSubject) {
+              this.logger.warn(`Subject "${subject.name}" already exists for board ${boardId}, skipping creation`);
+              return existingSubject;
+            }
+            
+            return prisma.subject.create({
+              data: {
+                name: subject.name,
+                board_id: boardId
+              }
+            });
+          }
+        })
       );
     }
   }
