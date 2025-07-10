@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpStatus, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { SchoolService } from './school.service';
-import { CreateSchoolDto, UpdateSchoolDto, SchoolListDto, UpsertSchoolDto } from './dto/school.dto';
+import { CreateSchoolDto, UpdateSchoolDto, SchoolListDto, UpsertSchoolDto, PartialUpsertSchoolDto } from './dto/school.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiProperty, ApiBearerAuth } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
@@ -116,6 +116,21 @@ export class SchoolController {
   @ApiResponse({ status: HttpStatus.CONFLICT, description: 'School name already exists' })
   async upsertSchool(@Body() upsertSchoolDto: UpsertSchoolDto) {
     return await this.schoolService.upsertSchool(upsertSchoolDto);
+  }
+
+  @Post('upsert-partial')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('ADMIN')
+  @ApiOperation({ 
+    summary: 'Partially update a school with only changed fields',
+    description: 'Updates only the provided fields of an existing school. More efficient for partial updates as it only sends changed data.'
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'School updated successfully' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, description: 'School, board, city, instruction medium, or standard not found' })
+  async partialUpsertSchool(@Body() partialUpsertSchoolDto: PartialUpsertSchoolDto) {
+    return await this.schoolService.partialUpsertSchool(partialUpsertSchoolDto);
   }
 
   @Delete(':id')

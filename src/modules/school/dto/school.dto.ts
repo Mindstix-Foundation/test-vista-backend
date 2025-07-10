@@ -204,4 +204,66 @@ export class UpsertSchoolDto {
   @IsNumber({}, { each: true })
   @IsNotEmpty()
   standard_ids: number[];
+}
+
+export class PartialUpsertSchoolDto {
+  @ApiProperty({ example: 1, description: 'School ID for update operation. Required for partial updates' })
+  @IsNumber()
+  @IsNotEmpty()
+  id: number;
+
+  @ApiPropertyOptional({ example: 'Delhi Public School' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  name?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsNumber()
+  @IsNotEmpty()
+  board_id?: number;
+
+  @ApiPropertyOptional({ type: AddressDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AddressDto)
+  address?: AddressDto;
+
+  @ApiPropertyOptional({ example: 'John Doe' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  principal_name?: string;
+
+  @ApiPropertyOptional({ example: 'school@example.com' })
+  @IsOptional()
+  @IsEmail()
+  @IsNotEmpty()
+  email?: string;
+
+  @ApiPropertyOptional({ example: '+911234567890', description: 'Contact number with country code' })
+  @IsOptional()
+  @IsPhoneNumber()
+  @IsNotEmpty({ message: 'Contact number cannot be empty if provided' })
+  contact_number?: string;
+
+  @ApiPropertyOptional({ example: '+919876543210', description: 'Alternate contact number with country code' })
+  @IsOptional()
+  @IsPhoneNumber()
+  alternate_contact_number?: string;
+
+  @ApiPropertyOptional({ example: [1, 2, 3], description: 'Array of instruction medium IDs' })
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsNotEmpty()
+  instruction_medium_ids?: number[];
+
+  @ApiPropertyOptional({ example: [1, 2, 3], description: 'Array of standard IDs' })
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsNotEmpty()
+  standard_ids?: number[];
 } 
