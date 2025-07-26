@@ -2190,6 +2190,14 @@ export class TestAssignmentService {
       // Calculate aggregated chapter-wise analysis
       const chapterWiseAnalysis = this.calculateAggregatedChapterWiseAnalysis(completedStudentResults);
 
+      // Calculate class strengths, weaknesses, and recommendations
+      const {
+        classStrengths,
+        classWeaknesses,
+        classAverageAreas,
+        classRecommendations
+      } = this.calculateClassStrengthsAndWeaknesses(chapterWiseAnalysis);
+
       return {
         test_paper_id: testPaperId,
         test_paper_name: testPaper.name,
@@ -2205,6 +2213,10 @@ export class TestAssignmentService {
         lowest_score: Math.round(lowestScore * 100) / 100,
         pass_rate: Math.round(passRate * 100) / 100,
         chapter_wise_analysis: chapterWiseAnalysis,
+        class_strengths: classStrengths,
+        class_weaknesses: classWeaknesses,
+        class_average_areas: classAverageAreas,
+        class_recommendations: classRecommendations,
         results: results
       };
     } catch (error) {
@@ -2305,6 +2317,179 @@ export class TestAssignmentService {
     } catch (error) {
       console.error('Error calculating aggregated chapter-wise analysis:', error);
       return [];
+    }
+  }
+
+  // Helper method to calculate class strengths, weaknesses, and teacher-focused recommendations
+  private calculateClassStrengthsAndWeaknesses(chapterWiseAnalysis: any[]): {
+    classStrengths: string[];
+    classWeaknesses: string[];
+    classAverageAreas: string[];
+    classRecommendations: string[];
+  } {
+    const classStrengths = [];
+    const classWeaknesses = [];
+    const classAverageAreas = [];
+    const classRecommendations = [];
+
+    if (Array.isArray(chapterWiseAnalysis)) {
+      chapterWiseAnalysis.forEach((chapter: any) => {
+        if (chapter.performanceLevel === 'excellent' || chapter.performanceLevel === 'good') {
+          classStrengths.push(chapter.chapterName);
+        } else if (chapter.performanceLevel === 'poor') {
+          classWeaknesses.push(chapter.chapterName);
+        } else if (chapter.performanceLevel === 'average') {
+          classAverageAreas.push(chapter.chapterName);
+        }
+      });
+    }
+
+    // Create teacher-focused recommendations
+    if (classWeaknesses.length > 0) {
+      classRecommendations.push(
+        `🔴 Critical Focus Areas: ${classWeaknesses.join(', ')} - Consider reviewing teaching methods, providing additional practice materials, and offering extra support sessions. Students are struggling with fundamental concepts in these areas.`
+      );
+    }
+    
+    if (classAverageAreas.length > 0) {
+      classRecommendations.push(
+        `🟡 Areas for Enhancement: ${classAverageAreas.join(', ')} - Students need more guided practice and concept clarification. Consider using different teaching approaches, visual aids, or peer learning activities to strengthen understanding.`
+      );
+    }
+    
+    if (classStrengths.length > 0) {
+      classRecommendations.push(
+        `🟢 Strong Performance: ${classStrengths.join(', ')} - Excellent teaching! Your current approach is working well. Continue this methodology and consider challenging students with advanced problems to further enhance their skills.`
+      );
+    }
+
+    return {
+      classStrengths,
+      classWeaknesses,
+      classAverageAreas,
+      classRecommendations
+    };
+  }
+
+  async getChapterStudentDetails(teacherId: number, testPaperId: number, chapterName: string): Promise<any> {
+    try {
+      // Verify test paper exists and belongs to teacher
+      const testPaper = await this.prisma.test_Paper.findUnique({
+        where: { id: testPaperId },
+        include: {
+          pattern: {
+            include: {
+              subject: true,
+              standard: true
+            }
+          }
+        }
+      });
+
+      if (!testPaper) {
+        throw new NotFoundException(`Test paper with ID ${testPaperId} not found`);
+      }
+
+      if (testPaper.user_id !== teacherId) {
+        throw new BadRequestException('You can only view results for your own test papers');
+      }
+
+      // Get all assignments for this test paper
+      const assignments = await this.prisma.test_Assignment.findMany({
+        where: { 
+          test_paper_id: testPaperId,
+          assigned_by_user_id: teacherId
+        },
+        include: {
+          student: {
+            include: {
+              user: true
+            }
+          },
+          test_attempts: {
+            include: {
+              student_result: true
+            },
+            orderBy: { attempt_number: 'desc' },
+            take: 1 // Get latest attempt
+          }
+        }
+      });
+
+      const students = [];
+
+      // Process each assignment to extract chapter-specific data
+      for (const assignment of assignments) {
+        const latestAttempt = assignment.test_attempts[0];
+        
+        if (latestAttempt && latestAttempt.status === 'completed' && latestAttempt.student_result) {
+          const result = latestAttempt.student_result;
+          
+          // Extract chapter-wise analysis for this student
+          const chapterWiseAnalysis = result.chapter_wise_analysis;
+          
+          if (Array.isArray(chapterWiseAnalysis)) {
+            // Find the specific chapter data
+            const chapterData = chapterWiseAnalysis.find((chapter: any) => 
+              chapter.chapterName === chapterName
+            ) as any;
+            
+            if (chapterData) {
+              const total = Number(chapterData.total || 0);
+              const correct = Number(chapterData.correct || 0);
+              const wrong = Number(chapterData.wrong || 0);
+              const skipped = Number(chapterData.skipped || 0);
+              const percentage = Number(chapterData.percentage || 0);
+              const performanceLevel = String(chapterData.performanceLevel || 'poor');
+              
+              students.push({
+                studentId: assignment.student.id,
+                name: assignment.student.user.name,
+                rollNumber: assignment.student.student_id,
+                totalQuestions: total,
+                attempted: total - skipped,
+                correct: correct,
+                wrong: wrong,
+                skipped: skipped,
+                percentage: percentage,
+                performanceLevel: performanceLevel,
+                status: 'completed' as const
+              });
+            }
+          }
+        } else {
+          // Student hasn't completed the test
+          students.push({
+            studentId: assignment.student.id,
+            name: assignment.student.user.name,
+            rollNumber: assignment.student.student_id,
+            totalQuestions: 0,
+            attempted: 0,
+            correct: 0,
+            wrong: 0,
+            skipped: 0,
+            percentage: 0,
+            performanceLevel: 'poor',
+            status: 'pending' as const
+          });
+        }
+      }
+
+      return {
+        test_paper_id: testPaperId,
+        test_paper_name: testPaper.name,
+        subject: testPaper.pattern.subject.name,
+        standard: testPaper.pattern.standard.name,
+        total_marks: testPaper.pattern.total_marks,
+        duration_minutes: testPaper.duration_minutes || 0,
+        chapter_name: chapterName,
+        students: students
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to get chapter student details');
     }
   }
 } 
