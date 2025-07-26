@@ -39,6 +39,11 @@ export class McqPatternFilterService {
         id: true,
         subject_id: true,
         standard_id: true,
+        standard: {
+          select: {
+            board_id: true,
+          },
+        },
       },
     });
 
@@ -54,11 +59,12 @@ export class McqPatternFilterService {
       );
     }
 
-    // Get all unique standard and subject IDs from chapters
+    // Get all unique standard, subject, and board IDs from chapters
     const standardIds = [...new Set(chapters.map((c) => c.standard_id))];
     const subjectIds = [...new Set(chapters.map((c) => c.subject_id))];
+    const boardIds = [...new Set(chapters.map((c) => c.standard.board_id))];
 
-    this.logger.log(`Found standards: ${standardIds}, subjects: ${subjectIds}`);
+    this.logger.log(`Found standards: ${standardIds}, subjects: ${subjectIds}, boards: ${boardIds}`);
 
     // Get topics for the selected chapters
     const topics = await this.prisma.topic.findMany({
@@ -71,9 +77,13 @@ export class McqPatternFilterService {
     this.logger.log(`Found ${topicIds.length} topics for selected chapters`);
 
     // Get patterns that match the criteria and contain ONLY MCQ question types
+    // FIXED: Now properly filtering by standard_id, subject_id, and board_id
     const patterns = await this.prisma.pattern.findMany({
       where: {
         ...(marks ? { total_marks: marks } : {}),
+        standard_id: { in: standardIds },
+        subject_id: { in: subjectIds },
+        board_id: { in: boardIds },
         sections: {
           some: {
             subsection_question_types: {
@@ -196,12 +206,22 @@ export class McqPatternFilterService {
         id: true,
         subject_id: true,
         standard_id: true,
+        standard: {
+          select: {
+            board_id: true,
+          },
+        },
       },
     });
 
     if (chapters.length === 0) {
       throw new NotFoundException('No chapters found with provided IDs');
     }
+
+    // Get all unique standard, subject, and board IDs from chapters
+    const standardIds = [...new Set(chapters.map((c) => c.standard_id))];
+    const subjectIds = [...new Set(chapters.map((c) => c.subject_id))];
+    const boardIds = [...new Set(chapters.map((c) => c.standard.board_id))];
 
     // Get topics for the selected chapters
     const topics = await this.prisma.topic.findMany({
@@ -213,8 +233,12 @@ export class McqPatternFilterService {
     const topicIds = topics.map((t) => t.id);
 
     // Get patterns that contain ONLY MCQ question types
+    // FIXED: Now properly filtering by standard_id, subject_id, and board_id
     const patterns = await this.prisma.pattern.findMany({
       where: {
+        standard_id: { in: standardIds },
+        subject_id: { in: subjectIds },
+        board_id: { in: boardIds },
         sections: {
           some: {
             subsection_question_types: {
