@@ -537,4 +537,52 @@ export class TestAssignmentController {
       throw error;
     }
   }
+
+  @Get('test-paper/:testPaperId/chapter/:chapterName/students')
+  @Roles('TEACHER')
+  @ApiOperation({ 
+    summary: 'Get chapter-wise student details',
+    description: 'Get detailed performance of all students for a specific chapter in a test paper'
+  })
+  @ApiParam({ 
+    name: 'testPaperId', 
+    description: 'Test Paper ID',
+    example: 1
+  })
+  @ApiParam({ 
+    name: 'chapterName', 
+    description: 'Chapter Name',
+    example: 'Algebra'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Chapter-wise student details retrieved successfully'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Test paper or chapter not found'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.BAD_REQUEST, 
+    description: 'You can only view results for your own test papers'
+  })
+  async getChapterStudentDetails(
+    @Request() req: any,
+    @Param('testPaperId') testPaperId: string,
+    @Param('chapterName') chapterName: string
+  ) {
+    try {
+      const teacherId = req.user.id;
+      const testPaperIdNumber = parseInt(testPaperId);
+      
+      if (isNaN(testPaperIdNumber)) {
+        throw new BadRequestException('Invalid test paper ID');
+      }
+      
+      return await this.testAssignmentService.getChapterStudentDetails(teacherId, testPaperIdNumber, chapterName);
+    } catch (error) {
+      console.error('Error in getChapterStudentDetails:', error);
+      throw error;
+    }
+  }
 } 

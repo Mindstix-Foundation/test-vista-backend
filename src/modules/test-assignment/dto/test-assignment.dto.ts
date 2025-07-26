@@ -649,6 +649,34 @@ export class TestPaperResultsResponseDto {
   })
   chapter_wise_analysis?: any[];
 
+  @ApiProperty({ 
+    example: ['Algebra', 'Geometry'],
+    description: 'Chapters where the class performed well (70%+ average)'
+  })
+  class_strengths?: string[];
+
+  @ApiProperty({ 
+    example: ['Trigonometry'],
+    description: 'Chapters where the class needs improvement (below 30% average)'
+  })
+  class_weaknesses?: string[];
+
+  @ApiProperty({ 
+    example: ['Calculus', 'Statistics'],
+    description: 'Chapters where the class has average performance (30-70% average)'
+  })
+  class_average_areas?: string[];
+
+  @ApiProperty({ 
+    example: [
+      '🔴 Critical Focus Areas: Trigonometry - Consider reviewing teaching methods and providing additional practice materials',
+      '🟡 Areas for Enhancement: Calculus, Statistics - Students need more guided practice and concept clarification',
+      '🟢 Strong Performance: Algebra, Geometry - Excellent teaching! Continue current approach and challenge students with advanced problems'
+    ],
+    description: 'Teacher-focused recommendations based on class performance'
+  })
+  class_recommendations?: string[];
+
   @ApiProperty({ type: [TestPaperResultDto] })
   results: TestPaperResultDto[];
 } 
