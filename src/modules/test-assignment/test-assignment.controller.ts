@@ -362,6 +362,44 @@ export class TestAssignmentController {
     }
   }
 
+  @Get('student/exam/:attemptId/time-sync')
+  @Roles('STUDENT')
+  @ApiOperation({ 
+    summary: 'Get current exam time status',
+    description: 'Get remaining time and sync clock for ongoing exam attempt'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Time sync data retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        time_remaining_seconds: { type: 'number', example: 2400 },
+        server_timestamp: { type: 'string', example: '2024-01-20T10:30:00Z' },
+        attempt_status: { type: 'string', example: 'in_progress' }
+      }
+    }
+  })
+  @ApiParam({ name: 'attemptId', description: 'Test attempt ID' })
+  async getExamTimeSync(
+    @Request() req: any,
+    @Param('attemptId') attemptId: string
+  ) {
+    try {
+      const userId = req.user.id;
+      const status = await this.testAssignmentService.getExamAttemptStatus(userId, parseInt(attemptId));
+      
+      return {
+        time_remaining_seconds: status.time_remaining_seconds,
+        server_timestamp: new Date().toISOString(),
+        attempt_status: status.status
+      };
+    } catch (error) {
+      console.error('Error in getExamTimeSync:', error);
+      throw error;
+    }
+  }
+
   @Post('student/exam/answer')
   @Roles('STUDENT')
   @ApiOperation({ 

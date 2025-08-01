@@ -341,6 +341,9 @@ export class ExamDataDto {
   @ApiProperty({ example: 60 })
   duration_minutes: number;
 
+  @ApiProperty({ example: 2400, description: 'Remaining time in seconds for resumed sessions' })
+  timeRemaining?: number;
+
   @ApiProperty({ example: 100 })
   total_marks: number;
 
