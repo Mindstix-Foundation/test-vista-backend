@@ -32,7 +32,11 @@ INSERT INTO "Question_Type" (type_name) VALUES
 ('Give Scientific Reasons'),
 ('Short Answer Question'),
 ('Complete and Identify Reaction'),
-('Short Note')
+('Short Note'),
+('2 Marks Questions'),
+('3 Marks Questions'),
+('4 Marks Questions'),
+('5 Marks Questions')
 ON CONFLICT DO NOTHING;
 
 -- Insert Sample Student User (for testing the JWT token issue)
