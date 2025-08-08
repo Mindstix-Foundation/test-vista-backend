@@ -2006,7 +2006,10 @@ export class ChapterMarksDistributionService {
 
   // Helper to clean allocated chapters
   private async cleanAllocatedChapters(chapters: AllocatedChapterDto[]): Promise<AllocatedChapterDto[]> {
-    return Promise.all(chapters.map(async (chapter) => {
+    // Filter out null entries that might have been created during sequence preservation
+    const validChapters = chapters.filter(chapter => chapter !== null && chapter !== undefined);
+    
+    return Promise.all(validChapters.map(async (chapter) => {
       const cleanedChapter = { ...chapter };
       
       if (cleanedChapter.question) {
@@ -2518,7 +2521,8 @@ export class ChapterMarksDistributionService {
     allocationMap: Map<string, any[]>,
     chapterQuestionTypePairs: Array<{ chapterId: number, questionTypeId: number }>
   ): void {
-    for (const allocatedChapter of subsection.allocatedChapters) {
+    for (let sequenceIndex = 0; sequenceIndex < subsection.allocatedChapters.length; sequenceIndex++) {
+      const allocatedChapter = subsection.allocatedChapters[sequenceIndex];
       const chapterId = allocatedChapter.chapterId;
       const questionTypeId = subsection.question_type_id;
       const key = `${chapterId}-${questionTypeId}`;
@@ -2528,11 +2532,12 @@ export class ChapterMarksDistributionService {
         chapterQuestionTypePairs.push({ chapterId, questionTypeId });
       }
       
-      // Record allocation position
+      // Record allocation position with original sequence index
       allocationMap.get(key).push({
         sectionIndex,
         subsectionId: subsection.subsectionQuestionTypeId,
-        allocationIndex: allocationMap.get(key).length
+        allocationIndex: allocationMap.get(key).length,
+        originalSequenceIndex: sequenceIndex  // Add original sequence index
       });
     }
   }
@@ -2633,35 +2638,59 @@ export class ChapterMarksDistributionService {
     // Track used question IDs per chapter-questionType combination
     const usedIdsMap = new Map<string, Set<number>>();
     
-      for (const [key, allocations] of allocationMap.entries()) {
-        const [chapterId, questionTypeId] = key.split('-').map(Number);
-        const questions = questionsMap.get(key) || [];
-        
+    // Collect all allocations with their original sequence and sort by sequence
+    const allAllocations: Array<{
+      key: string;
+      allocation: any;
+      chapterId: number;
+      questionTypeId: number;
+    }> = [];
+    
+    for (const [key, allocations] of allocationMap.entries()) {
+      const [chapterId, questionTypeId] = key.split('-').map(Number);
+      
+      for (const allocation of allocations) {
+        allAllocations.push({
+          key,
+          allocation,
+          chapterId,
+          questionTypeId
+        });
+      }
+    }
+    
+    // Sort by original sequence index to maintain the order from payload
+    allAllocations.sort((a, b) => 
+      (a.allocation.originalSequenceIndex || 0) - (b.allocation.originalSequenceIndex || 0)
+    );
+    
+    // Process allocations in original sequence order
+    for (const { key, allocation, chapterId, questionTypeId } of allAllocations) {
+      const questions = questionsMap.get(key) || [];
+      
       // Initialize set for tracking used questions for this key
       if (!usedIdsMap.has(key)) {
         usedIdsMap.set(key, new Set<number>());
       }
       const usedIds = usedIdsMap.get(key);
-        
-        for (const allocation of allocations) {
-        const result = this.processAllocation({
-          allocation,
-          questions,
-          usedIds,
-          chapterId,
-          questionTypeId,
-          requestBody,
-          responseDto,
-          selectedQuestionIds,
-          usedQuestionIds
-        });
-        
-        if (result.hasError) {
-          return {
-            hasError: true,
-            errorResponse: result.errorResponse
-          };
-        }
+      
+      const result = this.processAllocation({
+        allocation,
+        questions,
+        usedIds,
+        chapterId,
+        questionTypeId,
+        requestBody,
+        responseDto,
+        selectedQuestionIds,
+        usedQuestionIds
+      });
+      
+      if (result.hasError) {
+        return {
+          hasError: true,
+          errorResponse: result.errorResponse
+        };
       }
     }
     
@@ -2687,7 +2716,7 @@ export class ChapterMarksDistributionService {
       usedQuestionIds
     } = params;
     
-    const { sectionIndex, subsectionId } = allocation;
+    const { sectionIndex, subsectionId, originalSequenceIndex } = allocation;
     
     // Find the subsection in the response
     const section = responseDto.sectionAllocations[sectionIndex];
@@ -2696,6 +2725,11 @@ export class ChapterMarksDistributionService {
     );
     
     if (!subsection) return { hasError: false }; // Skip if subsection not found
+    
+    // Initialize allocatedChapters array if needed
+    if (!subsection.allocatedChapters) {
+      subsection.allocatedChapters = [];
+    }
     
     // Find available questions
     const availableQuestions = questions.filter(q => !usedIds.has(q.id));
@@ -2732,8 +2766,17 @@ export class ChapterMarksDistributionService {
     selectedQuestionIds.add(questionMin.id);
     usedQuestionIds.add(questionMin.id);
     
-    // Add to response
-    subsection.allocatedChapters.push(chapterAllocation);
+    // Insert at the correct position based on original sequence index
+    if (typeof originalSequenceIndex === 'number') {
+      // Ensure array is large enough
+      while (subsection.allocatedChapters.length <= originalSequenceIndex) {
+        subsection.allocatedChapters.push(null);
+      }
+      subsection.allocatedChapters[originalSequenceIndex] = chapterAllocation;
+    } else {
+      // Fallback to push if no sequence index
+      subsection.allocatedChapters.push(chapterAllocation);
+    }
     
     return { hasError: false };
   }
