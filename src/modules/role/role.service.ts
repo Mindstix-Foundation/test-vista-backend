@@ -1,0 +1,92 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+
+@Injectable()
+export class RoleService {
+  private readonly logger = new Logger(RoleService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findAll() {
+    try {
+      return await this.prisma.role.findMany({
+        select: {
+          id: true,
+          role_name: true
+        }
+      });
+    } catch (error) {
+      this.logger.error('Failed to fetch roles:', error);
+      throw error;
+    }
+  }
+
+  async findOne(id: number) {
+    try {
+      const role = await this.prisma.role.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          role_name: true,
+          user_roles: {
+            select: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email_id: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!role) {
+        throw new NotFoundException(`Role with ID ${id} not found`);
+      }
+
+      return {
+        ...role,
+        users: role.user_roles.map(ur => ur.user)
+      };
+    } catch (error) {
+      this.logger.error(`Failed to fetch role ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw error;
+    }
+  }
+
+  async findUserRoles(userId: number) {
+    const userRoles = await this.prisma.user_Role.findMany({
+      where: { user_id: userId },
+      include: {
+        role: true
+      }
+    });
+
+    return userRoles.map(userRole => userRole.role);
+  }
+
+  async getRoleIdByName(roleName: string): Promise<number> {
+    try {
+      const role = await this.prisma.role.findFirst({
+        where: { role_name: roleName }
+      });
+
+      if (!role) {
+        throw new NotFoundException(`Role with name ${roleName} not found`);
+      }
+
+      return role.id;
+    } catch (error) {
+      this.logger.error(`Failed to fetch role ID for name ${roleName}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw error;
+    }
+  }
+} 

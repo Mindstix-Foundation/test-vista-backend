@@ -1,0 +1,652 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { UserService } from './user.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { SortField, SortOrder } from '../../common/dto/pagination.dto';
+import { AddTeacherDto } from './dto/add-teacher.dto';
+import { UserExistsException } from './exceptions/user-exists.exception';
+
+describe('UserService', () => {
+  let service: UserService;
+
+  // Create a more complete mock of the PrismaService
+  const mockPrismaService = {
+    user: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      count: jest.fn(),
+    },
+    user_School: {
+      count: jest.fn(),
+      create: jest.fn(),
+    },
+    user_Role: {
+      create: jest.fn(),
+    },
+    role: {
+      findFirst: jest.fn(),
+    },
+    school: {
+      findUnique: jest.fn(),
+    },
+    school_Standard: {
+      findMany: jest.fn(),
+    },
+    medium_Standard_Subject: {
+      findMany: jest.fn(),
+    },
+    teacher_Subject: {
+      createMany: jest.fn(),
+    },
+    $transaction: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UserService,
+        {
+          provide: PrismaService,
+          useValue: mockPrismaService,
+        },
+      ],
+    }).compile();
+
+    service = module.get<UserService>(UserService);
+    jest.clearAllMocks();
+
+    // Expose private methods for testing
+    service['isValidEmail'] = jest.fn().mockImplementation((email: string) => {
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      return emailRegex.test(email) && email.length <= 254;
+    });
+
+    service['hashPassword'] = jest.fn().mockImplementation(async (password: string) => {
+      return 'hashedPassword';
+    });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('create', () => {
+    const createDto: CreateUserDto = {
+      email_id: 'test@example.com',
+      name: 'Test User',
+      contact_number: '1234567890',
+      password: 'Password123!',
+      status: true,
+    };
+
+    it('should create a new user successfully', async () => {
+      const expectedResult = {
+        id: 1,
+        ...createDto,
+        password: 'hashedPassword',
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.user.create.mockResolvedValue(expectedResult);
+
+      const result = await service.create(createDto);
+      expect(result).toEqual(expect.objectContaining({
+        id: expectedResult.id,
+        email_id: expectedResult.email_id,
+        name: expectedResult.name,
+      }));
+    });
+
+    it('should throw ConflictException when email already exists', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: 1, email_id: createDto.email_id });
+
+      await expect(service.create(createDto)).rejects.toThrow(ConflictException);
+    });
+
+    it('should throw BadRequestException for invalid email format', async () => {
+      const invalidDto = { ...createDto, email_id: 'invalid-email' };
+      await expect(service.create(invalidDto)).rejects.toThrow('Invalid email format');
+    });
+
+    it('should throw BadRequestException for invalid contact number', async () => {
+      const invalidDto = { ...createDto, contact_number: '123' };
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      
+      await expect(service.create(invalidDto)).rejects.toThrow('Contact number must be exactly 10 digits');
+    });
+  });
+
+  describe('findAll', () => {
+    it('should return paginated users in alphabetical order', async () => {
+      const mockUsers = [
+        { id: 2, name: 'User A' },
+        { id: 1, name: 'User B' },
+      ];
+      
+      mockPrismaService.user.count.mockResolvedValue(2);
+      mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
+
+      const result = await service.findAll({ page: 1, page_size: 15 });
+      
+      expect(result).toEqual({
+        data: mockUsers,
+        meta: {
+          total: 2,
+          page: 1,
+          page_size: 15,
+          total_pages: 1,
+          sort_by: SortField.NAME,
+          sort_order: SortOrder.ASC
+        }
+      });
+      
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        where: {},
+        orderBy: { name: 'asc' },
+        select: expect.any(Object)
+      });
+    });
+    
+    it('should filter users by schoolId', async () => {
+      const mockUsers = [
+        { id: 1, name: 'User A' },
+      ];
+      
+      mockPrismaService.user.count.mockResolvedValue(1);
+      mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
+
+      const result = await service.findAll({ schoolId: 1, page: 1, page_size: 15 });
+      
+      expect(result.data).toEqual(mockUsers);
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        where: { 
+          user_schools: {
+            some: { school_id: 1 }
+          }
+        },
+        orderBy: { name: 'asc' },
+        select: expect.any(Object)
+      });
+    });
+    
+    it('should sort users by created_at in descending order', async () => {
+      const mockUsers = [
+        { id: 1, name: 'User A', created_at: new Date('2023-01-02') },
+        { id: 2, name: 'User B', created_at: new Date('2023-01-01') },
+      ];
+      
+      mockPrismaService.user.count.mockResolvedValue(2);
+      mockPrismaService.user.findMany.mockResolvedValue(mockUsers);
+
+      const result = await service.findAll({
+        page: 1, 
+        page_size: 15, 
+        sort_by: SortField.CREATED_AT, 
+        sort_order: SortOrder.DESC
+      });
+      
+      expect(result.data).toEqual(mockUsers);
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith({
+        skip: 0,
+        take: 15,
+        where: {},
+        orderBy: { created_at: 'desc' },
+        select: expect.any(Object)
+      });
+    });
+  });
+
+  describe('findOne', () => {
+    it('should return a user by ID', async () => {
+      const userId = 1;
+      const expectedUser = { id: userId, name: 'Test User' };
+
+      mockPrismaService.user.findUnique.mockResolvedValue(expectedUser);
+
+      const result = await service.findOne(userId);
+      expect(result).toEqual(expectedUser);
+    });
+
+    it('should throw NotFoundException when user not found', async () => {
+      const userId = 999;
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOne(userId)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('update', () => {
+    const updateDto: UpdateUserDto = {
+      name: 'Updated Name',
+      contact_number: '9876543210',
+    };
+
+    it('should update a user successfully', async () => {
+      const userId = 1;
+      const existingUser = { 
+        id: userId, 
+        name: 'Old Name',
+        contact_number: '1234567890',
+        alternate_contact_number: null
+      };
+      const updatedUser = { 
+        ...existingUser, 
+        ...updateDto,
+        alternate_contact_number: null
+      };
+
+      mockPrismaService.user.findUnique.mockResolvedValue(existingUser);
+      mockPrismaService.user.update.mockResolvedValue(updatedUser);
+
+      const result = await service.update(userId, updateDto);
+      expect(result).toEqual(updatedUser);
+    });
+
+    it('should throw NotFoundException when updating non-existent user', async () => {
+      const userId = 999;
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.update(userId, updateDto)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove', () => {
+    it('should delete a user successfully', async () => {
+      const userId = 1;
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: userId });
+      mockPrismaService.user_School.count.mockResolvedValue(0);
+
+      await service.remove(userId);
+      expect(mockPrismaService.user.delete).toHaveBeenCalledWith({
+        where: { id: userId },
+      });
+    });
+
+    it('should throw NotFoundException when deleting non-existent user', async () => {
+      const userId = 999;
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.remove(userId)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw UnprocessableEntityException when user has school associations', async () => {
+      const userId = 1;
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: userId });
+      mockPrismaService.user_School.count.mockResolvedValue(1);
+
+      await expect(service.remove(userId)).rejects.toThrow('Cannot delete user because they are associated with schools');
+    });
+  });
+
+  describe('checkEmailAvailability', () => {
+    it('should return available: true when email is not registered', async () => {
+      const email = 'new@example.com';
+      
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      
+      const result = await service.checkEmailAvailability(email);
+      
+      expect(result).toEqual({
+        email,
+        available: true,
+        message: `Email ${email} is available`
+      });
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { email_id: email }
+      });
+    });
+    
+    it('should return available: false when email is already registered', async () => {
+      const email = 'existing@example.com';
+      
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: 1, email_id: email });
+      
+      const result = await service.checkEmailAvailability(email);
+      
+      expect(result).toEqual({
+        email,
+        available: false,
+        message: `Email ${email} is already registered`
+      });
+    });
+    
+    it('should throw BadRequestException for invalid email format', async () => {
+      const invalidEmail = 'invalid-email';
+      
+      await expect(service.checkEmailAvailability(invalidEmail)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('addTeacher', () => {
+    const mockAddTeacherDto: AddTeacherDto = {
+      name: 'Test Teacher',
+      email_id: 'teacher@example.com',
+      password: 'Password123!',
+      contact_number: '+911234567890',
+      alternate_contact_number: '+919876543210',
+      highest_qualification: 'M.Tech',
+      status: true,
+      school_id: 1,
+      start_date: new Date('2023-01-01'),
+      end_date: new Date('2024-12-31'),
+      standard_subjects: [
+        { schoolStandardId: 1, subjectIds: [1, 2] },
+        { schoolStandardId: 2, subjectIds: [3, 4] }
+      ]
+    };
+
+    it('should add a teacher with valid data', async () => {
+      // Configure mocks for valid test case
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test School',
+        school_instruction_mediums: [
+          { instruction_medium_id: 1, instruction_medium: { id: 1, instruction_medium: 'English' } },
+          { instruction_medium_id: 2, instruction_medium: { id: 2, instruction_medium: 'Hindi' } }
+        ]
+      });
+      mockPrismaService.school_Standard.findMany.mockResolvedValue([
+        { id: 1, school_id: 1, standard_id: 1, standard: { id: 1, name: 'Class 1' } },
+        { id: 2, school_id: 1, standard_id: 2, standard: { id: 2, name: 'Class 2' } }
+      ]);
+      
+      // Mock transaction
+      mockPrismaService.$transaction.mockImplementation(async (callback) => {
+        const txPrisma = {
+          user: {
+            create: jest.fn().mockResolvedValue({
+              id: 1,
+              name: 'Test Teacher',
+              email_id: 'teacher@example.com',
+              password: 'hashedPassword',
+              contact_number: '+911234567890',
+              alternate_contact_number: '+919876543210',
+              highest_qualification: 'M.Tech',
+              status: true
+            })
+          },
+          user_Role: {
+            create: jest.fn().mockResolvedValue({})
+          },
+          user_School: {
+            create: jest.fn().mockResolvedValue({})
+          },
+          medium_Standard_Subject: {
+            findMany: jest.fn()
+              .mockResolvedValueOnce([{ id: 1 }, { id: 2 }])
+              .mockResolvedValueOnce([{ id: 3 }, { id: 4 }])
+              .mockResolvedValueOnce([{ id: 5 }, { id: 6 }])
+              .mockResolvedValueOnce([{ id: 7 }, { id: 8 }])
+          },
+          teacher_Subject: {
+            createMany: jest.fn().mockResolvedValue({ count: 8 })
+          }
+        };
+        return await callback(txPrisma);
+      });
+
+      const result = await service.addTeacher(mockAddTeacherDto);
+      
+      expect(result).toBeDefined();
+      expect(result.id).toBe(1);
+      expect(result.name).toBe('Test Teacher');
+      expect(result.role).toBe('TEACHER');
+      expect(result.message).toBe('Teacher added successfully');
+      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+    });
+
+    it('should throw an error if email already exists', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue({ id: 1, email_id: 'teacher@example.com' });
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(UserExistsException);
+    });
+
+    it('should throw an error if email format is invalid', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(false);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw an error if teacher role not found', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue(null);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw an error if school not found', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue(null);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw an error if school has no instruction mediums', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test School',
+        school_instruction_mediums: []
+      });
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw an error if invalid school-standard IDs', async () => {
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.role.findFirst.mockResolvedValue({ id: 2, role_name: 'TEACHER' });
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test School',
+        school_instruction_mediums: [
+          { instruction_medium_id: 1, instruction_medium: { id: 1, instruction_medium: 'English' } }
+        ]
+      });
+      mockPrismaService.school_Standard.findMany.mockResolvedValue([
+        { id: 1, school_id: 1, standard_id: 1, standard: { id: 1, name: 'Class 1' } }
+      ]);
+
+      await expect(service.addTeacher(mockAddTeacherDto)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('editTeacher', () => {
+    const mockEditTeacherDto = {
+      id: 1,
+      name: 'Updated Teacher',
+      email_id: 'updated.teacher@example.com',
+      contact_number: '+911234567890',
+      status: true,
+      school_id: 2,
+      standard_subjects: [
+        { schoolStandardId: 3, subjectIds: [4, 5] }
+      ]
+    } as any; // Type assertion to avoid TypeScript errors
+
+    it('should update a teacher with valid data', async () => {
+      // Mock existing user with teacher role
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Old Teacher Name',
+        email_id: 'teacher@example.com',
+        contact_number: '+919999999999',
+        status: true,
+        user_roles: [
+          { role: { id: 2, role_name: 'TEACHER' } }
+        ],
+        user_schools: [
+          { 
+            school: { 
+              id: 1, 
+              name: 'Old School' 
+            } 
+          }
+        ]
+      });
+
+      // Mock new school
+      mockPrismaService.school.findUnique.mockResolvedValue({
+        id: 2,
+        name: 'New School',
+        school_instruction_mediums: [
+          { instruction_medium_id: 1, instruction_medium: { id: 1, instruction_medium: 'English' } },
+          { instruction_medium_id: 2, instruction_medium: { id: 2, instruction_medium: 'Hindi' } }
+        ]
+      });
+
+      // Mock school standards
+      mockPrismaService.school_Standard.findMany.mockResolvedValue([
+        { id: 3, school_id: 2, standard_id: 3, standard: { id: 3, name: 'Class 3' } }
+      ]);
+
+      // Mock transaction
+      mockPrismaService.$transaction.mockImplementation(async (callback) => {
+        const txPrisma = {
+          user: {
+            update: jest.fn().mockResolvedValue({
+              id: 1,
+              name: 'Updated Teacher',
+              email_id: 'updated.teacher@example.com',
+              contact_number: '+911234567890',
+              status: true
+            })
+          },
+          user_School: {
+            findFirst: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue({}),
+            update: jest.fn().mockResolvedValue({})
+          },
+          teacher_Subject: {
+            deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+            createMany: jest.fn().mockResolvedValue({ count: 4 }),
+            findMany: jest.fn().mockResolvedValue([
+              {
+                school_standard: {
+                  standard: { name: 'Class 3' }
+                }
+              }
+            ])
+          },
+          medium_Standard_Subject: {
+            findMany: jest.fn().mockResolvedValue([
+              { id: 101 }, { id: 102 }
+            ])
+          }
+        };
+        return await callback(txPrisma);
+      });
+
+      const result = await service.editTeacher(mockEditTeacherDto);
+
+      expect(result).toBeDefined();
+      expect(result.id).toBe(1);
+      expect(result.name).toBe('Updated Teacher');
+      expect(result.message).toBe('Teacher updated successfully');
+      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+    });
+
+    it('should throw an error if teacher not found', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.editTeacher(mockEditTeacherDto)).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw an error if user is not a teacher', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 1,
+        user_roles: [
+          { role: { id: 1, role_name: 'ADMIN' } }
+        ],
+        user_schools: []
+      });
+
+      await expect(service.editTeacher(mockEditTeacherDto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw an error if email format is invalid', async () => {
+      // Mock existing user with teacher role
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 1,
+        email_id: 'teacher@example.com',
+        user_roles: [
+          { role: { id: 2, role_name: 'TEACHER' } }
+        ],
+        user_schools: []
+      });
+
+      // Set up the test to make isValidEmail return false
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(false);
+
+      const dtoWithInvalidEmail = {
+        ...mockEditTeacherDto,
+        email_id: 'invalid-email'
+      };
+
+      await expect(service.editTeacher(dtoWithInvalidEmail)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw an error if email is already taken by another user', async () => {
+      // Mock existing user with teacher role
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 1,
+        email_id: 'teacher@example.com',
+        user_roles: [
+          { role: { id: 2, role_name: 'TEACHER' } }
+        ],
+        user_schools: []
+      });
+
+      // Mock isValidEmail to return true
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+
+      // Mock that another user has the email
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 2,
+        email_id: 'updated.teacher@example.com'
+      });
+
+      await expect(service.editTeacher(mockEditTeacherDto)).rejects.toThrow(UserExistsException);
+    });
+
+    it('should throw an error if school not found', async () => {
+      // Mock existing user
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: 1,
+        email_id: 'teacher@example.com',
+        user_roles: [
+          { role: { id: 2, role_name: 'TEACHER' } }
+        ],
+        user_schools: []
+      });
+
+      // Mock isValidEmail to return true
+      (service['isValidEmail'] as jest.Mock).mockReturnValue(true);
+
+      // Mock that no school is found
+      mockPrismaService.school.findUnique.mockResolvedValue(null);
+
+      await expect(service.editTeacher(mockEditTeacherDto)).rejects.toThrow(NotFoundException);
+    });
+  });
+}); 

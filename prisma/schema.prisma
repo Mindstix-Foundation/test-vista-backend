@@ -1,0 +1,711 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Country {
+  id     Int     @id @default(autoincrement())
+  name   String  @db.VarChar
+  states State[]
+}
+
+model State {
+  id         Int     @id @default(autoincrement())
+  country_id Int
+  name       String  @db.VarChar
+  cities     City[]
+  country    Country @relation(fields: [country_id], references: [id], onDelete: Cascade)
+}
+
+model City {
+  id        Int       @id @default(autoincrement())
+  state_id  Int
+  name      String    @db.VarChar
+  addresses Address[]
+  state     State     @relation(fields: [state_id], references: [id], onDelete: Cascade)
+}
+
+model Address {
+  id          Int      @id @default(autoincrement())
+  city_id     Int
+  postal_code String   @db.VarChar
+  street      String   @db.VarChar
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @updatedAt @db.Timestamptz(6)
+  city        City     @relation(fields: [city_id], references: [id], onDelete: Cascade)
+  board       Board?
+  school      School?
+}
+
+model Board {
+  id                  Int                  @id @default(autoincrement())
+  name                String               @unique @db.VarChar
+  abbreviation        String               @unique @db.VarChar
+  address_id          Int                  @unique
+  created_at          DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime             @updatedAt @db.Timestamptz(6)
+  address             Address              @relation(fields: [address_id], references: [id], onDelete: Cascade)
+  instruction_mediums Instruction_Medium[]
+  patterns            Pattern[]
+  schools             School[]
+  standards           Standard[]
+  subjects            Subject[]
+}
+
+model Standard {
+  id                       Int                       @id @default(autoincrement())
+  board_id                 Int
+  name                     String                    @db.VarChar
+  created_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                  @updatedAt @db.Timestamptz(6)
+  sequence_number          Int
+  chapters                 Chapter[]
+  medium_standard_subjects Medium_Standard_Subject[]
+  patterns                 Pattern[]
+  Practice_Attempt         Practice_Attempt[]
+  school_standards         School_Standard[]
+  board                    Board                     @relation(fields: [board_id], references: [id], onDelete: Cascade)
+
+  @@unique([board_id, name])
+  @@unique([board_id, sequence_number])
+}
+
+model Subject {
+  id                       Int                       @id @default(autoincrement())
+  board_id                 Int
+  name                     String                    @db.VarChar
+  created_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                  @updatedAt @db.Timestamptz(6)
+  chapters                 Chapter[]
+  medium_standard_subjects Medium_Standard_Subject[]
+  patterns                 Pattern[]
+  Practice_Attempt         Practice_Attempt[]
+  board                    Board                     @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  teacher_subjects         Teacher_Subject[]
+
+  @@unique([board_id, name])
+}
+
+model Instruction_Medium {
+  id                         Int                          @id @default(autoincrement())
+  board_id                   Int
+  instruction_medium         String                       @db.VarChar
+  created_at                 DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime                     @updatedAt @db.Timestamptz(6)
+  html_files                 HTML_File[]
+  board                      Board                        @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  medium_standard_subjects   Medium_Standard_Subject[]
+  question_text_topics       Question_Text_Topic_Medium[]
+  school_instruction_mediums School_Instruction_Medium[]
+
+  @@unique([board_id, instruction_medium])
+}
+
+model School {
+  id                         Int                         @id @default(autoincrement())
+  board_id                   Int
+  name                       String                      @db.VarChar
+  address_id                 Int                         @unique
+  principal_name             String                      @db.VarChar
+  email                      String                      @db.VarChar
+  contact_number             String                      @db.VarChar
+  alternate_contact_number   String?                     @db.VarChar
+  created_at                 DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime                    @updatedAt @db.Timestamptz(6)
+  address                    Address                     @relation(fields: [address_id], references: [id], onDelete: Cascade)
+  board                      Board                       @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  school_instruction_mediums School_Instruction_Medium[]
+  school_standards           School_Standard[]
+  test_papers                Test_Paper[]
+  user_schools               User_School[]
+}
+
+model School_Instruction_Medium {
+  id                    Int                @id @default(autoincrement())
+  instruction_medium_id Int
+  school_id             Int
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime           @updatedAt @db.Timestamptz(6)
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
+  school                School             @relation(fields: [school_id], references: [id], onDelete: Cascade)
+
+  @@unique([school_id, instruction_medium_id])
+}
+
+model School_Standard {
+  id               Int               @id @default(autoincrement())
+  standard_id      Int
+  school_id        Int
+  created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime          @updatedAt @db.Timestamptz(6)
+  school           School            @relation(fields: [school_id], references: [id], onDelete: Cascade)
+  standard         Standard          @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  students         Student[]
+  teacher_subjects Teacher_Subject[]
+
+  @@unique([school_id, standard_id])
+}
+
+model User {
+  id                       Int               @id @default(autoincrement())
+  email_id                 String            @unique @db.VarChar
+  password                 String            @db.VarChar
+  name                     String            @db.VarChar
+  contact_number           String            @db.VarChar
+  alternate_contact_number String?           @db.VarChar
+  highest_qualification    String?           @db.VarChar
+  status                   Boolean           @default(true)
+  created_at               DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime          @updatedAt @db.Timestamptz(6)
+  password_resets          Password_Reset[]
+  student                  Student?
+  teacher_subjects         Teacher_Subject[]
+  assigned_tests           Test_Assignment[]
+  test_papers              Test_Paper[]
+  user_roles               User_Role[]
+  user_schools             User_School[]
+}
+
+model Role {
+  id         Int         @id @default(autoincrement())
+  role_name  String      @unique @db.VarChar
+  user_roles User_Role[]
+}
+
+model User_Role {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  role_id    Int
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  role       Role     @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, role_id])
+}
+
+model User_School {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  school_id  Int
+  start_date DateTime  @db.Date
+  end_date   DateTime? @db.Date
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  school     School    @relation(fields: [school_id], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Medium_Standard_Subject {
+  id                    Int                @id @default(autoincrement())
+  instruction_medium_id Int
+  standard_id           Int
+  subject_id            Int
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime           @updatedAt @db.Timestamptz(6)
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
+  standard              Standard           @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  subject               Subject            @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+
+  @@unique([instruction_medium_id, standard_id, subject_id])
+}
+
+model Teacher_Subject {
+  id                  Int                          @id @default(autoincrement())
+  user_id             Int
+  school_standard_id  Int
+  subject_id          Int
+  created_at          DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime                     @updatedAt @db.Timestamptz(6)
+  student_enrollments Student_Subject_Enrollment[]
+  school_standard     School_Standard              @relation(fields: [school_standard_id], references: [id], onDelete: Cascade)
+  subject             Subject                      @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  user                User                         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, school_standard_id, subject_id])
+}
+
+model Chapter {
+  id                        Int                  @id @default(autoincrement())
+  sequential_chapter_number Int
+  name                      String               @db.VarChar
+  created_at                DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime             @updatedAt @db.Timestamptz(6)
+  standard_id               Int
+  subject_id                Int
+  standard                  Standard             @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  subject                   Subject              @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  Practice_Attempt          Practice_Attempt[]
+  test_paper_chapters       Test_Paper_Chapter[]
+  topics                    Topic[]
+
+  @@unique([subject_id, standard_id, sequential_chapter_number])
+}
+
+model Topic {
+  id                      Int                @id @default(autoincrement())
+  chapter_id              Int
+  sequential_topic_number Int
+  name                    String             @db.VarChar
+  created_at              DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime           @updatedAt @db.Timestamptz(6)
+  Practice_Attempt        Practice_Attempt[]
+  question_topics         Question_Topic[]
+  chapter                 Chapter            @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+}
+
+model Question_Type {
+  id                        Int                        @id @default(autoincrement())
+  type_name                 String                     @db.VarChar
+  questions                 Question[]
+  subsection_question_types Subsection_Question_Type[]
+}
+
+model Pattern {
+  id           Int          @id @default(autoincrement())
+  pattern_name String       @db.VarChar
+  board_id     Int
+  standard_id  Int
+  subject_id   Int
+  total_marks  Int
+  created_at   DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime     @updatedAt @db.Timestamptz(6)
+  board        Board        @relation(fields: [board_id], references: [id], onDelete: Cascade)
+  standard     Standard     @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  subject      Subject      @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  sections     Section[]
+  test_papers  Test_Paper[]
+}
+
+model Section {
+  id                        Int                        @id @default(autoincrement())
+  pattern_id                Int
+  sub_section               String?                    @db.VarChar
+  section_name              String                     @db.VarChar
+  total_questions           Int
+  mandotory_questions       Int
+  marks_per_question        Int
+  created_at                DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                   @updatedAt @db.Timestamptz(6)
+  section_number            Int
+  sequence_number           Int
+  pattern                   Pattern                    @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
+  subsection_question_types Subsection_Question_Type[]
+
+  @@unique([pattern_id, sequence_number])
+}
+
+model Subsection_Question_Type {
+  id                           Int           @id @default(autoincrement())
+  section_id                   Int
+  seqencial_subquestion_number Int
+  question_type_id             Int
+  created_at                   DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime      @updatedAt @db.Timestamptz(6)
+  question_type                Question_Type @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
+  section                      Section       @relation(fields: [section_id], references: [id], onDelete: Cascade)
+
+  @@unique([section_id, seqencial_subquestion_number])
+}
+
+model Blacklisted_Token {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+}
+
+model Password_Reset {
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  user_id    Int
+  used       Boolean  @default(false)
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([token])
+}
+
+model Image {
+  id                Int             @id @default(autoincrement())
+  image_url         String          @db.VarChar
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime        @updatedAt @db.Timestamptz(6)
+  file_size         Int
+  file_type         String          @db.VarChar
+  height            Int
+  original_filename String          @db.VarChar
+  width             Int
+  match_pairs_left  Match_Pair[]    @relation("LeftImage")
+  match_pairs_right Match_Pair[]    @relation("RightImage")
+  mcq_options       Mcq_Option[]
+  question_texts    Question_Text[]
+}
+
+model Question {
+  id                   Int                   @id @default(autoincrement())
+  question_type_id     Int
+  board_question       Boolean
+  created_at           DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime              @updatedAt @db.Timestamptz(6)
+  Practice_Answer      Practice_Answer[]
+  question_type        Question_Type         @relation(fields: [question_type_id], references: [id], onDelete: Cascade)
+  question_texts       Question_Text[]
+  question_topics      Question_Topic[]
+  student_answers      Student_Answer[]
+  test_paper_questions Test_Paper_Question[]
+}
+
+model Question_Text {
+  id                   Int                          @id @default(autoincrement())
+  question_id          Int
+  image_id             Int?
+  question_text        String
+  created_at           DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime                     @updatedAt @db.Timestamptz(6)
+  match_pairs          Match_Pair[]
+  mcq_options          Mcq_Option[]
+  Practice_Answer      Practice_Answer[]
+  image                Image?                       @relation(fields: [image_id], references: [id])
+  question             Question                     @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  question_text_topics Question_Text_Topic_Medium[]
+  student_answers      Student_Answer[]
+  test_paper_questions Test_Paper_Question[]
+}
+
+model Question_Text_Topic_Medium {
+  id                    Int                @id @default(autoincrement())
+  question_text_id      Int
+  question_topic_id     Int
+  instruction_medium_id Int
+  is_verified           Boolean            @default(false)
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime           @updatedAt @db.Timestamptz(6)
+  translation_status    String             @default("original")
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
+  question_text         Question_Text      @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  question_topic        Question_Topic     @relation(fields: [question_topic_id], references: [id], onDelete: Cascade)
+
+  @@unique([question_text_id, question_topic_id, instruction_medium_id])
+}
+
+model Question_Topic {
+  id                   Int                          @id @default(autoincrement())
+  question_id          Int
+  topic_id             Int
+  created_at           DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime                     @updatedAt @db.Timestamptz(6)
+  question_text_topics Question_Text_Topic_Medium[]
+  question             Question                     @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  topic                Topic                        @relation(fields: [topic_id], references: [id], onDelete: Cascade)
+
+  @@unique([question_id, topic_id])
+}
+
+model Mcq_Option {
+  id               Int               @id @default(autoincrement())
+  question_text_id Int
+  option_text      String?           @db.VarChar
+  image_id         Int?
+  is_correct       Boolean
+  created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime          @updatedAt @db.Timestamptz(6)
+  image            Image?            @relation(fields: [image_id], references: [id])
+  question_text    Question_Text     @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  Practice_Answer  Practice_Answer[]
+  student_answers  Student_Answer[]
+}
+
+model Match_Pair {
+  id               Int           @id @default(autoincrement())
+  question_text_id Int
+  left_text        String?       @db.VarChar
+  right_text       String?       @db.VarChar
+  left_image_id    Int?
+  right_image_id   Int?
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @updatedAt @db.Timestamptz(6)
+  left_image       Image?        @relation("LeftImage", fields: [left_image_id], references: [id])
+  question_text    Question_Text @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  right_image      Image?        @relation("RightImage", fields: [right_image_id], references: [id])
+}
+
+model Test_Paper {
+  id                          Int                   @id @default(autoincrement())
+  name                        String                @db.VarChar
+  exam_time                   DateTime              @db.Time(6)
+  pattern_id                  Int
+  created_at                  DateTime              @default(now()) @db.Timestamptz(6)
+  school_id                   Int
+  updated_at                  DateTime              @updatedAt @db.Timestamptz(6)
+  user_id                     Int
+  test_paper_origin_type      TestPaperOriginType?
+  duration_minutes            Int?
+  instructions                String?
+  is_online                   Boolean               @default(false)
+  negative_marking            Boolean               @default(false)
+  negative_marks_per_question Float?
+  randomize_options           Boolean               @default(false)
+  randomize_questions         Boolean               @default(false)
+  html_files                  HTML_File[]
+  test_assignments            Test_Assignment[]
+  pattern                     Pattern               @relation(fields: [pattern_id], references: [id], onDelete: Cascade)
+  school                      School                @relation(fields: [school_id], references: [id], onDelete: Cascade)
+  user                        User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  test_paper_chapters         Test_Paper_Chapter[]
+  test_paper_questions        Test_Paper_Question[]
+}
+
+model HTML_File {
+  id                    Int                @id @default(autoincrement())
+  test_paper_id         Int
+  content_url           String             @db.VarChar
+  instruction_medium_id Int
+  is_default_medium     Boolean            @default(false)
+  version               Int                @default(1)
+  file_size             Int?
+  is_pdf                Boolean            @default(false)
+  access_count          Int                @default(0)
+  last_accessed         DateTime?
+  created_at            DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime           @updatedAt @db.Timestamptz(6)
+  instruction_medium    Instruction_Medium @relation(fields: [instruction_medium_id], references: [id], onDelete: Cascade)
+  test_paper            Test_Paper         @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+
+  @@unique([test_paper_id, instruction_medium_id])
+}
+
+model Test_Paper_Chapter {
+  id            Int        @id @default(autoincrement())
+  test_paper_id Int
+  chapter_id    Int
+  weightage     Int
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  chapter       Chapter    @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+  test_paper    Test_Paper @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+}
+
+model Test_Paper_Question {
+  id               Int           @id @default(autoincrement())
+  test_paper_id    Int
+  question_id      Int
+  question_text_id Int
+  section_id       Int
+  subsection_id    Int
+  question_order   Int
+  marks            Float
+  is_mandatory     Boolean       @default(true)
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  question         Question      @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  question_text    Question_Text @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  test_paper       Test_Paper    @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+
+  @@unique([test_paper_id, question_id, question_text_id])
+  @@index([test_paper_id, section_id, question_order])
+}
+
+model Student {
+  id                   Int                          @id @default(autoincrement())
+  user_id              Int                          @unique
+  date_of_birth        DateTime?                    @db.Date
+  enrollment_date      DateTime                     @default(now()) @db.Date
+  school_standard_id   Int
+  status               String                       @default("active") @db.VarChar
+  created_at           DateTime                     @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime                     @updatedAt @db.Timestamptz(6)
+  student_id           String                       @db.VarChar
+  Practice_Attempt     Practice_Attempt[]
+  school_standard      School_Standard              @relation(fields: [school_standard_id], references: [id], onDelete: Cascade)
+  user                 User                         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  student_analytics    Student_Analytics?
+  Student_Notification Student_Notification[]
+  student_results      Student_Result[]
+  subject_enrollments  Student_Subject_Enrollment[]
+  test_assignments     Test_Assignment[]
+  test_attempts        Test_Attempt[]
+
+  @@unique([student_id, school_standard_id])
+}
+
+model Student_Subject_Enrollment {
+  id                 Int             @id @default(autoincrement())
+  student_id         Int
+  teacher_subject_id Int
+  status             String          @default("pending") @db.VarChar
+  request_message    String?
+  teacher_response   String?
+  academic_year      String          @db.VarChar
+  requested_at       DateTime        @default(now()) @db.Timestamptz(6)
+  responded_at       DateTime?       @db.Timestamptz(6)
+  enrollment_date    DateTime?       @db.Date
+  created_at         DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime        @updatedAt @db.Timestamptz(6)
+  student            Student         @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  teacher_subject    Teacher_Subject @relation(fields: [teacher_subject_id], references: [id], onDelete: Cascade)
+
+  @@unique([student_id, teacher_subject_id])
+}
+
+model Test_Assignment {
+  id                  Int            @id @default(autoincrement())
+  student_id          Int
+  test_paper_id       Int
+  assigned_by_user_id Int
+  assigned_date       DateTime       @default(now()) @db.Timestamptz(6)
+  due_date            DateTime       @db.Timestamptz(6)
+  available_from      DateTime       @db.Timestamptz(6)
+  max_attempts        Int            @default(1)
+  time_limit_minutes  Int?
+  status              String         @default("assigned") @db.VarChar
+  created_at          DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime       @updatedAt @db.Timestamptz(6)
+  assigned_by         User           @relation(fields: [assigned_by_user_id], references: [id], onDelete: Cascade)
+  student             Student        @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  test_paper          Test_Paper     @relation(fields: [test_paper_id], references: [id], onDelete: Cascade)
+  test_attempts       Test_Attempt[]
+
+  @@unique([student_id, test_paper_id])
+}
+
+model Test_Attempt {
+  id                 Int              @id @default(autoincrement())
+  student_id         Int
+  test_assignment_id Int
+  attempt_number     Int              @default(1)
+  started_at         DateTime         @default(now()) @db.Timestamptz(6)
+  submitted_at       DateTime?        @db.Timestamptz(6)
+  time_taken_seconds Int?
+  status             String           @default("in_progress") @db.VarChar
+  current_question   Int?
+  is_practice        Boolean          @default(false)
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime         @updatedAt @db.Timestamptz(6)
+  student_answers    Student_Answer[]
+  student_result     Student_Result?
+  student            Student          @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  test_assignment    Test_Assignment  @relation(fields: [test_assignment_id], references: [id], onDelete: Cascade)
+}
+
+model Student_Answer {
+  id                 Int           @id @default(autoincrement())
+  test_attempt_id    Int
+  question_id        Int
+  question_text_id   Int
+  selected_option_id Int?
+  is_correct         Boolean?
+  marks_obtained     Float?
+  time_spent_seconds Int?
+  is_flagged         Boolean       @default(false)
+  answered_at        DateTime      @default(now()) @db.Timestamptz(6)
+  question           Question      @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  question_text      Question_Text @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  selected_option    Mcq_Option?   @relation(fields: [selected_option_id], references: [id])
+  test_attempt       Test_Attempt  @relation(fields: [test_attempt_id], references: [id], onDelete: Cascade)
+
+  @@unique([test_attempt_id, question_id])
+}
+
+model Student_Result {
+  id                    Int          @id @default(autoincrement())
+  student_id            Int
+  test_attempt_id       Int          @unique
+  total_questions       Int
+  attempted_questions   Int
+  correct_answers       Int
+  wrong_answers         Int
+  skipped_questions     Int
+  total_marks           Float
+  obtained_marks        Float
+  percentage            Float
+  grade                 String?      @db.VarChar
+  rank_in_standard      Int?
+  time_taken_seconds    Int
+  performance_level     String       @db.VarChar
+  subject_wise_scores   Json?
+  chapter_wise_analysis Json?
+  strengths             Json?
+  weaknesses            Json?
+  recommendations       Json?
+  created_at            DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime     @updatedAt @db.Timestamptz(6)
+  student               Student      @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  test_attempt          Test_Attempt @relation(fields: [test_attempt_id], references: [id], onDelete: Cascade)
+}
+
+model Student_Analytics {
+  id                   Int      @id @default(autoincrement())
+  student_id           Int      @unique
+  total_tests_taken    Int      @default(0)
+  total_practice_tests Int      @default(0)
+  average_score        Float?
+  best_score           Float?
+  worst_score          Float?
+  last_score           Float?
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime @updatedAt @db.Timestamptz(6)
+  student              Student  @relation(fields: [student_id], references: [id], onDelete: Cascade)
+}
+
+model Practice_Answer {
+  id                  Int              @id @default(autoincrement())
+  practice_attempt_id Int
+  question_id         Int
+  question_text_id    Int
+  selected_option_id  Int?
+  is_correct          Boolean?
+  time_spent_seconds  Int?
+  answered_at         DateTime         @default(now()) @db.Timestamptz(6)
+  Practice_Attempt    Practice_Attempt @relation(fields: [practice_attempt_id], references: [id], onDelete: Cascade)
+  Question            Question         @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  Question_Text       Question_Text    @relation(fields: [question_text_id], references: [id], onDelete: Cascade)
+  Mcq_Option          Mcq_Option?      @relation(fields: [selected_option_id], references: [id])
+
+  @@unique([practice_attempt_id, question_id])
+}
+
+model Practice_Attempt {
+  id                 Int               @id @default(autoincrement())
+  student_id         Int
+  subject_id         Int
+  standard_id        Int
+  chapter_id         Int?
+  topic_id           Int?
+  total_questions    Int
+  started_at         DateTime          @default(now()) @db.Timestamptz(6)
+  completed_at       DateTime?         @db.Timestamptz(6)
+  time_taken_seconds Int?
+  score_percentage   Float?
+  correct_answers    Int?
+  wrong_answers      Int?
+  skipped_answers    Int?
+  created_at         DateTime          @default(now()) @db.Timestamptz(6)
+  Practice_Answer    Practice_Answer[]
+  Chapter            Chapter?          @relation(fields: [chapter_id], references: [id])
+  Standard           Standard          @relation(fields: [standard_id], references: [id], onDelete: Cascade)
+  Student            Student           @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  Subject            Subject           @relation(fields: [subject_id], references: [id], onDelete: Cascade)
+  Topic              Topic?            @relation(fields: [topic_id], references: [id])
+}
+
+model Student_Notification {
+  id         Int       @id @default(autoincrement())
+  student_id Int
+  title      String    @db.VarChar
+  message    String
+  type       String    @db.VarChar
+  priority   String    @default("normal") @db.VarChar
+  is_read    Boolean   @default(false)
+  action_url String?   @db.VarChar
+  expires_at DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  Student    Student   @relation(fields: [student_id], references: [id], onDelete: Cascade)
+}
+
+enum TestPaperOriginType {
+  board
+  other
+  both
+}
