@@ -72,124 +72,6 @@ backend/
 └── backups/                # Database backups
 ```
 
-## 🛠️ Development Setup
-
-### Prerequisites
-- **Node.js**: v16.0.0 or higher
-- **PostgreSQL**: v12.0 or higher
-- **npm**: v7.0.0 or higher
-- **Git**: For version control
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd test-vista-be
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Environment Configuration**
-   Create a `.env` file in the root directory:
-   ```env
-   # Database Configuration
-   DATABASE_URL="postgresql://username:password@localhost:5432/test_vista"
-   
-   # JWT Configuration
-   JWT_SECRET="your-super-secret-jwt-key-here"
-   JWT_EXPIRES_IN="24h"
-   
-   # AWS S3 Configuration
-   AWS_ACCESS_KEY_ID="your-aws-access-key"
-   AWS_SECRET_ACCESS_KEY="your-aws-secret-key"
-   AWS_REGION="your-aws-region"
-   AWS_S3_BUCKET="your-s3-bucket-name"
-   
-   # Application Configuration
-   PORT=3000
-   NODE_ENV=development
-   
-   # Email Configuration (if needed)
-   SMTP_HOST="your-smtp-host"
-   SMTP_PORT=587
-   SMTP_USER="your-email@domain.com"
-   SMTP_PASS="your-email-password"
-   ```
-
-4. **Database Setup**
-   ```bash
-   # Generate Prisma client
-   npx prisma generate
-   
-   # Run database migrations
-   npx prisma migrate dev
-   
-   # Seed database with initial data (optional)
-   npx prisma db seed
-   ```
-
-5. **Start development server**
-   ```bash
-   npm run start:dev
-   ```
-
-The API will be available at `http://localhost:3000`
-
-## 📜 Available Scripts
-
-### Development
-- `npm run start` - Start the application
-- `npm run start:dev` - Start with hot reload (recommended for development)
-- `npm run start:debug` - Start in debug mode
-- `npm run start:prod` - Start in production mode
-
-### Building
-- `npm run build` - Build the application for production
-
-### Database
-- `npx prisma migrate dev` - Create and apply new migration
-- `npx prisma migrate deploy` - Apply migrations in production
-- `npx prisma generate` - Generate Prisma client
-- `npx prisma studio` - Open Prisma Studio (database GUI)
-- `npx prisma db seed` - Seed database with initial data
-
-### Code Quality
-- `npm run lint` - Run ESLint and fix issues
-- `npm run format` - Format code with Prettier
-
-### Testing
-- `npm run test` - Run unit tests
-- `npm run test:watch` - Run tests in watch mode
-- `npm run test:cov` - Run tests with coverage report
-- `npm run test:e2e` - Run end-to-end tests
-
-## 🏗️ API Architecture
-
-### Module Structure
-Each feature is organized as a NestJS module with:
-- **Controller** - HTTP request handling
-- **Service** - Business logic implementation
-- **DTOs** - Data Transfer Objects for validation
-- **Entities** - Database model definitions
-- **Guards** - Authentication and authorization
-- **Interceptors** - Request/response transformation
-
-### Database Schema
-Key database entities include:
-- **Users** - Admin, Teacher, Student accounts
-- **Boards** - Educational boards (CBSE, ICSE, etc.)
-- **Schools** - Educational institutions
-- **Standards** - Class/grade levels
-- **Subjects** - Academic subjects
-- **Chapters** - Subject chapters
-- **Questions** - Question bank with multiple types
-- **TestPapers** - Generated test papers
-- **TestAttempts** - Student test submissions
-- **Results** - Performance analytics data
 
 ## 📚 Key Features
 
@@ -278,26 +160,8 @@ npm run test:cov
 npm run test:e2e
 ```
 
-### Testing Best Practices
-- Write unit tests for all services
-- Mock external dependencies
-- Test both success and error scenarios
-- Maintain high test coverage (>80%)
-
-## 🚀 Production Deployment
-
-### Environment Setup
-1. **Set production environment variables**
-2. **Configure production database**
-3. **Set up AWS S3 bucket**
-4. **Configure SMTP for emails**
 
 
-### Performance Optimization
-- **Connection Pooling** - Database connection optimization
-- **Caching** - Redis integration for frequently accessed data
-- **Rate Limiting** - Prevent API abuse
-- **Compression** - Gzip compression for responses
 
 ## 🔒 Security Features
 
@@ -321,43 +185,7 @@ npm run test:e2e
 - **Memory Usage**: Efficient memory management
 - **Uptime**: 99.9% availability target
 
-## 🐛 Troubleshooting
 
-### Common Issues
-
-1. **Database Connection Issues**
-   ```bash
-   # Check database connection
-   npx prisma db pull
-   
-   # Reset database (development only)
-   npx prisma migrate reset
-   ```
-
-2. **Port Already in Use**
-   ```bash
-   # Kill process on port 3000
-   lsof -ti:3000 | xargs kill -9
-   ```
-
-3. **Prisma Client Issues**
-   ```bash
-   # Regenerate Prisma client
-   npx prisma generate
-   ```
-
-4. **Environment Variables**
-   ```bash
-   # Verify environment variables are loaded
-   node -e "console.log(process.env.DATABASE_URL)"
-   ```
-
-### Debug Mode
-Enable debug logging:
-```env
-NODE_ENV=development
-LOG_LEVEL=debug
-```
 
 ## 📚 Documentation
 
@@ -414,6 +242,14 @@ LOG_LEVEL=debug
 - Implement proper DTOs for validation
 - Use descriptive variable and function names
 - Add JSDoc comments for complex functions
+
+
+## 🔗 Repository Link:
+
+
+- **⚙️ Backend Repository**: [Test Vista Frontend](https://github.com/Mindstix-Foundation/test-vista-frontend) 
+
+---
 
 ---
 
