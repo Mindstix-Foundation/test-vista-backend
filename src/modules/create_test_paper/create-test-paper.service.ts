@@ -10,7 +10,7 @@ import { Prisma } from '@prisma/client';
 type QuestionOriginType = 'board' | 'other' | 'both';
 
 // Constants for allocation logic
-const QUESTIONS_REQUIRED_PER_ALLOCATION = 2;
+const QUESTIONS_REQUIRED_PER_ALLOCATION = 1;
 const MINIMUM_QUESTIONS_FOR_AVAILABILITY_CHECK = 2;
 const SINGLE_QUESTION_ALLOCATION = 1;
 const INITIAL_CHAPTER_MARKS = 0;
@@ -475,8 +475,8 @@ export class CreateTestPaperService {
           const questionTypeId = subsectionQuestionTypes[0].question_type_id;
           const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
 
-          // Calculate how many questions can be allocated
-          const canAllocate = Math.floor(questionCount / QUESTIONS_REQUIRED_PER_ALLOCATION) + (questionCount % QUESTIONS_REQUIRED_PER_ALLOCATION > 0 ? SINGLE_QUESTION_ALLOCATION : INITIAL_CHAPTER_MARKS);
+          // Calculate how many questions can be allocated (1:1 ratio)
+          const canAllocate = questionCount;
           
           if (canAllocate >= totalQuestions) {
             absoluteMarks += totalQuestions * marksPerQuestion;
@@ -572,10 +572,10 @@ export class CreateTestPaperService {
           );
           
           if (availability && availability.question_count >= MINIMUM_QUESTIONS_FOR_AVAILABILITY_CHECK) {
-            // Calculate possible marks for this question type
+            // Calculate possible marks for this question type (1:1 ratio)
             const questionsPossible = Math.min(
               section.total_questions,
-              Math.floor(availability.question_count / MINIMUM_QUESTIONS_FOR_AVAILABILITY_CHECK)
+              availability.question_count
             );
             possibleMarks += questionsPossible * section.marks_per_question;
           }

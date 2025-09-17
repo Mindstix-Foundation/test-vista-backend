@@ -444,15 +444,15 @@ export class McqPatternFilterService {
     requirements: Map<number, number>,
     questionTypeMapping: Map<number, number>,
   ): { isValid: boolean; reason?: string } {
-    // Check each required question type against the mapping
+    // Check each required question type against the mapping (1:1 ratio)
     for (const [typeId, requiredCount] of requirements.entries()) {
       const availableCount = questionTypeMapping.get(typeId) || 0;
-      const minimumRequired = Math.ceil(availableCount / 2);
+      const minimumRequired = availableCount; // 1:1 ratio - use all available questions
 
       if (requiredCount > minimumRequired) {
         return {
           isValid: false,
-          reason: `Not enough MCQ questions. Required: ${requiredCount}, Available: ${availableCount}, Half+Ceiling: ${minimumRequired}`,
+          reason: `Not enough MCQ questions. Required: ${requiredCount}, Available: ${availableCount}`,
         };
       }
     }

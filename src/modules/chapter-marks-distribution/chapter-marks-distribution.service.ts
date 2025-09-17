@@ -535,8 +535,8 @@ export class ChapterMarksDistributionService {
     usedQuestionTypes.get(sectionId)!.add(questionTypeId);
     chapterQuestionTypeUsage.set(questionTypeId, currentCount - 1);
     
-    // Update the question count
-    const newCount = Math.max(0, currentCount - 2);
+    // Update the question count (1:1 ratio)
+    const newCount = Math.max(0, currentCount - 1);
     chapterQuestionTypes.set(questionTypeId, newCount);
   }
 
@@ -1009,9 +1009,9 @@ export class ChapterMarksDistributionService {
     usedQuestionTypes.get(sectionId)?.add(typeId);
     questionTypeUsage.set(typeId, (questionTypeUsage.get(typeId) || 0) + 1);
     
-    // Decrement question count by 2
+    // Decrement question count by 1 (1:1 ratio)
     const currentCount = chapterQuestionTypes.get(typeId) || 0;
-    const newCount = Math.max(0, currentCount - 2);
+    const newCount = Math.max(0, currentCount - 1);
     chapterQuestionTypes.set(typeId, newCount);
   }
 
@@ -1179,7 +1179,7 @@ export class ChapterMarksDistributionService {
     }
 
     // Use the updateAllocationTracking helper method for tracking updates
-    // It decrements by 2 by default, so override that behavior by updating directly
+    // It decrements by 1 now (1:1 ratio), so override that behavior by updating directly
     usedQuestionTypes.get(section.id)!.add(selectedTypeId);
     
     // Adjust the count differently than the original method
@@ -1740,9 +1740,9 @@ export class ChapterMarksDistributionService {
       chapterQuestionTypes: chapterTypes
     });
         
-    // Update tracking
+    // Update tracking (1:1 ratio)
     const newRemainingMarks = remainingMarks - markValue;
-    chapterTypes.set(questionTypeId, Math.max(0, currentCount - 2));
+    chapterTypes.set(questionTypeId, Math.max(0, currentCount - 1));
 
     return { 
       success: true, 

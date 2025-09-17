@@ -244,8 +244,8 @@ export class ChapterMarksRangeService {
     const questionTypeId = subsectionQuestionType.question_type_id;
     const questionCount = availableQuestions.get(questionTypeId) || 0;
     
-    // Calculate how many questions can be allocated
-    const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
+    // Calculate how many questions can be allocated (1:1 ratio)
+    const canAllocate = questionCount;
     
     return Math.min(canAllocate, totalQuestions) * marksPerQuestion;
   }
@@ -268,11 +268,11 @@ export class ChapterMarksRangeService {
       const questionTypeId = sqt.question_type_id;
       const questionCount = availableQuestions.get(questionTypeId) || 0;
 
-      if (questionCount >= 2) {
-        // Subtract 2 questions and add marks
+      if (questionCount >= 1) {
+        // Subtract 1 question and add marks (1:1 ratio)
         sectionMarks += marksPerQuestion;
         remainingQuestions--;
-        availableQuestions.set(questionTypeId, questionCount - 2);
+        availableQuestions.set(questionTypeId, questionCount - 1);
       }
     }
 
@@ -607,7 +607,7 @@ export class ChapterMarksRangeService {
   ): void {
     const questionTypeId = subsectionQuestionType.question_type_id;
     const questionCount = chapterQuestionTypes.get(questionTypeId) || 0;
-    const canAllocate = Math.floor(questionCount / 2) + (questionCount % 2 > 0 ? 1 : 0);
+    const canAllocate = questionCount; // 1:1 ratio - use all available questions
     
     this.logger.debug(`Single question type - QuestionTypeId: ${questionTypeId}, Count: ${questionCount}, CanAllocate: ${canAllocate}`);
     
@@ -661,10 +661,10 @@ export class ChapterMarksRangeService {
       const questionTypeId = sqt.question_type_id;
       const questionCount = questionTypes.get(questionTypeId) || 0;
       
-      if (questionCount >= 2) {
+      if (questionCount >= 1) {
         totalAllocatable++;
         remainingQuestions--;
-        questionTypes.set(questionTypeId, questionCount - 2);
+        questionTypes.set(questionTypeId, questionCount - 1);
       }
     }
     
