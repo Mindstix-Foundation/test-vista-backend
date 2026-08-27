@@ -13,14 +13,14 @@ export class CheckQuestionTypeDto {
   @Transform(({ value }) => {
     if (Array.isArray(value)) {
       return value.map(v => {
-        const parsed = typeof v === 'string' ? parseInt(v.trim(), 10) : v;
-        return isNaN(parsed) ? 0 : parsed;
+        const parsed = typeof v === 'string' ? Number.parseInt(v.trim(), 10) : v;
+        return Number.isNaN(parsed) ? 0 : parsed;
       });
     }
     if (typeof value === 'string') {
       return value.split(',').map(id => {
-        const parsed = parseInt(id.trim(), 10);
-        return isNaN(parsed) ? 0 : parsed;
+        const parsed = Number.parseInt(id.trim(), 10);
+        return Number.isNaN(parsed) ? 0 : parsed;
       });
     }
     return [];
@@ -37,8 +37,8 @@ export class CheckQuestionTypeDto {
   })
   @IsNotEmpty()
   @Transform(({ value }) => {
-    const parsed = typeof value === 'string' ? parseInt(value.trim(), 10) : value;
-    return isNaN(parsed) ? 0 : parsed;
+    const parsed = typeof value === 'string' ? Number.parseInt(value.trim(), 10) : value;
+    return Number.isNaN(parsed) ? 0 : parsed;
   })
   @IsNumber({}, { message: 'patternId must be a number' })
   patternId: number;
@@ -53,14 +53,14 @@ export class CheckQuestionTypeDto {
   @Transform(({ value }) => {
     if (Array.isArray(value)) {
       return value.map(v => {
-        const parsed = typeof v === 'string' ? parseInt(v.trim(), 10) : v;
-        return isNaN(parsed) ? 0 : parsed;
+        const parsed = typeof v === 'string' ? Number.parseInt(v.trim(), 10) : v;
+        return Number.isNaN(parsed) ? 0 : parsed;
       });
     }
     if (typeof value === 'string') {
       return value.split(',').map(id => {
-        const parsed = parseInt(id.trim(), 10);
-        return isNaN(parsed) ? 0 : parsed;
+        const parsed = Number.parseInt(id.trim(), 10);
+        return Number.isNaN(parsed) ? 0 : parsed;
       });
     }
     return [];

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SyllabusBridgeService } from '../syllabus/syllabus-bridge.service';
 import { CreateChapterDto } from './dto/create-chapter.dto';
 import { UpdateChapterDto } from './dto/update-chapter.dto';
 import { CheckQuestionTypeDto } from './dto/check-question-type.dto';
@@ -9,7 +10,18 @@ import { toTitleCase } from '../../utils/titleCase';
 export class ChapterService {
   private readonly logger = new Logger(ChapterService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly syllabusBridge: SyllabusBridgeService,
+  ) {}
+
+  private async bridgeSync(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (error) {
+      this.logger.warn(`Syllabus bridge sync failed: ${error?.message ?? error}`);
+    }
+  }
 
   async create(createChapterDto: CreateChapterDto) {
     try {
@@ -52,7 +64,7 @@ export class ChapterService {
         name: toTitleCase(createChapterDto.name),
       };
 
-      return await this.prisma.chapter.create({
+      const chapter = await this.prisma.chapter.create({
         data: chapterData,
         include: {
           subject: true,
@@ -60,6 +72,9 @@ export class ChapterService {
           topics: true,
         },
       });
+
+      void this.bridgeSync(() => this.syllabusBridge.syncChapter(chapter.id));
+      return chapter;
     } catch (error) {
       this.logger.error('Failed to create chapter:', error);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
@@ -71,42 +86,20 @@ export class ChapterService {
 
   async findAll(subjectId?: number, standardId?: number, mediumId?: number) {
     try {
-      // Handle medium only filter
-      if (mediumId && (!subjectId || !standardId)) {
-        this.logger.warn('Medium filter requires both subject and standard IDs');
-        throw new BadRequestException('Please provide both subject ID and standard ID when filtering by medium ID');
-      }
-      
-      // Build where clause based on provided filters
-      const where: any = {};
-      
-      if (subjectId) {
-        where.subject_id = subjectId;
-      }
-      
-      if (standardId) {
-        where.standard_id = standardId;
-      }
-      
-      // If medium is specified with subject and standard, validate the combination exists
+      this.assertMediumFilterHasSubjectAndStandard(mediumId, subjectId, standardId);
+
       if (mediumId && subjectId && standardId) {
-        // Check if the medium-standard-subject combination exists
-        const mssExists = await this.prisma.medium_Standard_Subject.findFirst({
-          where: {
-            instruction_medium_id: mediumId,
-            standard_id: standardId,
-            subject_id: subjectId
-          }
-        });
-        
+        const mssExists = await this.mediumStandardSubjectExists(mediumId, standardId, subjectId);
         if (!mssExists) {
-          this.logger.warn('No combination found for the specified medium, standard and subject');
-          throw new NotFoundException('The specified medium, standard, and subject combination does not exist');
+          this.logger.warn(
+            `No Medium_Standard_Subject for medium=${mediumId}, standard=${standardId}, subject=${subjectId} — returning empty chapters`,
+          );
+          return [];
         }
       }
 
       const chapters = await this.prisma.chapter.findMany({
-        where,
+        where: this.buildChapterWhereClause(subjectId, standardId),
         include: {
           subject: true,
           standard: true,
@@ -120,15 +113,85 @@ export class ChapterService {
           sequential_chapter_number: 'asc'
         }
       });
-      
+
+      if (mediumId && chapters.length) {
+        return this.attachVerifiedQuestionCounts(chapters, mediumId);
+      }
+
       return chapters;
     } catch (error) {
       this.logger.error('Failed to fetch chapters:', error);
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
-        throw error; // Re-throw validation errors with their original status codes
+        throw error;
       }
       throw new InternalServerErrorException('Failed to fetch chapters');
     }
+  }
+
+  private assertMediumFilterHasSubjectAndStandard(
+    mediumId?: number,
+    subjectId?: number,
+    standardId?: number,
+  ): void {
+    if (mediumId && (!subjectId || !standardId)) {
+      this.logger.warn('Medium filter requires both subject and standard IDs');
+      throw new BadRequestException('Please provide both subject ID and standard ID when filtering by medium ID');
+    }
+  }
+
+  private buildChapterWhereClause(subjectId?: number, standardId?: number) {
+    const where: any = {};
+    if (subjectId) {
+      where.subject_id = subjectId;
+    }
+    if (standardId) {
+      where.standard_id = standardId;
+    }
+    return where;
+  }
+
+  private async mediumStandardSubjectExists(
+    mediumId: number,
+    standardId: number,
+    subjectId: number,
+  ) {
+    return this.prisma.medium_Standard_Subject.findFirst({
+      where: {
+        instruction_medium_id: mediumId,
+        standard_id: standardId,
+        subject_id: subjectId
+      }
+    });
+  }
+
+  private async attachVerifiedQuestionCounts(chapters: { id: number }[], mediumId: number) {
+    const chapterIds = chapters.map((c) => c.id);
+    const counts = await this.prisma.question_Text_Topic_Medium.groupBy({
+      by: ['question_topic_id'],
+      where: {
+        instruction_medium_id: mediumId,
+        is_verified: true,
+        question_topic: {
+          topic: { chapter_id: { in: chapterIds } },
+        },
+      },
+      _count: { _all: true },
+    });
+    const topicLinks = await this.prisma.question_Topic.findMany({
+      where: { id: { in: counts.map((c) => c.question_topic_id) } },
+      select: { id: true, topic: { select: { chapter_id: true } } },
+    });
+    const topicToChapter = new Map(topicLinks.map((t) => [t.id, t.topic.chapter_id]));
+    const byChapter = new Map<number, number>();
+    for (const row of counts) {
+      const chapterId = topicToChapter.get(row.question_topic_id);
+      if (!chapterId) continue;
+      byChapter.set(chapterId, (byChapter.get(chapterId) || 0) + row._count._all);
+    }
+    return chapters.map((c) => ({
+      ...c,
+      question_count: byChapter.get(c.id) || 0,
+    }));
   }
 
   async findOne(id: number) {
@@ -228,7 +291,7 @@ export class ChapterService {
         name: updateChapterDto.name ? toTitleCase(updateChapterDto.name) : undefined,
       };
 
-      return await this.prisma.chapter.update({
+      const chapter = await this.prisma.chapter.update({
         where: { id },
         data: chapterData,
         include: {
@@ -237,6 +300,9 @@ export class ChapterService {
           topics: true,
         },
       });
+
+      void this.bridgeSync(() => this.syllabusBridge.syncChapter(chapter.id));
+      return chapter;
     } catch (error) {
       this.logger.error(`Failed to update chapter ${id}:`, error);
       
@@ -253,6 +319,8 @@ export class ChapterService {
       const currentPosition = chapterToDelete.sequential_chapter_number;
       const subjectId = chapterToDelete.subject_id;
       const standardId = chapterToDelete.standard_id;
+
+      await this.syllabusBridge.removeSyncedChapter(id);
 
       await this.prisma.$transaction(async (tx) => {
         // First delete the chapter
@@ -395,6 +463,7 @@ export class ChapterService {
           });
         });
 
+        void this.bridgeSync(() => this.syllabusBridge.syncChapter(chapterId));
         return await this.findOne(chapterId);
       } catch (txError) {
         this.logger.error(`Transaction failed: ${txError.message}`, txError.stack);
@@ -418,8 +487,8 @@ export class ChapterService {
     });
 
     if (chapters.length !== chapterIds.length) {
-      const foundIds = chapters.map(chapter => chapter.id);
-      const missingIds = chapterIds.filter(id => !foundIds.includes(id));
+      const foundIds = new Set(chapters.map(chapter => chapter.id));
+      const missingIds = chapterIds.filter(id => !foundIds.has(id));
       throw new NotFoundException(`Chapters not found with IDs: ${missingIds.join(', ')}`);
     }
 
@@ -457,8 +526,8 @@ export class ChapterService {
       });
 
       if (mediums.length !== mediumIds.length) {
-        const foundIds = mediums.map(medium => medium.id);
-        const missingIds = mediumIds.filter(id => !foundIds.includes(id));
+        const foundIds = new Set(mediums.map(medium => medium.id));
+        const missingIds = mediumIds.filter(id => !foundIds.has(id));
         throw new NotFoundException(`Instruction mediums not found with IDs: ${missingIds.join(', ')}`);
       }
     }
@@ -515,34 +584,9 @@ export class ChapterService {
       )
     )];
 
-    // Restructure the data to be grouped by question type
-    const questionTypeResults = questionTypes.map(qt => {
-      const chaptersWithType = chapters.map(chapter => {
-        const chapterTopicIds = topics
-          .filter(topic => topic.chapter_id === chapter.id)
-          .map(topic => topic.id);
-
-        const count = questions.filter(q => 
-          q.question_type_id === qt.type &&
-          q.question_topics.some(qt => chapterTopicIds.includes(qt.topic_id)) &&
-          (!mediumIds?.length || q.question_topics.some(qt => 
-            qt.question_text_topics.length === mediumIds.length
-          ))
-        ).length;
-
-        return {
-          id: chapter.id,
-          name: chapter.name,
-          count
-        };
-      }).filter(chapter => chapter.count > 0); // Only include chapters that have questions of this type
-
-      return {
-        type: qt.type,
-        name: qt.name,
-        chapters: chaptersWithType
-      };
-    });
+    const questionTypeResults = questionTypes.map(qt =>
+      this.buildQuestionTypeChapterCounts(qt, chapters, topics, questions, mediumIds),
+    );
 
     // Calculate total by summing up all chapter counts
     const total = questionTypeResults.reduce((sum, qt) => 
@@ -556,5 +600,72 @@ export class ChapterService {
         total // This will now be the sum of all chapter counts
       }
     };
+  }
+
+  private buildQuestionTypeChapterCounts(
+    questionType: { type: number; name: string },
+    chapters: { id: number; name: string }[],
+    topics: { id: number; chapter_id: number }[],
+    questions: any[],
+    mediumIds?: number[],
+  ) {
+    const chaptersWithType = chapters
+      .map((chapter) => this.buildChapterQuestionCount(chapter, questionType.type, topics, questions, mediumIds))
+      .filter((chapter) => chapter.count > 0);
+
+    return {
+      type: questionType.type,
+      name: questionType.name,
+      chapters: chaptersWithType,
+    };
+  }
+
+  private buildChapterQuestionCount(
+    chapter: { id: number; name: string },
+    questionTypeId: number,
+    topics: { id: number; chapter_id: number }[],
+    questions: any[],
+    mediumIds?: number[],
+  ) {
+    const chapterTopicIds = topics
+      .filter((topic) => topic.chapter_id === chapter.id)
+      .map((topic) => topic.id);
+
+    return {
+      id: chapter.id,
+      name: chapter.name,
+      count: this.countMatchingQuestions(questions, questionTypeId, chapterTopicIds, mediumIds),
+    };
+  }
+
+  private countMatchingQuestions(
+    questions: any[],
+    questionTypeId: number,
+    chapterTopicIds: number[],
+    mediumIds?: number[],
+  ): number {
+    return questions.filter((question) =>
+      this.questionMatchesChapterType(question, questionTypeId, chapterTopicIds, mediumIds),
+    ).length;
+  }
+
+  private questionMatchesChapterType(
+    question: any,
+    questionTypeId: number,
+    chapterTopicIds: number[],
+    mediumIds?: number[],
+  ): boolean {
+    if (question.question_type_id !== questionTypeId) {
+      return false;
+    }
+    if (!question.question_topics.some((qt) => chapterTopicIds.includes(qt.topic_id))) {
+      return false;
+    }
+    if (!mediumIds?.length) {
+      return true;
+    }
+    return question.question_topics.some(
+      (qt) => qt.question_text_topics.length === mediumIds.length,
+    );
   }
 } 

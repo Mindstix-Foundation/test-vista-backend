@@ -1,12 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '../../prisma/client';
 import { CreateMcqOptionDto } from './dto/create-mcq-option.dto';
 import { UpdateMcqOptionDto } from './dto/update-mcq-option.dto';
 import { FilterMcqOptionDto } from './dto/filter-mcq-option.dto';
 
 @Injectable()
 export class McqOptionService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createMcqOptionDto: CreateMcqOptionDto) {
     return this.prisma.mcq_Option.create({
@@ -63,7 +64,10 @@ export class McqOptionService {
         },
       });
     } catch (error) {
-      throw new NotFoundException(`MCQ Option with ID ${id} not found`);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new NotFoundException(`MCQ Option with ID ${id} not found`);
+      }
+      throw error;
     }
   }
 
@@ -73,7 +77,10 @@ export class McqOptionService {
         where: { id },
       });
     } catch (error) {
-      throw new NotFoundException(`MCQ Option with ID ${id} not found`);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new NotFoundException(`MCQ Option with ID ${id} not found`);
+      }
+      throw error;
     }
   }
 } 

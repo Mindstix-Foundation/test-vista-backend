@@ -112,19 +112,19 @@ export class MediumStandardSubjectController {
     @Query('board_id') boardId?: string
   ) {
     try {
-      const mediumIdNum = parseInt(mediumId, 10);
-      const standardIdNum = parseInt(standardId, 10);
-      const boardIdNum = boardId ? parseInt(boardId, 10) : undefined;
+      const mediumIdNum = Number.parseInt(mediumId, 10);
+      const standardIdNum = Number.parseInt(standardId, 10);
+      const boardIdNum = boardId ? Number.parseInt(boardId, 10) : undefined;
       
-      if (isNaN(mediumIdNum)) {
+      if (Number.isNaN(mediumIdNum)) {
         throw new BadRequestException('Invalid medium ID: must be a number');
       }
       
-      if (isNaN(standardIdNum)) {
+      if (Number.isNaN(standardIdNum)) {
         throw new BadRequestException('Invalid standard ID: must be a number');
       }
       
-      if (boardId && isNaN(boardIdNum)) {
+      if (boardId && Number.isNaN(boardIdNum)) {
         throw new BadRequestException('Invalid board ID: must be a number');
       }
       

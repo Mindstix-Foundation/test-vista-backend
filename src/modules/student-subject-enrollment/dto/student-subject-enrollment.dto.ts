@@ -28,6 +28,23 @@ export class CreateStudentSubjectEnrollmentDto {
   academic_year: string;
 }
 
+export class AdminMapEnrollmentDto {
+  @ApiProperty({ example: 1, description: 'Student ID' })
+  @IsNumber()
+  @IsNotEmpty()
+  student_id: number;
+
+  @ApiProperty({ example: 1, description: 'Teacher Subject ID' })
+  @IsNumber()
+  @IsNotEmpty()
+  teacher_subject_id: number;
+
+  @ApiPropertyOptional({ example: '2025-26', description: 'Academic year (defaults to current)' })
+  @IsString()
+  @IsOptional()
+  academic_year?: string;
+}
+
 export class UpdateEnrollmentStatusDto {
   @ApiProperty({ 
     enum: EnrollmentStatus,
@@ -62,7 +79,7 @@ export class GetEnrollmentsQueryDto {
   })
   @IsNumber()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   student_id?: number;
 
   @ApiPropertyOptional({ 
@@ -71,7 +88,7 @@ export class GetEnrollmentsQueryDto {
   })
   @IsNumber()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   teacher_subject_id?: number;
 
   @ApiPropertyOptional({ 
@@ -162,7 +179,7 @@ export class GetEnrolledStudentsQueryDto {
   })
   @IsNumber()
   @IsNotEmpty()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   standard_id: number;
 
   @ApiProperty({ 
@@ -171,7 +188,7 @@ export class GetEnrolledStudentsQueryDto {
   })
   @IsNumber()
   @IsNotEmpty()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   subject_id: number;
 
   @ApiPropertyOptional({ 
@@ -180,7 +197,7 @@ export class GetEnrolledStudentsQueryDto {
   })
   @IsNumber()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   paper_id?: number;
 
   @ApiPropertyOptional({ 

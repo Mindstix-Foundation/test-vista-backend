@@ -17,7 +17,7 @@ const MCQ_QUESTION_TYPE_ID = 1;
 export class McqPatternFilterService {
   private readonly logger = new Logger(McqPatternFilterService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async filterPatterns(filterDto: FilterMcqPatternsWithMarksDto) {
     const { mediumIds, chapterIds, questionOrigin, marks } = filterDto;
@@ -52,8 +52,8 @@ export class McqPatternFilterService {
     }
 
     if (chapters.length !== chapterIds.length) {
-      const foundIds = chapters.map((c) => c.id);
-      const missingIds = chapterIds.filter((id) => !foundIds.includes(id));
+      const foundIds = new Set(chapters.map((c) => c.id));
+      const missingIds = chapterIds.filter((id) => !foundIds.has(id));
       throw new NotFoundException(
         `Chapters not found with IDs: ${missingIds.join(', ')}`,
       );
@@ -222,15 +222,6 @@ export class McqPatternFilterService {
     const standardIds = [...new Set(chapters.map((c) => c.standard_id))];
     const subjectIds = [...new Set(chapters.map((c) => c.subject_id))];
     const boardIds = [...new Set(chapters.map((c) => c.standard.board_id))];
-
-    // Get topics for the selected chapters
-    const topics = await this.prisma.topic.findMany({
-      where: {
-        chapter_id: { in: chapterIds },
-      },
-    });
-
-    const topicIds = topics.map((t) => t.id);
 
     // Get patterns that contain ONLY MCQ question types
     // FIXED: Now properly filtering by standard_id, subject_id, and board_id

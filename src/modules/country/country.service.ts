@@ -32,11 +32,21 @@ export class CountryService {
   }
 
   async findAll() {
-    return this.prisma.country.findMany({
+    const countries = await this.prisma.country.findMany({
       select: {
         id: true,
         name: true
-      }
+      },
+      orderBy: { name: 'asc' },
+    });
+    // Prefer first id per exact name so duplicate seed rows (e.g. India) don't appear twice
+    const seen = new Set<string>();
+    return countries.filter((c) => {
+      const key = c.name.trim().toLowerCase();
+      if (key.includes('legacy duplicate')) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }
 

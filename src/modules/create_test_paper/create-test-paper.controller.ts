@@ -102,8 +102,13 @@ export class CreateTestPaperController {
     status: 401,
     description: 'Unauthorized'
   })
-  async getOnlineTestPapers(@Request() req: any) {
-    return this.createTestPaperService.getOnlineTestPapers(req.user.id);
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    description: 'Filter by exam category: BOARD | ENTRANCE | COMPETITIVE',
+  })
+  async getOnlineTestPapers(@Request() req: any, @Query('category') category?: string) {
+    return this.createTestPaperService.getOnlineTestPapers(req.user.id, category);
   }
 
   @Post('online')

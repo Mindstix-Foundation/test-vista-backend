@@ -9,8 +9,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   private readonly logger = new Logger(JwtStrategy.name);
 
   constructor(
-    private configService: ConfigService,
-    private prisma: PrismaService
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -23,8 +23,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload) {
       throw new UnauthorizedException('Invalid token payload');
     }
-
-    this.logger.debug('JWT payload:', JSON.stringify(payload, null, 2));
 
     // Load full user data including student profile if applicable
     const user = await this.prisma.user.findUnique({
@@ -76,7 +74,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const userRoles = user.user_roles.map(ur => ur.role.role_name);
-    this.logger.debug(`User found: ${user.email_id}, Roles: ${userRoles.join(', ')}, Student: ${user.student ? 'Yes' : 'No'}`);
 
     return {
       id: user.id,

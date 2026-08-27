@@ -5,17 +5,23 @@ import {
   ConflictException, 
   InternalServerErrorException, 
   BadRequestException,
-  UnprocessableEntityException,
   Inject,
   forwardRef
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStudentDto, UpdateStudentDto } from './dto/student.dto';
 import { hash } from 'bcryptjs';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AuthService } from '../auth/auth.service';
+import {
+  generateOrgCode,
+  InstitutionType,
+  InstitutionVisibility,
+  OrgMembershipStatus,
+} from '../../common/utils/org-membership.util';
+import { isWellFormedEmail } from '../../common/utils/email.util';
 
 /**
  * Student search parameters for findAll method
@@ -82,6 +88,29 @@ export class StudentService {
         throw new NotFoundException(`School Standard with ID ${createDto.school_standard_id} not found`);
       }
 
+      let institution = await this.prisma.institution.findFirst({
+        where: { school_id: schoolStandard.school_id },
+      });
+      if (!institution) {
+        institution = await this.prisma.institution.create({
+          data: {
+            institution_type: InstitutionType.SCHOOL,
+            name: schoolStandard.school.name,
+            org_code: generateOrgCode('TV-S'),
+            visibility: InstitutionVisibility.PRIVATE,
+            school_id: schoolStandard.school_id,
+            is_active: true,
+          },
+        });
+      }
+      if (!institution.is_active) {
+        throw new BadRequestException(
+          'This school/organization is closed and is not accepting new students.',
+        );
+      }
+
+      const institutionId = institution.id;
+
       // Hash password
       const hashedPassword = await this.hashPassword(createDto.password);
 
@@ -115,6 +144,8 @@ export class StudentService {
           }
         });
 
+        const studentStatus = createDto.status || 'pending';
+
         // Create student profile
         const student = await prisma.student.create({
           data: {
@@ -122,11 +153,24 @@ export class StudentService {
             student_id: createDto.student_id,
             date_of_birth: createDto.date_of_birth ? new Date(createDto.date_of_birth) : null,
             school_standard_id: createDto.school_standard_id,
-            status: createDto.status || 'active'
+            status: studentStatus
           }
         });
 
-        return { user, student };
+        const membership = await prisma.learner_Institution_Membership.create({
+          data: {
+            user_id: user.id,
+            institution_id: institutionId,
+            student_id: student.id,
+            school_standard_id: createDto.school_standard_id,
+            status:
+              studentStatus === 'active'
+                ? OrgMembershipStatus.active
+                : OrgMembershipStatus.pending,
+          },
+        });
+
+        return { user, student, membership };
       });
 
       return {
@@ -140,6 +184,7 @@ export class StudentService {
         date_of_birth: result.student.date_of_birth,
         school_standard_id: result.student.school_standard_id,
         status: result.student.status,
+        membership_status: result.membership.status,
         enrollment_date: result.student.enrollment_date,
         created_at: result.student.created_at,
         updated_at: result.student.updated_at
@@ -409,7 +454,6 @@ export class StudentService {
 
   async update(id: number, updateDto: UpdateStudentDto) {
     try {
-      // Check if student exists
       const existingStudent = await this.prisma.student.findUnique({
         where: { id },
         include: {
@@ -421,87 +465,13 @@ export class StudentService {
         throw new NotFoundException(`Student with ID ${id} not found`);
       }
 
-      // Check for email conflicts if email is being updated
-      if (updateDto.email_id && updateDto.email_id !== existingStudent.user.email_id) {
-        const emailExists = await this.prisma.user.findUnique({
-          where: { email_id: updateDto.email_id }
-        });
+      await this.assertStudentUpdateConflicts(id, existingStudent, updateDto);
 
-        if (emailExists) {
-          throw new ConflictException(`Email ${updateDto.email_id} already exists`);
-        }
-      }
-
-      // Check for student ID conflicts if student ID is being updated
-      if (updateDto.student_id && updateDto.student_id !== existingStudent.student_id) {
-        const studentIdExists = await this.prisma.student.findFirst({
-          where: {
-            student_id: updateDto.student_id,
-            school_standard_id: updateDto.school_standard_id || existingStudent.school_standard_id,
-            id: { not: id }
-          }
-        });
-
-        if (studentIdExists) {
-          throw new ConflictException(`Student ID ${updateDto.student_id} already exists in this school-standard`);
-        }
-      }
-
-      // Validate school-standard if being updated
-      if (updateDto.school_standard_id && updateDto.school_standard_id !== existingStudent.school_standard_id) {
-        const schoolStandard = await this.prisma.school_Standard.findUnique({
-          where: { id: updateDto.school_standard_id }
-        });
-
-        if (!schoolStandard) {
-          throw new NotFoundException(`School Standard with ID ${updateDto.school_standard_id} not found`);
-        }
-      }
-
-      // Update user and student in a transaction
-      const result = await this.prisma.$transaction(async (prisma) => {
-        // Prepare user update data
-        const userUpdateData: Prisma.UserUpdateInput = {};
-        if (updateDto.email_id) userUpdateData.email_id = updateDto.email_id;
-        if (updateDto.name) userUpdateData.name = toTitleCase(updateDto.name);
-        if (updateDto.contact_number) userUpdateData.contact_number = updateDto.contact_number;
-        if (updateDto.alternate_contact_number !== undefined) {
-          userUpdateData.alternate_contact_number = updateDto.alternate_contact_number || null;
-        }
-
-        // Update user if there's user data to update
-        if (Object.keys(userUpdateData).length > 0) {
-          await prisma.user.update({
-            where: { id: existingStudent.user_id },
-            data: userUpdateData
-          });
-        }
-
-        // Prepare student update data
-        const studentUpdateData: Prisma.StudentUpdateInput = {};
-        if (updateDto.student_id) studentUpdateData.student_id = updateDto.student_id;
-        if (updateDto.date_of_birth !== undefined) {
-          studentUpdateData.date_of_birth = updateDto.date_of_birth ? new Date(updateDto.date_of_birth) : null;
-        }
-        if (updateDto.school_standard_id) {
-          studentUpdateData.school_standard = {
-            connect: { id: updateDto.school_standard_id }
-          };
-        }
-        if (updateDto.status) studentUpdateData.status = updateDto.status;
-
-        // Update student if there's student data to update
-        if (Object.keys(studentUpdateData).length > 0) {
-          await prisma.student.update({
-            where: { id },
-            data: studentUpdateData
-          });
-        }
-
+      await this.prisma.$transaction(async (prisma) => {
+        await this.applyStudentUserUpdates(prisma, existingStudent.user_id, id, updateDto);
         return true;
       });
 
-      // Return updated student
       return await this.findOne(id);
     } catch (error) {
       if (error instanceof NotFoundException || 
@@ -512,6 +482,92 @@ export class StudentService {
       this.logger.error('Failed to update student:', error);
       throw new InternalServerErrorException('Failed to update student');
     }
+  }
+
+  private async assertStudentUpdateConflicts(
+    id: number,
+    existingStudent: { student_id: string; school_standard_id: number; user: { email_id: string } },
+    updateDto: UpdateStudentDto,
+  ): Promise<void> {
+    if (updateDto.email_id && updateDto.email_id !== existingStudent.user.email_id) {
+      const emailExists = await this.prisma.user.findUnique({
+        where: { email_id: updateDto.email_id }
+      });
+      if (emailExists) {
+        throw new ConflictException(`Email ${updateDto.email_id} already exists`);
+      }
+    }
+
+    if (updateDto.student_id && updateDto.student_id !== existingStudent.student_id) {
+      const studentIdExists = await this.prisma.student.findFirst({
+        where: {
+          student_id: updateDto.student_id,
+          school_standard_id: updateDto.school_standard_id || existingStudent.school_standard_id,
+          id: { not: id }
+        }
+      });
+      if (studentIdExists) {
+        throw new ConflictException(`Student ID ${updateDto.student_id} already exists in this school-standard`);
+      }
+    }
+
+    if (updateDto.school_standard_id && updateDto.school_standard_id !== existingStudent.school_standard_id) {
+      const schoolStandard = await this.prisma.school_Standard.findUnique({
+        where: { id: updateDto.school_standard_id }
+      });
+      if (!schoolStandard) {
+        throw new NotFoundException(`School Standard with ID ${updateDto.school_standard_id} not found`);
+      }
+    }
+  }
+
+  private async applyStudentUserUpdates(
+    prisma: Prisma.TransactionClient,
+    userId: number,
+    studentId: number,
+    updateDto: UpdateStudentDto,
+  ): Promise<void> {
+    const userUpdateData = this.buildStudentUserUpdateData(updateDto);
+    if (Object.keys(userUpdateData).length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: userUpdateData
+      });
+    }
+
+    const studentUpdateData = this.buildStudentRecordUpdateData(updateDto);
+    if (Object.keys(studentUpdateData).length > 0) {
+      await prisma.student.update({
+        where: { id: studentId },
+        data: studentUpdateData
+      });
+    }
+  }
+
+  private buildStudentUserUpdateData(updateDto: UpdateStudentDto): Prisma.UserUpdateInput {
+    const userUpdateData: Prisma.UserUpdateInput = {};
+    if (updateDto.email_id) userUpdateData.email_id = updateDto.email_id;
+    if (updateDto.name) userUpdateData.name = toTitleCase(updateDto.name);
+    if (updateDto.contact_number) userUpdateData.contact_number = updateDto.contact_number;
+    if (updateDto.alternate_contact_number !== undefined) {
+      userUpdateData.alternate_contact_number = updateDto.alternate_contact_number || null;
+    }
+    return userUpdateData;
+  }
+
+  private buildStudentRecordUpdateData(updateDto: UpdateStudentDto): Prisma.StudentUpdateInput {
+    const studentUpdateData: Prisma.StudentUpdateInput = {};
+    if (updateDto.student_id) studentUpdateData.student_id = updateDto.student_id;
+    if (updateDto.date_of_birth !== undefined) {
+      studentUpdateData.date_of_birth = updateDto.date_of_birth ? new Date(updateDto.date_of_birth) : null;
+    }
+    if (updateDto.school_standard_id) {
+      studentUpdateData.school_standard = {
+        connect: { id: updateDto.school_standard_id }
+      };
+    }
+    if (updateDto.status) studentUpdateData.status = updateDto.status;
+    return studentUpdateData;
   }
 
   async remove(id: number): Promise<void> {
@@ -711,8 +767,7 @@ export class StudentService {
   }
 
   private isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return isWellFormedEmail(email);
   }
 
   private async hashPassword(password: string): Promise<string> {

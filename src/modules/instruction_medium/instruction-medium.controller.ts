@@ -38,6 +38,14 @@ export class InstructionMediumController {
     return this.instructionMediumService.findAll();
   }
 
+  @Get('board/:boardId')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get instruction mediums by board id' })
+  @ApiResponse({ status: 200, description: 'List of instruction mediums for the specified board' })
+  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
+    return await this.instructionMediumService.findByBoard(boardId);
+  }
+
   @Get(':id')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ summary: 'Get an instruction medium by id' })
@@ -74,13 +82,5 @@ export class InstructionMediumController {
   })
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.instructionMediumService.remove(id);
-  }
-
-  @Get('board/:boardId')
-  @Roles('ADMIN', 'TEACHER')
-  @ApiOperation({ summary: 'Get instruction mediums by board id' })
-  @ApiResponse({ status: 200, description: 'List of instruction mediums for the specified board' })
-  async findByBoard(@Param('boardId', ParseIntPipe) boardId: number) {
-    return await this.instructionMediumService.findByBoard(boardId);
   }
 } 

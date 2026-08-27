@@ -10,16 +10,12 @@ import {
   ParseIntPipe, 
   HttpStatus, 
   HttpCode, 
-  UseGuards, 
-  ValidationPipe,
-  ConflictException
+  UseGuards
 } from '@nestjs/common';
 import { StudentService, StudentSearchParams } from './student.service';
 import { 
   CreateStudentDto, 
-  UpdateStudentDto, 
-  StudentListDto, 
-  StudentDetailDto 
+  UpdateStudentDto
 } from './dto/student.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiProperty, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';

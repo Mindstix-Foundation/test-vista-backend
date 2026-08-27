@@ -28,7 +28,7 @@ export class UpdateStandardSubjectsDto {
   @Expose()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      return parseInt(value, 10);
+      return Number.parseInt(value, 10);
     }
     return value;
   })
@@ -44,7 +44,7 @@ export class UpdateStandardSubjectsDto {
   @Expose()
   @Transform(({ value }) => {
     if (Array.isArray(value)) {
-      return value.map(item => typeof item === 'string' ? parseInt(item, 10) : item);
+      return value.map(item => typeof item === 'string' ? Number.parseInt(item, 10) : item);
     }
     return value;
   })
@@ -140,7 +140,7 @@ export class UpdateTeacherDto {
   @IsOptional()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      return parseInt(value, 10);
+      return Number.parseInt(value, 10);
     }
     return value;
   })

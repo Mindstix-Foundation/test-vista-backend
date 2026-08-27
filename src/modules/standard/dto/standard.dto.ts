@@ -85,12 +85,12 @@ export class CommonStandardsQueryDto {
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       // Split the comma-separated string into an array and convert to numbers
-      return value.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id));
+      return value.split(',').map(id => Number(id.trim())).filter(id => !Number.isNaN(id));
     } else if (Array.isArray(value)) {
       // If it's already an array, make sure all elements are numbers
-      return value.map(id => Number(id)).filter(id => !isNaN(id));
+      return value.map(Number).filter(id => !Number.isNaN(id));
     }
-    return [Number(value)].filter(id => !isNaN(id));
+    return [Number(value)].filter(id => !Number.isNaN(id));
   })
   instruction_medium_ids: number[];
 } 

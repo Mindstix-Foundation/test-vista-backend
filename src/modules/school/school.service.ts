@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSchoolDto, UpdateSchoolDto, UpsertSchoolDto, PartialUpsertSchoolDto } from './dto/school.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
@@ -89,7 +89,7 @@ export class SchoolService {
       
       // Filter by board ID if provided
       if (boardId) {
-        where.board_id = parseInt(boardId.toString());
+        where.board_id = Number.parseInt(boardId.toString(), 10);
       }
       
       // Add search condition for school name
@@ -179,7 +179,7 @@ export class SchoolService {
       
       // Filter by board ID if provided
       if (boardId) {
-        where.board_id = parseInt(boardId.toString());
+        where.board_id = Number.parseInt(boardId.toString(), 10);
       }
       
       // Add search condition for school name
@@ -457,7 +457,11 @@ export class SchoolService {
             }
           },
           school_instruction_mediums: true,
-          user_schools: true
+          institution: {
+            include: {
+              memberships: { where: { status: 'active' } },
+            },
+          },
         }
       });
 
@@ -471,7 +475,7 @@ export class SchoolService {
           ss.teacher_subjects.map(ts => ts.user_id)
         )).size,
         instructionMediums: school.school_instruction_mediums.length,
-        users: school.user_schools.length
+        users: school.institution?.memberships?.length ?? 0
       };
 
       this.logger.log(`Deleting school ${id} will also delete:
@@ -543,10 +547,8 @@ export class SchoolService {
         }
 
         // Handle school creation/update
-        let school;
         if (schoolId) {
-          // Update existing school
-          school = await prisma.school.update({
+          await prisma.school.update({
             where: { id: schoolId },
             data: {
               name: toTitleCase(upsertDto.name),
@@ -558,8 +560,7 @@ export class SchoolService {
             }
           });
         } else {
-          // Create new school
-          school = await prisma.school.create({
+          const school = await prisma.school.create({
             data: {
               name: toTitleCase(upsertDto.name),
               board_id: upsertDto.board_id,
@@ -580,8 +581,11 @@ export class SchoolService {
         });
 
         // Create new mappings
+        if (schoolId == null) {
+          throw new InternalServerErrorException('Failed to resolve school ID after upsert');
+        }
         const instructionMediumMappings = upsertDto.instruction_medium_ids.map(mediumId => ({
-          school_id: schoolId!,
+          school_id: schoolId,
           instruction_medium_id: mediumId,
         }));
 
@@ -597,7 +601,7 @@ export class SchoolService {
 
         // Create new mappings
         const standardMappings = upsertDto.standard_ids.map(standardId => ({
-          school_id: schoolId!,
+          school_id: schoolId,
           standard_id: standardId,
         }));
 
@@ -666,181 +670,194 @@ export class SchoolService {
 
   async partialUpsertSchool(partialUpsertDto: PartialUpsertSchoolDto) {
     try {
-      return await this.prisma.$transaction(async (prisma) => {
-        const schoolId = partialUpsertDto.id;
+      return await this.prisma.$transaction((prisma) =>
+        this.applyPartialSchoolUpsert(prisma, partialUpsertDto),
+      );
+    } catch (error) {
+      this.handlePartialSchoolUpsertError(error);
+    }
+  }
 
-        // Get existing school to compare changes
-        const existingSchool = await prisma.school.findUnique({
-          where: { id: schoolId },
-          include: { 
-            address: true,
-            school_instruction_mediums: true,
-            school_standards: true
-          }
-        });
+  private async applyPartialSchoolUpsert(
+    prisma: Prisma.TransactionClient,
+    partialUpsertDto: PartialUpsertSchoolDto,
+  ) {
+    const schoolId = partialUpsertDto.id;
+    const existingSchool = await prisma.school.findUnique({
+      where: { id: schoolId },
+      include: {
+        address: true,
+        school_instruction_mediums: true,
+        school_standards: true
+      }
+    });
 
-        if (!existingSchool) {
-          throw new NotFoundException(`School with ID ${schoolId} not found`);
+    if (!existingSchool) {
+      throw new NotFoundException(`School with ID ${schoolId} not found`);
+    }
+
+    this.logger.log(`Performing partial update for school ${schoolId}`);
+
+    if (partialUpsertDto.address) {
+      this.logger.log(`Updating address for school ${schoolId}`);
+      await prisma.address.update({
+        where: { id: existingSchool.address_id },
+        data: {
+          street: partialUpsertDto.address.street,
+          postal_code: partialUpsertDto.address.postal_code,
+          city_id: partialUpsertDto.address.city_id,
         }
+      });
+    }
 
-        this.logger.log(`Performing partial update for school ${schoolId}`);
+    await this.updatePartialSchoolFields(prisma, schoolId, partialUpsertDto);
+    await this.syncSchoolInstructionMediums(prisma, schoolId, partialUpsertDto.instruction_medium_ids);
+    await this.syncSchoolStandards(prisma, schoolId, partialUpsertDto.standard_ids);
 
-        // Update address if provided
-        if (partialUpsertDto.address) {
-          this.logger.log(`Updating address for school ${schoolId}`);
-          await prisma.address.update({
-            where: { id: existingSchool.address_id },
-            data: {
-              street: partialUpsertDto.address.street,
-              postal_code: partialUpsertDto.address.postal_code,
-              city_id: partialUpsertDto.address.city_id,
-            }
-          });
-        }
-
-        // Prepare school update data - only include provided fields
-        const schoolUpdateData: any = {};
-        
-        if (partialUpsertDto.name !== undefined) {
-          schoolUpdateData.name = toTitleCase(partialUpsertDto.name);
-        }
-        
-        if (partialUpsertDto.board_id !== undefined) {
-          // Validate board exists
-          const board = await prisma.board.findUnique({
-            where: { id: partialUpsertDto.board_id }
-          });
-          if (!board) {
-            throw new NotFoundException(`Board with ID ${partialUpsertDto.board_id} not found`);
-          }
-          schoolUpdateData.board_id = partialUpsertDto.board_id;
-        }
-        
-        if (partialUpsertDto.principal_name !== undefined) {
-          schoolUpdateData.principal_name = toTitleCase(partialUpsertDto.principal_name);
-        }
-        
-        if (partialUpsertDto.email !== undefined) {
-          schoolUpdateData.email = partialUpsertDto.email;
-        }
-        
-        if (partialUpsertDto.contact_number !== undefined) {
-          schoolUpdateData.contact_number = partialUpsertDto.contact_number;
-        }
-        
-        if (partialUpsertDto.alternate_contact_number !== undefined) {
-          schoolUpdateData.alternate_contact_number = partialUpsertDto.alternate_contact_number;
-        }
-
-        // Update school details if any fields were provided
-        if (Object.keys(schoolUpdateData).length > 0) {
-          this.logger.log(`Updating school fields: ${Object.keys(schoolUpdateData).join(', ')}`);
-          await prisma.school.update({
-            where: { id: schoolId },
-            data: schoolUpdateData
-          });
-        }
-
-        // Handle instruction medium mappings if provided
-        if (partialUpsertDto.instruction_medium_ids !== undefined) {
-          this.logger.log(`Updating instruction medium mappings for school ${schoolId}`);
-          
-          // Delete existing mappings
-          await prisma.school_Instruction_Medium.deleteMany({
-            where: { school_id: schoolId }
-          });
-
-          // Create new mappings
-          if (partialUpsertDto.instruction_medium_ids.length > 0) {
-            const instructionMediumMappings = partialUpsertDto.instruction_medium_ids.map(mediumId => ({
-              school_id: schoolId,
-              instruction_medium_id: mediumId,
-            }));
-
-            await prisma.school_Instruction_Medium.createMany({
-              data: instructionMediumMappings
-            });
-          }
-        }
-
-        // Handle standard mappings if provided
-        if (partialUpsertDto.standard_ids !== undefined) {
-          this.logger.log(`Updating standard mappings for school ${schoolId}`);
-          
-          // Delete existing mappings
-          await prisma.school_Standard.deleteMany({
-            where: { school_id: schoolId }
-          });
-
-          // Create new mappings
-          if (partialUpsertDto.standard_ids.length > 0) {
-            const standardMappings = partialUpsertDto.standard_ids.map(standardId => ({
-              school_id: schoolId,
-              standard_id: standardId,
-            }));
-
-            await prisma.school_Standard.createMany({
-              data: standardMappings
-            });
-          }
-        }
-
-        // Return the complete updated school data
-        return await prisma.school.findUnique({
-          where: { id: schoolId },
+    return prisma.school.findUnique({
+      where: { id: schoolId },
+      include: {
+        address: {
           include: {
-            address: {
+            city: {
               include: {
-                city: {
+                state: {
                   include: {
-                    state: {
-                      include: {
-                        country: true
-                      }
-                    }
+                    country: true
                   }
                 }
               }
-            },
-            board: true,
-            school_instruction_mediums: {
-              orderBy: {
-                instruction_medium: {
-                  instruction_medium: 'asc'
-                }
-              },
-              include: {
-                instruction_medium: true
-              }
-            },
-            school_standards: {
-              orderBy: {
-                standard: {
-                  sequence_number: 'asc'
-                }
-              },
-              include: {
-                standard: true
-              }
             }
           }
-        });
-      });
-    } catch (error) {
-      this.logger.error('Failed to partially upsert school:', error);
-      if (error instanceof NotFoundException || 
-          error instanceof ConflictException) {
-        throw error;
-      }
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('School with this name already exists');
+        },
+        board: true,
+        school_instruction_mediums: {
+          orderBy: {
+            instruction_medium: {
+              instruction_medium: 'asc'
+            }
+          },
+          include: {
+            instruction_medium: true
+          }
+        },
+        school_standards: {
+          orderBy: {
+            standard: {
+              sequence_number: 'asc'
+            }
+          },
+          include: {
+            standard: true
+          }
         }
-        if (error.code === 'P2003') {
-          throw new NotFoundException('Referenced entity not found (board, city, instruction medium, or standard)');
-        }
       }
-      throw new InternalServerErrorException('Failed to partially upsert school');
+    });
+  }
+
+  private async updatePartialSchoolFields(
+    prisma: Prisma.TransactionClient,
+    schoolId: number,
+    partialUpsertDto: PartialUpsertSchoolDto,
+  ): Promise<void> {
+    const schoolUpdateData: any = {};
+
+    if (partialUpsertDto.name !== undefined) {
+      schoolUpdateData.name = toTitleCase(partialUpsertDto.name);
     }
+    if (partialUpsertDto.board_id !== undefined) {
+      const board = await prisma.board.findUnique({
+        where: { id: partialUpsertDto.board_id }
+      });
+      if (!board) {
+        throw new NotFoundException(`Board with ID ${partialUpsertDto.board_id} not found`);
+      }
+      schoolUpdateData.board_id = partialUpsertDto.board_id;
+    }
+    if (partialUpsertDto.principal_name !== undefined) {
+      schoolUpdateData.principal_name = toTitleCase(partialUpsertDto.principal_name);
+    }
+    if (partialUpsertDto.email !== undefined) {
+      schoolUpdateData.email = partialUpsertDto.email;
+    }
+    if (partialUpsertDto.contact_number !== undefined) {
+      schoolUpdateData.contact_number = partialUpsertDto.contact_number;
+    }
+    if (partialUpsertDto.alternate_contact_number !== undefined) {
+      schoolUpdateData.alternate_contact_number = partialUpsertDto.alternate_contact_number;
+    }
+
+    if (Object.keys(schoolUpdateData).length > 0) {
+      this.logger.log(`Updating school fields: ${Object.keys(schoolUpdateData).join(', ')}`);
+      await prisma.school.update({
+        where: { id: schoolId },
+        data: schoolUpdateData
+      });
+    }
+  }
+
+  private async syncSchoolInstructionMediums(
+    prisma: Prisma.TransactionClient,
+    schoolId: number,
+    instructionMediumIds?: number[],
+  ): Promise<void> {
+    if (instructionMediumIds === undefined) {
+      return;
+    }
+
+    this.logger.log(`Updating instruction medium mappings for school ${schoolId}`);
+    await prisma.school_Instruction_Medium.deleteMany({
+      where: { school_id: schoolId }
+    });
+
+    if (instructionMediumIds.length > 0) {
+      await prisma.school_Instruction_Medium.createMany({
+        data: instructionMediumIds.map((mediumId) => ({
+          school_id: schoolId,
+          instruction_medium_id: mediumId,
+        }))
+      });
+    }
+  }
+
+  private async syncSchoolStandards(
+    prisma: Prisma.TransactionClient,
+    schoolId: number,
+    standardIds?: number[],
+  ): Promise<void> {
+    if (standardIds === undefined) {
+      return;
+    }
+
+    this.logger.log(`Updating standard mappings for school ${schoolId}`);
+    await prisma.school_Standard.deleteMany({
+      where: { school_id: schoolId }
+    });
+
+    if (standardIds.length > 0) {
+      await prisma.school_Standard.createMany({
+        data: standardIds.map((standardId) => ({
+          school_id: schoolId,
+          standard_id: standardId,
+        }))
+      });
+    }
+  }
+
+  private handlePartialSchoolUpsertError(error: unknown): never {
+    this.logger.error('Failed to partially upsert school:', error);
+    if (error instanceof NotFoundException ||
+        error instanceof ConflictException) {
+      throw error;
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        throw new ConflictException('School with this name already exists');
+      }
+      if (error.code === 'P2003') {
+        throw new NotFoundException('Referenced entity not found (board, city, instruction medium, or standard)');
+      }
+    }
+    throw new InternalServerErrorException('Failed to partially upsert school');
   }
 }

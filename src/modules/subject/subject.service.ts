@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SyllabusBridgeService } from '../syllabus/syllabus-bridge.service';
 import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
 import { toTitleCase } from '../../utils/titleCase';
 
@@ -7,7 +8,18 @@ import { toTitleCase } from '../../utils/titleCase';
 export class SubjectService {
   private readonly logger = new Logger(SubjectService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly syllabusBridge: SyllabusBridgeService,
+  ) {}
+
+  private async bridgeSync(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (error) {
+      this.logger.warn(`Syllabus bridge sync failed: ${error?.message ?? error}`);
+    }
+  }
 
   async create(createDto: CreateSubjectDto) {
     try {
@@ -32,7 +44,7 @@ export class SubjectService {
         throw new ConflictException(`Subject '${createDto.name}' already exists for this board`);
       }
 
-      return await this.prisma.subject.create({
+      const subject = await this.prisma.subject.create({
         data: {
           name: toTitleCase(createDto.name),
           board_id: createDto.board_id,
@@ -41,6 +53,9 @@ export class SubjectService {
           board: true
         }
       });
+
+      void this.bridgeSync(() => this.syllabusBridge.syncSubject(subject.id));
+      return subject;
     } catch (error) {
       this.logger.error('Failed to create subject:', error);
       if (error instanceof NotFoundException || 
@@ -119,7 +134,7 @@ export class SubjectService {
         }
       }
       
-      return await this.prisma.subject.update({
+      const subject = await this.prisma.subject.update({
         where: { id },
         data: {
           ...updateDto,
@@ -129,6 +144,9 @@ export class SubjectService {
           board: true
         }
       });
+
+      void this.bridgeSync(() => this.syllabusBridge.syncSubject(subject.id));
+      return subject;
     } catch (error) {
       this.logger.error(`Failed to update subject ${id}:`, error);
       if (error instanceof NotFoundException || 
@@ -190,6 +208,9 @@ export class SubjectService {
         - ${relatedCounts.topics} topics
         and all their related records`);
 
+      // Delete synced exam syllabus nodes before legacy cascade
+      await this.syllabusBridge.removeSyncedSubject(id);
+
       // Delete the subject - cascade will handle all related records
       await this.prisma.subject.delete({
         where: { id }
@@ -212,6 +233,31 @@ export class SubjectService {
         name: 'asc' // Sort alphabetically by name
       }
     });
+  }
+
+  /** Subjects linked to a standard via any Medium_Standard_Subject row. */
+  async findByBoardAndStandard(boardId: number, standardId: number) {
+    const standard = await this.prisma.standard.findFirst({
+      where: { id: standardId, board_id: boardId },
+    });
+    if (!standard) {
+      return [];
+    }
+
+    const rows = await this.prisma.medium_Standard_Subject.findMany({
+      where: { standard_id: standardId },
+      select: {
+        subject: {
+          select: { id: true, board_id: true, name: true, created_at: true, updated_at: true },
+        },
+      },
+      distinct: ['subject_id'],
+    });
+
+    return rows
+      .map((r) => r.subject)
+      .filter((s) => s.board_id === boardId)
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async findUnconnectedSubjects(boardId: number, mediumId: number, standardId: number) {
@@ -335,14 +381,14 @@ export class SubjectService {
       const uniqueSubjectsMap = new Map();
       
       // Add each subject to the map using subject ID as the key
-      mediumStandardSubjects.forEach(mss => {
+      for (const mss of mediumStandardSubjects) {
         if (!uniqueSubjectsMap.has(mss.subject.id)) {
           uniqueSubjectsMap.set(mss.subject.id, {
             id: mss.subject.id,
             name: mss.subject.name
           });
         }
-      });
+      }
       
       // Convert the map values to an array
       return Array.from(uniqueSubjectsMap.values());

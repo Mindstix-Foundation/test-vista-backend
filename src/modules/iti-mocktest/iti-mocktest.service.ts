@@ -3,13 +3,38 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ItiStudentRegistrationDto, ItiStudentLoginDto } from './dto/iti-student-registration.dto';
 import * as bcrypt from 'bcrypt';
+import {
+  generateOrgCode,
+  InstitutionType,
+  InstitutionVisibility,
+  OrgMembershipStatus,
+} from '../../common/utils/org-membership.util';
 
 @Injectable()
 export class ItiMocktestService {
   constructor(
-    private prisma: PrismaService,
-    private jwtService: JwtService
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService
   ) {}
+
+  private async ensureInstitutionForSchool(schoolId: number, schoolName: string) {
+    let institution = await this.prisma.institution.findFirst({
+      where: { school_id: schoolId },
+    });
+    if (!institution) {
+      institution = await this.prisma.institution.create({
+        data: {
+          institution_type: InstitutionType.SCHOOL,
+          name: schoolName,
+          org_code: generateOrgCode('TV-S'),
+          visibility: InstitutionVisibility.PRIVATE,
+          school_id: schoolId,
+          is_active: true,
+        },
+      });
+    }
+    return institution;
+  }
 
   async registerStudent(dto: ItiStudentRegistrationDto) {
     // Check if roll number already exists in the same school
@@ -46,7 +71,7 @@ export class ItiMocktestService {
     }
 
     // Generate a simple email from roll number and school name
-    const email = `${dto.roll_no.toLowerCase()}@${schoolStandard.school.name.toLowerCase().replace(/\s+/g, '')}.edu`;
+    const email = `${dto.roll_no.toLowerCase()}@${schoolStandard.school.name.toLowerCase().replaceAll(/\s+/g, '')}.edu`;
     
     // Check if user with this email already exists
     const existingUser = await this.prisma.user.findUnique({
@@ -63,66 +88,85 @@ export class ItiMocktestService {
     const password = dto.roll_no;
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user first
-    const user = await this.prisma.user.create({
-      data: {
-        email_id: email,
-        password: hashedPassword,
-        name: dto.name,
-        contact_number: '0000000000', // Placeholder
-        status: true
-      }
-    });
-
-    // Assign student role
-    const studentRole = await this.prisma.role.findFirst({
-      where: { role_name: 'STUDENT' }
-    });
-
-    if (studentRole) {
-      await this.prisma.user_Role.create({
-        data: {
-          user_id: user.id,
-          role_id: studentRole.id
-        }
-      });
+    const institution = await this.ensureInstitutionForSchool(
+      schoolStandard.school_id,
+      schoolStandard.school.name,
+    );
+    if (!institution.is_active) {
+      throw new BadRequestException(
+        'This school/organization is closed and is not accepting new students.',
+      );
     }
 
-    // Create student record
-    const student = await this.prisma.student.create({
-      data: {
-        user_id: user.id,
-        student_id: dto.roll_no,
-        school_standard_id: schoolStandard.id,
-        enrollment_date: new Date(),
-        status: 'active'
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email_id: email,
+          password: hashedPassword,
+          name: dto.name,
+          contact_number: '0000000000',
+          status: true,
+        },
+      });
+
+      const studentRole = await tx.role.findFirst({
+        where: { role_name: 'STUDENT' },
+      });
+      if (studentRole) {
+        await tx.user_Role.create({
+          data: { user_id: user.id, role_id: studentRole.id },
+        });
       }
+
+      const student = await tx.student.create({
+        data: {
+          user_id: user.id,
+          student_id: dto.roll_no,
+          school_standard_id: schoolStandard.id,
+          enrollment_date: new Date(),
+          status: 'pending',
+        },
+      });
+
+      const membership = await tx.learner_Institution_Membership.create({
+        data: {
+          user_id: user.id,
+          institution_id: institution.id,
+          student_id: student.id,
+          school_standard_id: schoolStandard.id,
+          status: OrgMembershipStatus.pending,
+        },
+      });
+
+      return { user, student, membership };
     });
 
-    // Generate JWT token for auto-login
-    const payload = { 
-      sub: user.id, 
-      email_id: user.email_id, 
-      roles: ['STUDENT'] 
+    const payload = {
+      sub: result.user.id,
+      email_id: result.user.email_id,
+      roles: ['STUDENT'],
     };
     const access_token = this.jwtService.sign(payload);
 
     return {
-      message: 'Registration successful',
+      message:
+        'Registration successful. Your school/coaching admin must approve your request before you can take teacher-assigned tests. Self-practice is available now.',
       student: {
-        id: student.id,
-        name: user.name,
-        roll_no: student.student_id,
-        email: user.email_id,
+        id: result.student.id,
+        name: result.user.name,
+        roll_no: result.student.student_id,
+        email: result.user.email_id,
         school: schoolStandard.school.name,
-        standard: schoolStandard.standard.name
+        standard: schoolStandard.standard.name,
+        status: result.student.status,
+        membership_status: result.membership.status,
       },
       access_token,
       user: {
-        id: user.id,
-        email_id: user.email_id,
-        roles: ['STUDENT']
-      }
+        id: result.user.id,
+        email_id: result.user.email_id,
+        roles: ['STUDENT'],
+      },
     };
   }
 
@@ -347,7 +391,30 @@ export class ItiMocktestService {
           include: {
             role: true
           }
-        }
+        },
+        learner_memberships: {
+          where: {
+            status: {
+              in: [
+                OrgMembershipStatus.pending,
+                OrgMembershipStatus.active,
+                OrgMembershipStatus.rejected,
+              ],
+            },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 1,
+          include: {
+            institution: {
+              select: {
+                id: true,
+                name: true,
+                org_code: true,
+                institution_type: true,
+              },
+            },
+          },
+        },
       }
     });
 
@@ -358,6 +425,8 @@ export class ItiMocktestService {
     if (!user.student) {
       throw new NotFoundException('Student profile not found');
     }
+
+    const membership = user.learner_memberships[0] || null;
 
     return {
       message: 'Profile retrieved successfully',
@@ -373,7 +442,10 @@ export class ItiMocktestService {
           board: user.student.school_standard.school.board.name,
           standard: user.student.school_standard.standard.name,
           enrollment_date: user.student.enrollment_date,
-          status: user.student.status
+          status: user.student.status,
+          membership_status: membership?.status ?? null,
+          membership_pending: membership?.status === OrgMembershipStatus.pending,
+          institution: membership?.institution ?? null,
         }
       }
     };

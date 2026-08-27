@@ -51,13 +51,13 @@ export class ChapterMarksDistributionController {
     }
 
     // Validate that all values are valid numbers
-    if (parsedChapterIds.some(id => isNaN(id) || id <= 0)) {
+    if (parsedChapterIds.some(id => Number.isNaN(id) || id <= 0)) {
       throw new BadRequestException('All chapter IDs must be valid positive numbers');
     }
-    if (parsedMediumIds.some(id => isNaN(id) || id <= 0)) {
+    if (parsedMediumIds.some(id => Number.isNaN(id) || id <= 0)) {
       throw new BadRequestException('All medium IDs must be valid positive numbers');
     }
-    if (parsedRequestedMarks.some(marks => isNaN(marks) || marks < 0)) {
+    if (parsedRequestedMarks.some(marks => Number.isNaN(marks) || marks < 0)) {
       throw new BadRequestException('All requested marks must be valid non-negative numbers');
     }
 
@@ -135,13 +135,13 @@ export class ChapterMarksDistributionController {
     const parsedMediumIds = mediumIds.split(',').map(id => +id);
     
     // Validate input parameters
-    if (parsedQuestionTextIds.some(id => isNaN(id) || id <= 0)) {
+    if (parsedQuestionTextIds.some(id => Number.isNaN(id) || id <= 0)) {
       throw new BadRequestException('All question text IDs must be valid positive numbers');
     }
-    if (parsedMediumIds.some(id => isNaN(id) || id <= 0)) {
+    if (parsedMediumIds.some(id => Number.isNaN(id) || id <= 0)) {
       throw new BadRequestException('All medium IDs must be valid positive numbers');
     }
-    if (isNaN(+chapterId) || +chapterId <= 0) {
+    if (Number.isNaN(+chapterId) || +chapterId <= 0) {
       throw new BadRequestException('Chapter ID must be a valid positive number');
     }
 

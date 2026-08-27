@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ImageService } from './image.service';
-import { CreateImageDto, ImageUploadDto } from './dto/image.dto';
+import { CreateImageDto } from './dto/image.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -96,8 +96,8 @@ export class ImageController {
     }
     
     // Convert string values to numbers if provided
-    const customWidth = width ? parseInt(width, 10) : undefined;
-    const customHeight = height ? parseInt(height, 10) : undefined;
+    const customWidth = width ? Number.parseInt(width, 10) : undefined;
+    const customHeight = height ? Number.parseInt(height, 10) : undefined;
     
     return this.imageService.uploadImage(file, customWidth, customHeight);
   }
@@ -153,8 +153,8 @@ export class ImageController {
     }
     
     // Convert string values to numbers if provided
-    const customWidth = width ? parseInt(width, 10) : undefined;
-    const customHeight = height ? parseInt(height, 10) : undefined;
+    const customWidth = width ? Number.parseInt(width, 10) : undefined;
+    const customHeight = height ? Number.parseInt(height, 10) : undefined;
     
     const imageId = await this.imageService.uploadAndCreateImage(file, customWidth, customHeight);
     return { id: imageId };

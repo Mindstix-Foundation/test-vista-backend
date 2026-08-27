@@ -113,11 +113,12 @@ export class TestPaperDto {
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       try {
-        // Try to parse as JSON
         return JSON.parse(value).map(Number);
-      } catch (e) {
-        // Try to parse as comma-separated values
-        return value.split(',').map(v => Number(v.trim()));
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          return value.split(',').map(v => Number(v.trim()));
+        }
+        throw error;
       }
     }
     return Array.isArray(value) ? value.map(Number) : [];
@@ -134,11 +135,12 @@ export class TestPaperDto {
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       try {
-        // Try to parse as JSON
         return JSON.parse(value).map(Number);
-      } catch (e) {
-        // Try to parse as comma-separated values
-        return value.split(',').map(v => Number(v.trim()));
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          return value.split(',').map(v => Number(v.trim()));
+        }
+        throw error;
       }
     }
     return Array.isArray(value) ? value.map(Number) : [];
@@ -155,11 +157,12 @@ export class TestPaperDto {
   @Transform(({ value }) => {
     if (typeof value === 'string') {
       try {
-        // Try to parse as JSON
         return JSON.parse(value).map(Number);
-      } catch (e) {
-        // Try to parse as comma-separated values
-        return value.split(',').map(v => Number(v.trim()));
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          return value.split(',').map(v => Number(v.trim()));
+        }
+        throw error;
       }
     }
     return Array.isArray(value) ? value.map(Number) : [];

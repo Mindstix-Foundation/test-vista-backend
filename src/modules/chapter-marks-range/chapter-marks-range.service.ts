@@ -8,68 +8,30 @@ import { ChapterMarksRangeFilterDto, ChapterMarksRangeResponseDto } from './dto/
 export class ChapterMarksRangeService {
   private readonly logger = new Logger(ChapterMarksRangeService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   private boundedUniqueSums(nums: number[], limits: number[]): number[] {
     this.logger.debug(`Calculating bounded unique sums for nums: ${nums}, limits: ${limits}`);
-    
-    // Validate input arrays
-    if (nums.length === 0 || limits.length === 0 || nums.length !== limits.length) {
-      this.logger.warn('Invalid input arrays for boundedUniqueSums');
+
+    if (!this.areBoundedUniqueSumInputsValid(nums, limits)) {
       return [];
     }
-    
-    // Calculate maximum possible sum
+
     const maxSum = nums.reduce((sum, num, idx) => sum + (num * limits[idx]), 0);
     this.logger.debug(`Maximum possible sum: ${maxSum}`);
-    
-    // Add safety check to prevent memory issues
-    const MAX_ALLOWED_SUM = 10000; // Reasonable limit to prevent memory issues
-    if (maxSum > MAX_ALLOWED_SUM) {
-      this.logger.error(`Maximum sum ${maxSum} exceeds allowed limit ${MAX_ALLOWED_SUM}. This could cause memory issues.`);
-      throw new BadRequestException(`Maximum sum ${maxSum} exceeds allowed limit. Please reduce the input parameters.`);
-    }
-    
+    this.assertBoundedUniqueSumWithinLimit(maxSum);
+
     if (maxSum <= 0) {
       this.logger.debug('Maximum sum is 0 or negative, returning empty array');
       return [];
     }
-    
+
     try {
       const dp = new Array(maxSum + 1).fill(false);
       dp[0] = true;
 
       for (let idx = 0; idx < nums.length; idx++) {
-        const num = nums[idx];
-        let count = limits[idx];
-        
-        if (num <= 0 || count <= 0) {
-          this.logger.debug(`Skipping invalid num: ${num}, count: ${count}`);
-          continue;
-        }
-        
-        this.logger.debug(`Processing num: ${num}, count: ${count}`);
-        
-        // Binary optimization
-        const temp = [];
-        let k = 1;
-        while (count > 0) {
-          const use = Math.min(k, count);
-          temp.push(use);
-          count -= use;
-          k *= 2;
-        }
-        this.logger.debug(`Binary components: ${temp}`);
-
-        for (const use of temp) {
-          const val = use * num;
-          this.logger.debug(`Processing value: ${val} (${use} * ${num})`);
-          for (let i = maxSum; i >= val; i--) {
-            if (dp[i - val]) {
-              dp[i] = true;
-            }
-          }
-        }
+        this.applyBoundedSumForNumber(dp, nums[idx], limits[idx], maxSum);
       }
 
       const result = Array.from({ length: maxSum }, (_, i) => i + 1).filter(i => dp[i]);
@@ -78,6 +40,64 @@ export class ChapterMarksRangeService {
     } catch (error) {
       this.logger.error(`Error in boundedUniqueSums: ${error.message}`);
       throw new InternalServerErrorException(`Failed to calculate possible marks: ${error.message}`);
+    }
+  }
+
+  private areBoundedUniqueSumInputsValid(nums: number[], limits: number[]): boolean {
+    if (nums.length === 0 || limits.length === 0 || nums.length !== limits.length) {
+      this.logger.warn('Invalid input arrays for boundedUniqueSums');
+      return false;
+    }
+    return true;
+  }
+
+  private assertBoundedUniqueSumWithinLimit(maxSum: number): void {
+    const MAX_ALLOWED_SUM = 10000;
+    if (maxSum > MAX_ALLOWED_SUM) {
+      this.logger.error(`Maximum sum ${maxSum} exceeds allowed limit ${MAX_ALLOWED_SUM}. This could cause memory issues.`);
+      throw new BadRequestException(`Maximum sum ${maxSum} exceeds allowed limit. Please reduce the input parameters.`);
+    }
+  }
+
+  private applyBoundedSumForNumber(
+    dp: boolean[],
+    num: number,
+    count: number,
+    maxSum: number,
+  ): void {
+    if (num <= 0 || count <= 0) {
+      this.logger.debug(`Skipping invalid num: ${num}, count: ${count}`);
+      return;
+    }
+
+    this.logger.debug(`Processing num: ${num}, count: ${count}`);
+    const binaryComponents = this.splitCountIntoBinaryComponents(count);
+    this.logger.debug(`Binary components: ${binaryComponents}`);
+
+    for (const use of binaryComponents) {
+      this.markReachableSums(dp, use * num, maxSum);
+    }
+  }
+
+  private splitCountIntoBinaryComponents(count: number): number[] {
+    const temp: number[] = [];
+    let remaining = count;
+    let k = 1;
+    while (remaining > 0) {
+      const use = Math.min(k, remaining);
+      temp.push(use);
+      remaining -= use;
+      k *= 2;
+    }
+    return temp;
+  }
+
+  private markReachableSums(dp: boolean[], val: number, maxSum: number): void {
+    this.logger.debug(`Processing value: ${val}`);
+    for (let i = maxSum; i >= val; i--) {
+      if (dp[i - val]) {
+        dp[i] = true;
+      }
     }
   }
 
@@ -168,8 +188,10 @@ export class ChapterMarksRangeService {
       if (!map.has(chapterId)) {
         map.set(chapterId, new Map());
       }
-      
-      map.get(chapterId)!.set(questionTypeId, count);
+      const typeMap = map.get(chapterId);
+      if (typeMap) {
+        typeMap.set(questionTypeId, count);
+      }
     }
     
     return map;
@@ -362,8 +384,10 @@ export class ChapterMarksRangeService {
       if (!chapterQuestionTypeMap.has(chapterId)) {
         chapterQuestionTypeMap.set(chapterId, new Map());
       }
-      
-      chapterQuestionTypeMap.get(chapterId)!.set(questionTypeId, count);
+      const typeMap = chapterQuestionTypeMap.get(chapterId);
+      if (typeMap) {
+        typeMap.set(questionTypeId, count);
+      }
     }
     
     this.logger.debug(`Processed question counts for ${chapterQuestionTypeMap.size} chapters`);
@@ -525,7 +549,7 @@ export class ChapterMarksRangeService {
         chapterName: chapter.name,
         possibleMarks,
         minMarks: possibleMarks.length > 0 ? possibleMarks[0] : 0,
-        maxMarks: possibleMarks.length > 0 ? possibleMarks[possibleMarks.length - 1] : 0
+        maxMarks: possibleMarks.length > 0 ? possibleMarks.at(-1) : 0
       };
     } catch (error) {
       this.logger.error(`Error processing chapter ${chapter.name} (ID: ${chapter.id}): ${error.message}`);

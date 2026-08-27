@@ -36,13 +36,23 @@ export class StateService {
   }
 
   async findAll(countryId?: number) {
-    return this.prisma.state.findMany({
+    const states = await this.prisma.state.findMany({
       where: countryId ? { country_id: countryId } : undefined,
       select: {
         id: true,
         name: true,
-        country_id: true
-      }
+        country_id: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+    // Collapse duplicate state names within a country (legacy seed artifacts)
+    if (!countryId) return states;
+    const seen = new Set<string>();
+    return states.filter((s) => {
+      const key = s.name.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }
 

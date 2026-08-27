@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe, ConflictException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, HttpStatus, HttpCode, UseGuards, ValidationPipe, ConflictException, Request } from '@nestjs/common';
 import { UserService } from './user.service';
 import { CreateUserDto, UpdateUserDto, UserListDto } from './dto/user.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
@@ -10,6 +10,8 @@ import { Type } from 'class-transformer';
 import { IsOptional, IsNumber, IsString } from 'class-validator';
 import { AddTeacherDto } from './dto/add-teacher.dto';
 import { UpdateTeacherDto } from './dto/update-teacher.dto';
+import { RegisterTeacherDto, RegisterStudentDto, UpdateTeacherCurriculumScopeDto } from './dto/register-teacher.dto';
+import { DeleteMyAccountDto } from './dto/delete-account.dto';
 
 class GetUsersQueryDto extends PaginationDto {
   @ApiProperty({ required: false })
@@ -34,6 +36,81 @@ class GetUsersQueryDto extends PaginationDto {
 @Controller('users')
 export class UserController {
   constructor(private readonly userService: UserService) {}
+
+  @Post('register/teacher')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Public teacher self-registration (org join optional)',
+    description:
+      'Creates a TEACHER account. Optionally send institution_id or org_code to create a pending join request.',
+  })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'Teacher registered; returns access_token' })
+  @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Email already exists' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid input' })
+  async registerTeacher(@Body() dto: RegisterTeacherDto) {
+    return await this.userService.registerTeacher(dto);
+  }
+
+  @Post('register/student')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Public student self-registration (email + password; org join optional)',
+    description:
+      'Creates a STUDENT account. With institution_id/org_code + school_standard_id, creates a pending learner membership. Without org, uses Open Learning until they join a school later.',
+  })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'Student registered; returns access_token' })
+  @ApiResponse({ status: HttpStatus.CONFLICT, description: 'Email or roll already exists' })
+  async registerStudent(@Body() dto: RegisterStudentDto) {
+    return await this.userService.registerStudent(dto);
+  }
+
+  @Put('me/curriculum-scope')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('TEACHER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update my curriculum scope (board + standards + subjects for create-paper)',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Curriculum scope updated' })
+  async updateMyCurriculumScope(
+    @Request() req,
+    @Body() dto: UpdateTeacherCurriculumScopeDto,
+  ) {
+    return await this.userService.updateMyCurriculumScope(req.user.id, dto);
+  }
+
+  @Get('me/delete-account-status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('TEACHER', 'STUDENT')
+  @ApiOperation({
+    summary: 'Get delete-account preconditions (org admin / last-teacher gates)',
+  })
+  async getDeleteAccountStatus(@Request() req) {
+    return await this.userService.getDeleteAccountStatus(req.user.id);
+  }
+
+  @Delete('me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles('TEACHER', 'STUDENT')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Permanently delete my account (password required)',
+    description:
+      'Hard-deletes the user. Sole org admins must transfer_admin or delete_org. Last teacher must confirm org hard-delete.',
+  })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Account deleted' })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Invalid password or org gate failed' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Platform admin cannot self-delete' })
+  async deleteMyAccount(
+    @Request() req,
+    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }))
+    dto: DeleteMyAccountDto,
+  ) {
+    return await this.userService.deleteMyAccount(req.user.id, dto);
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)

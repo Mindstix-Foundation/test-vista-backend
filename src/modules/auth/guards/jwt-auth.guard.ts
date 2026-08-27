@@ -28,8 +28,11 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         throw new UnauthorizedException('No token provided');
       }
 
-      // Check if token is blacklisted
-      const isBlacklisted = await this.authService?.isTokenBlacklisted(token);
+      // Check if token is blacklisted (must use injected AuthService)
+      if (!this.authService) {
+        throw new UnauthorizedException('Authentication service unavailable');
+      }
+      const isBlacklisted = await this.authService.isTokenBlacklisted(token);
       if (isBlacklisted) {
         throw new UnauthorizedException('Token has been invalidated');
       }

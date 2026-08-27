@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SyllabusBridgeService } from '../syllabus/syllabus-bridge.service';
 import { CreateTopicDto } from './dto/create-topic.dto';
 import { UpdateTopicDto } from './dto/update-topic.dto';
 import { toTitleCase } from '../../utils/titleCase';
@@ -8,7 +9,18 @@ import { toTitleCase } from '../../utils/titleCase';
 export class TopicService {
   private readonly logger = new Logger(TopicService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly syllabusBridge: SyllabusBridgeService,
+  ) {}
+
+  private async bridgeSync(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (error) {
+      this.logger.warn(`Syllabus bridge sync failed: ${error?.message ?? error}`);
+    }
+  }
 
   async create(createTopicDto: CreateTopicDto) {
     try {
@@ -38,12 +50,15 @@ export class TopicService {
         name: toTitleCase(createTopicDto.name),
       };
 
-      return await this.prisma.topic.create({
+      const topic = await this.prisma.topic.create({
         data: topicData,
         include: {
           chapter: true,
         },
       });
+
+      void this.bridgeSync(() => this.syllabusBridge.syncTopic(topic.id));
+      return topic;
     } catch (error) {
       this.logger.error('Failed to create topic:', error);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
@@ -130,13 +145,16 @@ export class TopicService {
         name: updateTopicDto.name ? toTitleCase(updateTopicDto.name) : undefined,
       };
 
-      return await this.prisma.topic.update({
+      const topic = await this.prisma.topic.update({
         where: { id },
         data: topicData,
         include: {
           chapter: true,
         },
       });
+
+      void this.bridgeSync(() => this.syllabusBridge.syncTopic(topic.id));
+      return topic;
     } catch (error) {
       this.logger.error(`Failed to update topic ${id}:`, error);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
@@ -150,6 +168,8 @@ export class TopicService {
     try {
       const topicToDelete = await this.findOne(id);
       const currentPosition = topicToDelete.sequential_topic_number;
+
+      await this.syllabusBridge.removeSyncedTopic(id);
 
       await this.prisma.$transaction(async (tx) => {
         // First delete the topic

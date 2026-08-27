@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Logger } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto, QuestionCountFilterDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto, QuestionCountFilterDto, CreatePassageGroupDto, UpdatePassageGroupDto } from './dto/question.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -215,6 +215,40 @@ export class QuestionController {
     return await this.questionService.createComplete(completeDto);
   }
 
+  @Post('passage-groups')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({
+    summary: 'Create a passage-linked MCQ group (shared passage + 2 or more child MCQs)',
+  })
+  @ApiResponse({ status: 201, description: 'Passage group created successfully' })
+  async createPassageGroup(@Body() dto: CreatePassageGroupDto) {
+    return await this.questionService.createPassageGroup(dto);
+  }
+
+  @Get('passage-groups/:id')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Get a passage group with ordered child MCQs' })
+  async getPassageGroup(@Param('id', ParseIntPipe) id: number) {
+    return await this.questionService.getPassageGroup(id);
+  }
+
+  @Put('passage-groups/:id')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Update a passage group (passage text and/or replace children)' })
+  async updatePassageGroup(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePassageGroupDto,
+  ) {
+    return await this.questionService.updatePassageGroup(id, dto);
+  }
+
+  @Delete('passage-groups/:id')
+  @Roles('ADMIN', 'TEACHER')
+  @ApiOperation({ summary: 'Delete a passage group and all of its child questions' })
+  async deletePassageGroup(@Param('id', ParseIntPipe) id: number) {
+    return await this.questionService.deletePassageGroup(id);
+  }
+
   @Get('count')
   @Roles('ADMIN', 'TEACHER')
   @ApiOperation({ 
@@ -355,6 +389,7 @@ export class QuestionController {
       question_type_id,
       topic_id,
       chapter_id,
+      syllabus_node_id,
       board_question,
       instruction_medium_id,
       page,
@@ -371,7 +406,7 @@ export class QuestionController {
       - instruction_medium_id: ${instruction_medium_id} (${typeof instruction_medium_id})
       - is_verified: ${is_verified} (${typeof is_verified})
       - translation_status: ${translation_status} (${typeof translation_status})
-      - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}
+      - other filters: question_type_id=${question_type_id}, topic_id=${topic_id}, chapter_id=${chapter_id}, syllabus_node_id=${syllabus_node_id}
       - all filters: ${JSON.stringify(filters)}
     `);
 
@@ -380,6 +415,7 @@ export class QuestionController {
       question_type_id,
       topic_id,
       chapter_id,
+      syllabus_node_id,
       board_question,
       instruction_medium_id,
       page,
@@ -436,6 +472,7 @@ export class QuestionController {
       question_type_id,
       topic_id,
       chapter_id,
+      syllabus_node_id,
       board_question,
       page,
       page_size,
@@ -463,6 +500,7 @@ export class QuestionController {
         question_type_id,
         topic_id,
         chapter_id,
+        syllabus_node_id,
         board_question,
         page,
         page_size,
@@ -532,6 +570,7 @@ export class QuestionController {
       question_type_id,
       topic_id,
       chapter_id,
+      syllabus_node_id,
       board_question,
       is_verified,
       translation_status
@@ -548,6 +587,7 @@ export class QuestionController {
         question_type_id,
         topic_id,
         chapter_id,
+        syllabus_node_id,
         board_question,
         is_verified,
         translation_status

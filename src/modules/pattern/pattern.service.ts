@@ -8,7 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePatternDto } from './dto/create-pattern.dto';
 import { UpdatePatternDto } from './dto/update-pattern.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 
 interface FilterOptions {
   boardId?: number;
@@ -26,7 +26,7 @@ interface FilterOptions {
 export class PatternService {
   private readonly logger = new Logger(PatternService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createPatternDto: CreatePatternDto) {
     try {

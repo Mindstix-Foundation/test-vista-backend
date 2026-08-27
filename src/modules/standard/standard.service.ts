@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateStandardDto, UpdateStandardDto } from './dto/standard.dto';
-import { Standard, Prisma } from '@prisma/client';
+import { Standard, Prisma } from '../../prisma/client';
+import { randomInt } from 'node:crypto';
 
 
 @Injectable()
@@ -51,7 +52,7 @@ export class StandardService {
               });
               
               // Add a random offset between 1-100 to avoid collisions with concurrent requests
-              const randomOffset = Math.floor(Math.random() * 100) + 1;
+              const randomOffset = randomInt(1, 101);
               sequenceNumber = (highestSequence?.sequence_number || 0) + randomOffset;
               this.logger.log(`Position ${createStandardDto.sequence_number} is already taken. Using position ${sequenceNumber} instead.`);
             }
@@ -356,8 +357,8 @@ export class StandardService {
       });
 
       if (instructionMediums.length !== instructionMediumIds.length) {
-        const foundIds = instructionMediums.map(medium => medium.id);
-        const missingIds = instructionMediumIds.filter(id => !foundIds.includes(id));
+        const foundIds = new Set(instructionMediums.map(medium => medium.id));
+        const missingIds = instructionMediumIds.filter(id => !foundIds.has(id));
         throw new NotFoundException(`Instruction medium(s) with ID(s) ${missingIds.join(', ')} not found`);
       }
 
@@ -490,12 +491,12 @@ export class StandardService {
 
       // Extract unique standards from teacher-subject assignments
       const standardMap = new Map<number, Standard>();
-      teacherSubjects.forEach(ts => {
+      for (const ts of teacherSubjects) {
         const standard = ts.school_standard.standard;
         if (!standardMap.has(standard.id)) {
           standardMap.set(standard.id, standard);
         }
-      });
+      }
 
       // Convert map values to array and sort
       const standards = Array.from(standardMap.values());
@@ -547,8 +548,8 @@ export class StandardService {
       });
 
       if (instructionMediums.length !== instructionMediumIds.length) {
-        const foundIds = instructionMediums.map(medium => medium.id);
-        const missingIds = instructionMediumIds.filter(id => !foundIds.includes(id));
+        const foundIds = new Set(instructionMediums.map(medium => medium.id));
+        const missingIds = instructionMediumIds.filter(id => !foundIds.has(id));
         throw new NotFoundException(`Instruction medium(s) with ID(s) ${missingIds.join(', ')} not found`);
       }
 

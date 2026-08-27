@@ -15,7 +15,7 @@ export class BaseFilterPatternDto {
   @IsArray()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      return value.split(',').map(id => parseInt(id.trim(), 10));
+      return value.split(',').map(id => Number.parseInt(id.trim(), 10));
     }
     
     if (Array.isArray(value)) {
@@ -33,7 +33,7 @@ export class BaseFilterPatternDto {
   @IsArray()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      return value.split(',').map(id => parseInt(id.trim(), 10));
+      return value.split(',').map(id => Number.parseInt(id.trim(), 10));
     }
     return Array.isArray(value) ? value : [value];
   })

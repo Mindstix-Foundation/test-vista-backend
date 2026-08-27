@@ -1,14 +1,16 @@
 import { Injectable, Logger, NotFoundException, InternalServerErrorException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto, QuestionCountFilterDto } from './dto/question.dto';
+import { CreateQuestionDto, UpdateQuestionDto, QuestionFilterDto, QuestionSortField, CompleteQuestionDto, EditCompleteQuestionDto, RemoveQuestionFromChapterDto, AddTranslationDto, QuestionCountFilterDto, CreatePassageGroupDto, UpdatePassageGroupDto, PassageGroupChildDto } from './dto/question.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 import { AwsS3Service } from '../aws/aws-s3.service';
+import { SyllabusBridgeService } from '../syllabus/syllabus-bridge.service';
 
 interface QuestionFilters {
   question_type_id?: number;
   topic_id?: number;
   chapter_id?: number;
+  syllabus_node_id?: number;
   page?: number;
   page_size?: number;
   sort_by?: QuestionSortField;
@@ -46,7 +48,8 @@ export class QuestionService {
    */
   constructor(
     private readonly prisma: PrismaService,
-    private readonly awsS3Service: AwsS3Service
+    private readonly awsS3Service: AwsS3Service,
+    private readonly syllabusBridge: SyllabusBridgeService,
   ) {}
 
   // Helper method to transform image data with presigned URLs
@@ -104,6 +107,16 @@ export class QuestionService {
     // Process question texts and their images
     if (result.question_texts && result.question_texts.length > 0) {
       result.question_texts = await this.transformQuestionTexts(result.question_texts, result.id);
+    }
+
+    if (result.question_group?.passage_image) {
+      result.question_group = {
+        ...result.question_group,
+        passage_image: await this.transformImageIfExists(
+          result.question_group.passage_image,
+          `passage group ${result.question_group.id}`,
+        ),
+      };
     }
     
     return result;
@@ -331,7 +344,13 @@ export class QuestionService {
   }
 
   private addTopicFilters(whereConditions: any, filters: QuestionFilters): void {
-    const { topic_id, chapter_id } = filters;
+    const { topic_id, chapter_id, syllabus_node_id } = filters;
+
+    if (syllabus_node_id !== undefined) {
+      whereConditions.syllabus_node_links = {
+        some: { syllabus_node_id },
+      };
+    }
     
     if (topic_id === undefined && chapter_id === undefined) {
       return;
@@ -475,6 +494,15 @@ export class QuestionService {
       take,
       include: {
         question_type: true,
+        question_group: {
+          include: {
+            passage_image: true,
+            questions: {
+              select: { id: true, group_order: true },
+              orderBy: { group_order: 'asc' },
+            },
+          },
+        },
         question_texts: {
           include: {
             image: true,
@@ -553,7 +581,7 @@ export class QuestionService {
   }
 
   private logQuestionsDebugInfo(questions: any[]): void {
-    questions.forEach(question => {
+    for (const question of questions) {
       this.logger.log(`Debug data for question ID ${question.id}:
         - Question type: ${question.question_type?.type_name || 'unknown'}
         - Question has ${question.question_topics?.length || 0} topics
@@ -575,7 +603,7 @@ export class QuestionService {
             })))}`
         ).join('\n')}
       `);
-    });
+    }
   }
 
   private addTranslationStatusAndTopicInfo(questions: any[]): any[] {
@@ -740,6 +768,15 @@ export class QuestionService {
         where: { id },
         include: {
           question_type: true,
+          question_group: {
+            include: {
+              passage_image: true,
+              questions: {
+                select: { id: true, group_order: true },
+                orderBy: { group_order: 'asc' },
+              },
+            },
+          },
           question_topics: {
             include: {
               topic: true
@@ -1224,6 +1261,7 @@ export class QuestionService {
         question_type_id,
         topic_id,
         chapter_id,
+        syllabus_node_id,
         board_question,
         page = 1,
         page_size = 10,
@@ -1240,7 +1278,7 @@ export class QuestionService {
       // Find question IDs with no translations for the specified medium
       const questionIds = await this.findUntranslatedQuestionIds(
         instruction_medium_id_param, 
-        { chapter_id, is_verified, translation_status }
+        { chapter_id, syllabus_node_id, is_verified, translation_status }
       );
       
       if (questionIds.length === 0) {
@@ -1250,7 +1288,7 @@ export class QuestionService {
       // Build where conditions for the main query
       const whereConditions = this.buildUntranslatedWhereConditions(
         questionIds, 
-        { question_type_id, board_question, topic_id, chapter_id, search }
+        { question_type_id, board_question, topic_id, chapter_id, syllabus_node_id, search }
       );
       
       // Build order by clause
@@ -1298,9 +1336,33 @@ export class QuestionService {
 
   private async findUntranslatedQuestionIds(
     instruction_medium_id_param: number,
-    filters: { chapter_id?: number, is_verified?: boolean, translation_status?: string }
+    filters: { chapter_id?: number; syllabus_node_id?: number; is_verified?: boolean; translation_status?: string }
   ): Promise<number[]> {
-    const { chapter_id, is_verified, translation_status } = filters;
+    const { chapter_id, syllabus_node_id, is_verified, translation_status } = filters;
+
+    const verifiedSyllabusOrClause = syllabus_node_id
+      ? Prisma.sql`OR (
+          EXISTS (
+            SELECT 1 FROM "Question_Syllabus_Node" qsn2
+            WHERE qsn2.question_id = q.id AND qsn2.syllabus_node_id = ${syllabus_node_id}
+          )
+          AND EXISTS (
+            SELECT 1 FROM "Question_Text" qt5 WHERE qt5.question_id = q.id
+          )
+        )`
+      : Prisma.sql``;
+    const isVerifiedClause = is_verified === true
+      ? Prisma.sql`AND (
+          EXISTS (
+            SELECT 1 
+            FROM "Question_Text" qt3 
+            JOIN "Question_Text_Topic_Medium" qttm3 ON qt3.id = qttm3.question_text_id
+            WHERE qt3.question_id = q.id 
+            AND qttm3.is_verified = true
+          )
+          ${verifiedSyllabusOrClause}
+        )`
+      : Prisma.sql``;
     
     // Build the raw query for untranslated questions
     const untranslatedQuestionIds = await this.prisma.$queryRaw<{ id: number }[]>`
@@ -1313,6 +1375,13 @@ export class QuestionService {
         WHERE qt.question_id = q.id 
         AND qttm.instruction_medium_id = ${instruction_medium_id_param}
       )
+      ${syllabus_node_id ?
+        Prisma.sql`AND EXISTS (
+          SELECT 1 FROM "Question_Syllabus_Node" qsn
+          WHERE qsn.question_id = q.id AND qsn.syllabus_node_id = ${syllabus_node_id}
+        )` :
+        Prisma.sql``
+      }
       ${chapter_id ? 
         Prisma.sql`AND EXISTS (
           SELECT 1 FROM "Question_Topic" qt2
@@ -1321,17 +1390,8 @@ export class QuestionService {
         )` : 
         Prisma.sql``
       }
-      ${is_verified === true ? 
-        Prisma.sql`AND EXISTS (
-          SELECT 1 
-          FROM "Question_Text" qt3 
-          JOIN "Question_Text_Topic_Medium" qttm3 ON qt3.id = qttm3.question_text_id
-          WHERE qt3.question_id = q.id 
-          AND qttm3.is_verified = true
-        )` : 
-        Prisma.sql``
-      }
-      ${translation_status ? 
+      ${isVerifiedClause}
+      ${translation_status && !syllabus_node_id ? 
         Prisma.sql`AND EXISTS (
           SELECT 1 
           FROM "Question_Text" qt4 
@@ -1359,10 +1419,11 @@ export class QuestionService {
       board_question?: boolean,
       topic_id?: number,
       chapter_id?: number,
+      syllabus_node_id?: number,
       search?: string
     }
   ): any {
-    const { question_type_id, board_question, topic_id, chapter_id, search } = filters;
+    const { question_type_id, board_question, topic_id, chapter_id, syllabus_node_id, search } = filters;
     const whereConditions: any = {
       id: {
         in: questionIds
@@ -1390,12 +1451,19 @@ export class QuestionService {
     // Add chapter filter if specified
     if (chapter_id !== undefined) {
       whereConditions.question_topics = {
-        ...(whereConditions.question_topics || {}),
         some: {
-          ...(whereConditions.question_topics?.some || {}),
+          ...whereConditions.question_topics?.some,
           topic: {
             chapter_id
           }
+        }
+      };
+    }
+
+    if (syllabus_node_id !== undefined) {
+      whereConditions.syllabus_node_links = {
+        some: {
+          syllabus_node_id
         }
       };
     }
@@ -1403,7 +1471,7 @@ export class QuestionService {
     // Search filter
     if (search) {
       whereConditions.question_texts = {
-        ...(whereConditions.question_texts || {}),
+        ...whereConditions.question_texts,
         some: {
           question_text: {
             contains: search,
@@ -1593,16 +1661,13 @@ export class QuestionService {
       question_type_id,
       question_topic_data,
       question_text_topic_medium_data,
-      question_text_data
+      question_text_data,
+      syllabus_node_id,
     } = completeDto;
 
     // Validate all required properties exist
     if (question_type_id === undefined) {
       throw new BadRequestException('question_type_id is required');
-    }
-    
-    if (question_topic_data?.topic_id === undefined) {
-      throw new BadRequestException('question_topic_data with topic_id is required');
     }
     
     if (!question_text_data) {
@@ -1611,17 +1676,50 @@ export class QuestionService {
 
     // Validate question type
     await this.validateQuestionType(prisma, question_type_id);
-    
-    // Validate topic
-    await this.validateTopic(prisma, question_topic_data.topic_id);
-    
-    // Validate instruction medium if provided
-    if (question_text_topic_medium_data) {
-      await this.validateInstructionMedium(prisma, question_text_topic_medium_data.instruction_medium_id);
+
+    if (syllabus_node_id) {
+      await this.validateSyllabusNode(prisma, syllabus_node_id);
+    } else {
+      if (question_topic_data?.topic_id === undefined) {
+        throw new BadRequestException('question_topic_data with topic_id is required');
+      }
+      await this.validateTopic(prisma, question_topic_data.topic_id);
+      if (question_text_topic_medium_data) {
+        await this.validateInstructionMedium(prisma, question_text_topic_medium_data.instruction_medium_id);
+      }
     }
     
     // Validate images
     await this.validateImages(prisma, question_text_data);
+  }
+
+  private async validateSyllabusNode(prisma: any, syllabus_node_id: number): Promise<void> {
+    const node = await prisma.syllabus_Node.findUnique({
+      where: { id: syllabus_node_id },
+    });
+    if (!node) {
+      throw new NotFoundException(`Syllabus node with ID ${syllabus_node_id} not found`);
+    }
+  }
+
+  private async ensureSyllabusNodeTag(
+    prisma: any,
+    question_id: number,
+    syllabus_node_id: number,
+  ): Promise<void> {
+    const existing = await prisma.question_Syllabus_Node.findUnique({
+      where: {
+        question_id_syllabus_node_id: {
+          question_id,
+          syllabus_node_id,
+        },
+      },
+    });
+    if (!existing) {
+      await prisma.question_Syllabus_Node.create({
+        data: { question_id, syllabus_node_id },
+      });
+    }
   }
 
   private async validateQuestionType(prisma: any, question_type_id: number): Promise<void> {
@@ -1832,8 +1930,19 @@ export class QuestionService {
 
     const {
       question_topic_data,
-      question_text_topic_medium_data
+      question_text_topic_medium_data,
+      syllabus_node_id,
     } = completeDto;
+
+    if (syllabus_node_id) {
+      await this.ensureSyllabusNodeTag(
+        prisma,
+        existingQuestionText.question_id,
+        syllabus_node_id,
+      );
+      const result = await this.fetchCompleteQuestion(prisma, existingQuestionText.question_id);
+      return await this.transformSingleQuestion(result);
+    }
 
     // Check if the question is already associated with the given topic
     const existingTopicAssociation = await prisma.question_Topic.findFirst({
@@ -2036,6 +2145,12 @@ export class QuestionService {
         topic_id: question_topic_data.topic_id
       }
     });
+
+    await this.syllabusBridge.autoTagQuestionFromBoardTopic(
+      existingQuestionText.question_id,
+      question_topic_data.topic_id,
+      prisma,
+    );
     
     // Create medium association if specified
     if (question_text_topic_medium_data) {
@@ -2085,7 +2200,8 @@ export class QuestionService {
       board_question,
       question_topic_data,
       question_text_topic_medium_data,
-      question_text_data
+      question_text_data,
+      syllabus_node_id,
     } = completeDto;
 
     try {
@@ -2098,13 +2214,35 @@ export class QuestionService {
           board_question: board_question ?? false
         }
       });
-      
-      // Create the question topic association
-      const questionTopic = await this.createQuestionTopic(
-        prisma, 
-        question.id, 
-        question_topic_data.topic_id
-      );
+
+      let questionTopic: { id: number } | null = null;
+      if (question_topic_data?.topic_id) {
+        questionTopic = await this.createQuestionTopic(
+          prisma,
+          question.id,
+          question_topic_data.topic_id,
+        );
+        if (!syllabus_node_id) {
+          await this.syllabusBridge.autoTagQuestionFromBoardTopic(
+            question.id,
+            question_topic_data.topic_id,
+            prisma,
+          );
+        }
+      } else if (syllabus_node_id && question_text_topic_medium_data) {
+        // Exam create with translation medium: attach QTTM via board legacy topic when available
+        const legacyTopicId = await this.resolveLegacyTopicForSyllabusNode(
+          prisma,
+          syllabus_node_id,
+        );
+        if (legacyTopicId) {
+          questionTopic = await this.createQuestionTopic(
+            prisma,
+            question.id,
+            legacyTopicId,
+          );
+        }
+      }
       
       // Create the question text
       const questionText = await this.createQuestionText(
@@ -2128,13 +2266,22 @@ export class QuestionService {
       );
       
       // Create the question text topic medium association if provided
-      if (question_text_topic_medium_data) {
+      if (question_text_topic_medium_data && questionTopic) {
         await this.createQuestionTextTopicMedium(
           prisma, 
           questionText.id, 
           questionTopic.id, 
           question_text_topic_medium_data
         );
+      } else if (question_text_topic_medium_data && syllabus_node_id && !questionTopic) {
+        this.logger.warn(
+          `Exam question ${question.id}: no legacy board topic for syllabus node ${syllabus_node_id}; ` +
+            'skipping QTTM (translation pending still lists by syllabus tag + missing target medium)',
+        );
+      }
+
+      if (syllabus_node_id) {
+        await this.ensureSyllabusNodeTag(prisma, question.id, syllabus_node_id);
       }
       
       // Get the complete question with all relations
@@ -2145,6 +2292,36 @@ export class QuestionService {
     } catch (error) {
       this.handleCreateCompleteError(error);
     }
+  }
+
+  /** Prefer legacy_topic_id on the node, else first topic under legacy_chapter_id (walk parents). */
+  private async resolveLegacyTopicForSyllabusNode(
+    prisma: any,
+    syllabus_node_id: number,
+  ): Promise<number | null> {
+    let nodeId: number | null = syllabus_node_id;
+    while (nodeId) {
+      const node = await prisma.syllabus_Node.findUnique({
+        where: { id: nodeId },
+        select: {
+          legacy_topic_id: true,
+          legacy_chapter_id: true,
+          parent_id: true,
+        },
+      });
+      if (!node) return null;
+      if (node.legacy_topic_id) return node.legacy_topic_id;
+      if (node.legacy_chapter_id) {
+        const topic = await prisma.topic.findFirst({
+          where: { chapter_id: node.legacy_chapter_id },
+          orderBy: { id: 'asc' },
+          select: { id: true },
+        });
+        if (topic) return topic.id;
+      }
+      nodeId = node.parent_id ?? null;
+    }
+    return null;
   }
 
   private async createQuestionTopic(
@@ -3120,6 +3297,21 @@ export class QuestionService {
       board_question: question.board_question,
       question_type_id: question.question_type?.id,
       question_type: this.simplifyQuestionType(question.question_type),
+      question_group_id: question.question_group_id ?? question.question_group?.id ?? null,
+      group_order: question.group_order ?? null,
+      question_group: question.question_group
+        ? {
+            id: question.question_group.id,
+            group_kind: question.question_group.group_kind,
+            passage_text: question.question_group.passage_text,
+            passage_image: question.question_group.passage_image ?? null,
+            external_key: question.question_group.external_key ?? null,
+            child_question_ids: (question.question_group.questions || []).map((q) => ({
+              id: q.id,
+              group_order: q.group_order,
+            })),
+          }
+        : null,
       question_texts: this.simplifyQuestionTexts(question, defaultTopic)
     };
   }
@@ -3260,6 +3452,11 @@ export class QuestionService {
       where: { id: questionId },
       include: {
         question_type: true,
+        syllabus_node_links: {
+          include: {
+            syllabus_node: true,
+          },
+        },
         question_texts: {
           include: {
             image: true,
@@ -3304,7 +3501,11 @@ export class QuestionService {
       text.question_text_topics?.some(qttm => qttm.is_verified)
     );
 
-    if (!hasVerifiedText) {
+    const isExamTaggedQuestion =
+      question.syllabus_node_links?.length > 0 &&
+      question.question_texts?.length > 0;
+
+    if (!hasVerifiedText && !isExamTaggedQuestion) {
       throw new BadRequestException(
         `Question with ID ${questionId} does not have any verified text. Only verified questions can be translated.`
       );
@@ -3435,10 +3636,33 @@ export class QuestionService {
     textId: number, 
     translationDto: AddTranslationDto
   ) {
-    // Find all topic IDs associated with this question
-    const questionTopics = await prisma.question_Topic.findMany({
+    let questionTopics = await prisma.question_Topic.findMany({
       where: { question_id: questionId }
     });
+
+    if (questionTopics.length === 0) {
+      const syllabusLink = await prisma.question_Syllabus_Node.findFirst({
+        where: { question_id: questionId },
+        include: { syllabus_node: true },
+      });
+      const legacyTopicId = syllabusLink?.syllabus_node?.legacy_topic_id;
+      if (legacyTopicId) {
+        const questionTopic = await prisma.question_Topic.upsert({
+          where: {
+            question_id_topic_id: {
+              question_id: questionId,
+              topic_id: legacyTopicId,
+            },
+          },
+          create: {
+            question_id: questionId,
+            topic_id: legacyTopicId,
+          },
+          update: {},
+        });
+        questionTopics = [questionTopic];
+      }
+    }
 
     // Create associations for each topic with the new medium
     for (const questionTopic of questionTopics) {
@@ -3995,10 +4219,35 @@ export class QuestionService {
         question_type_id,
         topic_id,
         chapter_id,
+        syllabus_node_id,
         board_question,
         is_verified,
         translation_status
       } = filters;
+
+      const verifiedSyllabusOrClause = syllabus_node_id
+        ? Prisma.sql`OR (
+            EXISTS (
+              SELECT 1 FROM "Question_Syllabus_Node" qsn2
+              WHERE qsn2.question_id = q.id AND qsn2.syllabus_node_id = ${syllabus_node_id}
+            )
+            AND EXISTS (
+              SELECT 1 FROM "Question_Text" qt5 WHERE qt5.question_id = q.id
+            )
+          )`
+        : Prisma.sql``;
+      const isVerifiedClause = is_verified === true
+        ? Prisma.sql`AND (
+            EXISTS (
+              SELECT 1 
+              FROM "Question_Text" qt3 
+              JOIN "Question_Text_Topic_Medium" qttm3 ON qt3.id = qttm3.question_text_id
+              WHERE qt3.question_id = q.id 
+              AND qttm3.is_verified = true
+            )
+            ${verifiedSyllabusOrClause}
+          )`
+        : Prisma.sql``;
 
       // Basic raw query to get untranslated questions count for this medium
       const untranslatedQuestionsCount = await this.prisma.$queryRaw<[{ count: string }]>`
@@ -4026,25 +4275,23 @@ export class QuestionService {
           )` : 
           Prisma.sql``
         }
+        ${syllabus_node_id ?
+          Prisma.sql`AND EXISTS (
+            SELECT 1 FROM "Question_Syllabus_Node" qsn
+            WHERE qsn.question_id = q.id AND qsn.syllabus_node_id = ${syllabus_node_id}
+          )` :
+          Prisma.sql``
+        }
         ${question_type_id ? 
           Prisma.sql`AND q.question_type_id = ${question_type_id}` : 
           Prisma.sql``
         }
-        ${board_question !== undefined ? 
-          Prisma.sql`AND q.board_question = ${board_question}` : 
-          Prisma.sql``
+        ${board_question === undefined ? 
+          Prisma.sql`` :
+          Prisma.sql`AND q.board_question = ${board_question}`
         }
-        ${is_verified === true ? 
-          Prisma.sql`AND EXISTS (
-            SELECT 1 
-            FROM "Question_Text" qt3 
-            JOIN "Question_Text_Topic_Medium" qttm3 ON qt3.id = qttm3.question_text_id
-            WHERE qt3.question_id = q.id 
-            AND qttm3.is_verified = true
-          )` : 
-          Prisma.sql``
-        }
-        ${translation_status ? 
+        ${isVerifiedClause}
+        ${translation_status && !syllabus_node_id ? 
           Prisma.sql`AND EXISTS (
             SELECT 1 
             FROM "Question_Text" qt4 
@@ -4057,7 +4304,7 @@ export class QuestionService {
       `;
 
       // Extract count value and convert to number
-      const count = parseInt(untranslatedQuestionsCount[0]?.count || '0', 10);
+      const count = Number.parseInt(untranslatedQuestionsCount[0]?.count || '0', 10);
 
       // Add diagnostic logging
       this.logger.log(`Found ${count} untranslated questions for medium ${instruction_medium_id_param}`);
@@ -4161,5 +4408,275 @@ export class QuestionService {
       this.logger.error('Error counting questions:', error);
       throw new InternalServerErrorException('Failed to count questions');
     }
+  }
+
+  private validatePassageChildren(children: PassageGroupChildDto[]) {
+    if (!children || children.length < 2) {
+      throw new BadRequestException('A passage group requires at least 2 linked MCQ children');
+    }
+    for (const [index, child] of children.entries()) {
+      const options = child.mcq_options || [];
+      const correct = options.filter((o) => o.is_correct);
+      if (options.length < 2 || correct.length !== 1) {
+        throw new BadRequestException(
+          `Child ${index + 1} must be an MCQ with at least 2 options and exactly one correct answer`,
+        );
+      }
+    }
+  }
+
+  private async resolveMcqTypeId() {
+    const questionType = await this.prisma.question_Type.findFirst({
+      where: { type_name: 'Multiple Choice Question (MCQ)' },
+    });
+    if (!questionType) {
+      throw new BadRequestException('Question type "Multiple Choice Question (MCQ)" is not seeded');
+    }
+    return questionType.id;
+  }
+
+  async createPassageGroup(dto: CreatePassageGroupDto) {
+    this.validatePassageChildren(dto.children);
+    if (!dto.syllabus_node_id && !dto.question_topic_data?.topic_id) {
+      throw new BadRequestException('Either syllabus_node_id or question_topic_data.topic_id is required');
+    }
+    if (dto.syllabus_node_id) {
+      const node = await this.prisma.syllabus_Node.findUnique({ where: { id: dto.syllabus_node_id } });
+      if (!node) throw new NotFoundException(`Syllabus node ${dto.syllabus_node_id} not found`);
+    }
+    if (dto.question_topic_data?.topic_id) {
+      const topic = await this.prisma.topic.findUnique({ where: { id: dto.question_topic_data.topic_id } });
+      if (!topic) throw new NotFoundException(`Topic ${dto.question_topic_data.topic_id} not found`);
+    }
+    if (dto.passage_image_id) {
+      const image = await this.prisma.image.findUnique({ where: { id: dto.passage_image_id } });
+      if (!image) throw new NotFoundException(`Passage image ${dto.passage_image_id} not found`);
+    }
+    if (dto.external_key) {
+      const existing = await this.prisma.question_Group.findUnique({ where: { external_key: dto.external_key } });
+      if (existing) {
+        return this.getPassageGroup(existing.id);
+      }
+    }
+
+    const mcqTypeId = await this.resolveMcqTypeId();
+
+    const groupId = await this.prisma.$transaction(async (tx) => {
+      const group = await tx.question_Group.create({
+        data: {
+          group_kind: dto.group_kind || 'PASSAGE_MCQ',
+          passage_text: dto.passage_text,
+          passage_image_id: dto.passage_image_id,
+          external_key: dto.external_key,
+        },
+      });
+
+      for (let i = 0; i < dto.children.length; i++) {
+        const child = dto.children[i];
+        const groupOrder = child.group_order ?? i + 1;
+        const question = await tx.question.create({
+          data: {
+            question_type_id: mcqTypeId,
+            board_question: dto.board_question,
+            question_group_id: group.id,
+            group_order: groupOrder,
+          },
+        });
+
+        const questionText = await tx.question_Text.create({
+          data: {
+            question_id: question.id,
+            question_text: child.question_text,
+            image_id: child.image_id,
+          },
+        });
+
+        for (const option of child.mcq_options) {
+          await tx.mcq_Option.create({
+            data: {
+              question_text_id: questionText.id,
+              option_text: option.option_text,
+              image_id: option.image_id,
+              is_correct: !!option.is_correct,
+            },
+          });
+        }
+
+        if (dto.question_topic_data?.topic_id) {
+          const questionTopic = await tx.question_Topic.create({
+            data: {
+              question_id: question.id,
+              topic_id: dto.question_topic_data.topic_id,
+            },
+          });
+          if (dto.question_text_topic_medium_data?.instruction_medium_id) {
+            await tx.question_Text_Topic_Medium.create({
+              data: {
+                question_text_id: questionText.id,
+                question_topic_id: questionTopic.id,
+                instruction_medium_id: dto.question_text_topic_medium_data.instruction_medium_id,
+                is_verified: false,
+                translation_status: dto.question_text_topic_medium_data.translation_status || 'original',
+              },
+            });
+          }
+        }
+
+        if (dto.syllabus_node_id) {
+          await tx.question_Syllabus_Node.create({
+            data: {
+              question_id: question.id,
+              syllabus_node_id: dto.syllabus_node_id,
+            },
+          });
+        }
+      }
+
+      return group.id;
+    });
+
+    return this.getPassageGroup(groupId);
+  }
+
+  async getPassageGroup(id: number) {
+    const group = await this.prisma.question_Group.findUnique({
+      where: { id },
+      include: {
+        passage_image: true,
+        questions: {
+          orderBy: { group_order: 'asc' },
+          include: {
+            question_type: true,
+            question_texts: { include: { mcq_options: true, image: true } },
+            question_topics: { include: { topic: true } },
+            syllabus_node_links: {
+              include: { syllabus_node: { select: { id: true, name: true, node_type: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!group) throw new NotFoundException(`Passage group ${id} not found`);
+
+    let passageImage = group.passage_image;
+    if (passageImage) {
+      passageImage = await this.transformImageData(passageImage);
+    }
+
+    return {
+      id: group.id,
+      group_kind: group.group_kind,
+      passage_text: group.passage_text,
+      passage_image: passageImage,
+      external_key: group.external_key,
+      created_at: group.created_at,
+      updated_at: group.updated_at,
+      children: group.questions.map((q) => ({
+        id: q.id,
+        group_order: q.group_order,
+        board_question: q.board_question,
+        question_type: q.question_type,
+        question_texts: q.question_texts,
+        question_topics: q.question_topics,
+        syllabus_node_links: q.syllabus_node_links,
+      })),
+    };
+  }
+
+  async updatePassageGroup(id: number, dto: UpdatePassageGroupDto) {
+    const existing = await this.prisma.question_Group.findUnique({
+      where: { id },
+      include: { questions: { select: { id: true } } },
+    });
+    if (!existing) throw new NotFoundException(`Passage group ${id} not found`);
+
+    if (dto.children) {
+      this.validatePassageChildren(dto.children);
+    }
+    if (dto.passage_image_id) {
+      const image = await this.prisma.image.findUnique({ where: { id: dto.passage_image_id } });
+      if (!image) throw new NotFoundException(`Passage image ${dto.passage_image_id} not found`);
+    }
+
+    const mcqTypeId = await this.resolveMcqTypeId();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.question_Group.update({
+        where: { id },
+        data: {
+          ...(dto.passage_text === undefined ? {} : { passage_text: dto.passage_text }),
+          ...(dto.passage_image_id === undefined ? {} : { passage_image_id: dto.passage_image_id }),
+        },
+      });
+
+      if (dto.children) {
+        // Replace children atomically (cascade deletes texts/options via Question relations).
+        await tx.question.deleteMany({ where: { question_group_id: id } });
+
+        for (let i = 0; i < dto.children.length; i++) {
+          const child = dto.children[i];
+          const groupOrder = child.group_order ?? i + 1;
+          const question = await tx.question.create({
+            data: {
+              question_type_id: mcqTypeId,
+              board_question: dto.board_question ?? true,
+              question_group_id: id,
+              group_order: groupOrder,
+            },
+          });
+
+          const questionText = await tx.question_Text.create({
+            data: {
+              question_id: question.id,
+              question_text: child.question_text,
+              image_id: child.image_id,
+            },
+          });
+
+          for (const option of child.mcq_options) {
+            await tx.mcq_Option.create({
+              data: {
+                question_text_id: questionText.id,
+                option_text: option.option_text,
+                image_id: option.image_id,
+                is_correct: !!option.is_correct,
+              },
+            });
+          }
+
+          if (dto.question_topic_data?.topic_id) {
+            await tx.question_Topic.create({
+              data: {
+                question_id: question.id,
+                topic_id: dto.question_topic_data.topic_id,
+              },
+            });
+          }
+
+          if (dto.syllabus_node_id) {
+            await tx.question_Syllabus_Node.create({
+              data: {
+                question_id: question.id,
+                syllabus_node_id: dto.syllabus_node_id,
+              },
+            });
+          }
+        }
+      } else if (dto.board_question !== undefined) {
+        await tx.question.updateMany({
+          where: { question_group_id: id },
+          data: { board_question: dto.board_question },
+        });
+      }
+    });
+
+    return this.getPassageGroup(id);
+  }
+
+  async deletePassageGroup(id: number) {
+    const existing = await this.prisma.question_Group.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException(`Passage group ${id} not found`);
+    await this.prisma.question_Group.delete({ where: { id } });
+    return { message: `Passage group ${id} deleted`, id };
   }
 } 

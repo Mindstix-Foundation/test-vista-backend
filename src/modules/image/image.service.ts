@@ -200,147 +200,17 @@ export class ImageService {
 
   async remove(id: number): Promise<void> {
     try {
-      // First, find the image to get its S3 URL
-      const image = await this.prisma.image.findUnique({
-        where: { id },
-        include: {
-          question_texts: {
-            select: {
-              id: true,
-              question: {
-                select: {
-                  id: true
-                }
-              },
-              question_text_topics: true
-            }
-          },
-          mcq_options: {
-            select: {
-              id: true,
-              question_text: {
-                select: {
-                  id: true,
-                  question: {
-                    select: {
-                      id: true
-                    }
-                  },
-                  question_text_topics: true
-                }
-              }
-            }
-          },
-          match_pairs_left: {
-            select: {
-              id: true,
-              question_text: {
-                select: {
-                  id: true,
-                  question: {
-                    select: {
-                      id: true
-                    }
-                  },
-                  question_text_topics: true
-                }
-              }
-            }
-          },
-          match_pairs_right: {
-            select: {
-              id: true,
-              question_text: {
-                select: {
-                  id: true,
-                  question: {
-                    select: {
-                      id: true
-                    }
-                  },
-                  question_text_topics: true
-                }
-              }
-            }
-          }
-        }
-      });
-
+      const image = await this.findImageWithUsages(id);
       if (!image) {
         throw new NotFoundException(`Image with ID ${id} not found`);
       }
 
-      // Get all affected question text topic relationships to mark them as unverified
-      const affectedQuestionTextTopics = new Set<number>();
-      
-      // Add question text topic IDs from question texts
-      image.question_texts.forEach(qt => {
-        if (qt.question_text_topics) {
-          qt.question_text_topics.forEach(qtt => {
-            affectedQuestionTextTopics.add(qtt.id);
-          });
-        }
-      });
-      
-      // Add question text topic IDs from MCQ options
-      image.mcq_options.forEach(opt => {
-        if (opt.question_text?.question_text_topics) {
-          opt.question_text.question_text_topics.forEach(qtt => {
-            affectedQuestionTextTopics.add(qtt.id);
-          });
-        }
-      });
-      
-      // Add question text topic IDs from match pairs (left)
-      image.match_pairs_left.forEach(mp => {
-        if (mp.question_text?.question_text_topics) {
-          mp.question_text.question_text_topics.forEach(qtt => {
-            affectedQuestionTextTopics.add(qtt.id);
-          });
-        }
-      });
-      
-      // Add question text topic IDs from match pairs (right)
-      image.match_pairs_right.forEach(mp => {
-        if (mp.question_text?.question_text_topics) {
-          mp.question_text.question_text_topics.forEach(qtt => {
-            affectedQuestionTextTopics.add(qtt.id);
-          });
-        }
-      });
+      const affectedQuestionTextTopics = this.collectAffectedQuestionTextTopicIds(image);
+      this.logImageDeletion(id, image, affectedQuestionTextTopics);
 
-      // Log what will be deleted and where the image is used
-      this.logger.log(`Deleting image ${id} (${image.image_url}) which is used in:
-        - ${image.question_texts.length} question texts
-        - ${image.mcq_options.length} MCQ options
-        - ${image.match_pairs_left.length} match pairs (left side)
-        - ${image.match_pairs_right.length} match pairs (right side)
-        - Affecting ${affectedQuestionTextTopics.size} question text topic relationships
-        All references will be set to null due to onDelete: SetNull`);
-
-      // Delete the image from S3
       await this.awsS3Service.deleteFile(image.image_url);
-
-      // Delete the image from database
-      await this.prisma.image.delete({
-        where: { id }
-      });
-      
-      // Mark all affected question text topics as unverified
-      if (affectedQuestionTextTopics.size > 0) {
-        await this.prisma.question_Text_Topic_Medium.updateMany({
-          where: {
-            id: {
-              in: Array.from(affectedQuestionTextTopics)
-            }
-          },
-          data: {
-            is_verified: false
-          }
-        });
-        
-        this.logger.log(`Marked ${affectedQuestionTextTopics.size} question text topic relationships as unverified due to image deletion`);
-      }
+      await this.prisma.image.delete({ where: { id } });
+      await this.markQuestionTextTopicsUnverified(affectedQuestionTextTopics);
 
       this.logger.log(`Successfully deleted image ${id}`);
     } catch (error) {
@@ -350,6 +220,93 @@ export class ImageService {
       }
       throw new InternalServerErrorException('Failed to delete image');
     }
+  }
+
+  private findImageWithUsages(id: number) {
+    const questionTextUsageSelect = {
+      id: true,
+      question: { select: { id: true } },
+      question_text_topics: true,
+    };
+    return this.prisma.image.findUnique({
+      where: { id },
+      include: {
+        question_texts: { select: questionTextUsageSelect },
+        mcq_options: {
+          select: {
+            id: true,
+            question_text: { select: questionTextUsageSelect },
+          },
+        },
+        match_pairs_left: {
+          select: {
+            id: true,
+            question_text: { select: questionTextUsageSelect },
+          },
+        },
+        match_pairs_right: {
+          select: {
+            id: true,
+            question_text: { select: questionTextUsageSelect },
+          },
+        },
+      },
+    });
+  }
+
+  private collectTopicIds(
+    topics: Array<{ id: number }> | undefined,
+    into: Set<number>,
+  ): void {
+    if (!topics) {
+      return;
+    }
+    for (const topic of topics) {
+      into.add(topic.id);
+    }
+  }
+
+  private collectAffectedQuestionTextTopicIds(
+    image: Awaited<ReturnType<ImageService['findImageWithUsages']>>,
+  ): Set<number> {
+    const affected = new Set<number>();
+    if (!image) {
+      return affected;
+    }
+    for (const qt of image.question_texts) {
+      this.collectTopicIds(qt.question_text_topics, affected);
+    }
+    for (const item of [...image.mcq_options, ...image.match_pairs_left, ...image.match_pairs_right]) {
+      this.collectTopicIds(item.question_text?.question_text_topics, affected);
+    }
+    return affected;
+  }
+
+  private logImageDeletion(
+    id: number,
+    image: NonNullable<Awaited<ReturnType<ImageService['findImageWithUsages']>>>,
+    affectedQuestionTextTopics: Set<number>,
+  ): void {
+    this.logger.log(`Deleting image ${id} (${image.image_url}) which is used in:
+        - ${image.question_texts.length} question texts
+        - ${image.mcq_options.length} MCQ options
+        - ${image.match_pairs_left.length} match pairs (left side)
+        - ${image.match_pairs_right.length} match pairs (right side)
+        - Affecting ${affectedQuestionTextTopics.size} question text topic relationships
+        All references will be set to null due to onDelete: SetNull`);
+  }
+
+  private async markQuestionTextTopicsUnverified(topicIds: Set<number>): Promise<void> {
+    if (topicIds.size === 0) {
+      return;
+    }
+    await this.prisma.question_Text_Topic_Medium.updateMany({
+      where: { id: { in: Array.from(topicIds) } },
+      data: { is_verified: false },
+    });
+    this.logger.log(
+      `Marked ${topicIds.size} question text topic relationships as unverified due to image deletion`,
+    );
   }
 
   async getPresignedUrl(id: number, expiresIn?: number): Promise<string> {

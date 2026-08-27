@@ -10,13 +10,13 @@ import { CountryModule } from './modules/country/country.module';
 import { StandardModule } from './modules/standard/standard.module';
 import { SubjectModule } from './modules/subject/subject.module';
 import { InstructionMediumModule } from './modules/instruction_medium/instruction-medium.module';
+import { CurriculumModule } from './modules/curriculum/curriculum.module';
 import { SchoolModule } from './modules/school/school.module';
 import { SchoolInstructionMediumModule } from './modules/school_instruction_medium/school_instruction_medium.module';
 import { SchoolStandardModule } from './modules/school_standard/school_standard.module';
 import { UserModule } from './modules/user/user.module';
 import { RoleModule } from './modules/role/role.module';
 import { UserRoleModule } from './modules/user_role/user-role.module';
-import { UserSchoolModule } from './modules/user_school/user-school.module';
 import { MediumStandardSubjectModule } from './modules/medium_standard_subject/medium-standard-subject.module';
 import { TeacherSubjectModule } from './modules/teacher_subject/teacher-subject.module';
 import { BoardManagementModule } from './modules/board-management/board-management.module';
@@ -45,6 +45,15 @@ import { StudentModule } from './modules/student/student.module';
 import { StudentSubjectEnrollmentModule } from './modules/student-subject-enrollment/student-subject-enrollment.module';
 import { TestAssignmentModule } from './modules/test-assignment/test-assignment.module';
 import { ItiMocktestModule } from './modules/iti-mocktest/iti-mocktest.module';
+import { ExamCatalogModule } from './modules/exam-catalog/exam-catalog.module';
+import { SyllabusModule } from './modules/syllabus/syllabus.module';
+import { PaperTemplateModule } from './modules/paper-template/paper-template.module';
+import { InstitutionModule } from './modules/institution/institution.module';
+import { ParticipantModule } from './modules/participant/participant.module';
+import { LanguageModule } from './modules/language/language.module';
+import { SmartTestModule } from './modules/smart-test/smart-test.module';
+import { NotificationModule } from './modules/notification/notification.module';
+import { StudentGroupModule } from './modules/student-group/student-group.module';
 
 @Module({
   imports: [
@@ -59,13 +68,14 @@ import { ItiMocktestModule } from './modules/iti-mocktest/iti-mocktest.module';
     StandardModule,
     SubjectModule,
     InstructionMediumModule,
+    CurriculumModule,
+    LanguageModule,
     SchoolModule,
     SchoolInstructionMediumModule,
     SchoolStandardModule,
     UserModule,
     RoleModule,
     UserRoleModule,
-    UserSchoolModule,
     MediumStandardSubjectModule,
     TeacherSubjectModule,
     BoardManagementModule,
@@ -92,6 +102,14 @@ import { ItiMocktestModule } from './modules/iti-mocktest/iti-mocktest.module';
     StudentSubjectEnrollmentModule,
     TestAssignmentModule,
     ItiMocktestModule,
+    ExamCatalogModule,
+    SyllabusModule,
+    PaperTemplateModule,
+    InstitutionModule,
+    ParticipantModule,
+    StudentGroupModule,
+    SmartTestModule,
+    NotificationModule,
     MulterModule.register({
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB

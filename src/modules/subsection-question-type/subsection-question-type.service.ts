@@ -7,7 +7,7 @@ import { UpdateSubsectionQuestionTypeDto } from './dto/update-subsection-questio
 export class SubsectionQuestionTypeService {
   private readonly logger = new Logger(SubsectionQuestionTypeService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateSubsectionQuestionTypeDto) {
     try {

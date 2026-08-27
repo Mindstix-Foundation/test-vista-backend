@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Global, Module, forwardRef } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { PassportModule } from '@nestjs/passport';
@@ -14,6 +14,8 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 
+/** Global so JwtAuthGuard can inject AuthService in every feature module. */
+@Global()
 @Module({
   imports: [
     forwardRef(() => UserModule),

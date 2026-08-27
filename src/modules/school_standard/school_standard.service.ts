@@ -58,12 +58,15 @@ export class SchoolStandardService {
 
       // Add syllabus filter if requested
       if (hasSyllabus !== undefined) {
-        where.standard = {
-          medium_standard_subjects: {
-            some: hasSyllabus ? {} : undefined,
-            none: !hasSyllabus ? {} : undefined,
-          }
-        };
+        if (hasSyllabus) {
+          where.standard = {
+            medium_standard_subjects: { some: {} },
+          };
+        } else {
+          where.standard = {
+            medium_standard_subjects: { none: {} },
+          };
+        }
       }
 
       return await this.prisma.school_Standard.findMany({
@@ -97,12 +100,15 @@ export class SchoolStandardService {
 
       // Add syllabus filter if requested
       if (hasSyllabus !== undefined) {
-        where.standard = {
-          medium_standard_subjects: {
-            some: hasSyllabus ? {} : undefined,
-            none: !hasSyllabus ? {} : undefined,
-          }
-        };
+        if (hasSyllabus) {
+          where.standard = {
+            medium_standard_subjects: { some: {} },
+          };
+        } else {
+          where.standard = {
+            medium_standard_subjects: { none: {} },
+          };
+        }
       }
 
       const schoolStandards = await this.prisma.school_Standard.findMany({

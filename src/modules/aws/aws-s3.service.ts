@@ -68,7 +68,7 @@ export class AwsS3Service {
 
       // Generate a unique filename
       const timestamp = Date.now();
-      const key = `images/${timestamp}-${file.originalname.replace(/\s/g, '_')}`;
+      const key = `images/${timestamp}-${file.originalname.replaceAll(/\s/g, '_')}`;
 
       // Upload to S3
       const command = new PutObjectCommand({
@@ -168,7 +168,7 @@ export class AwsS3Service {
 
       // Generate a unique filename
       const timestamp = Date.now();
-      const key = `test-papers/${timestamp}-${filename.replace(/\s/g, '_')}`;
+      const key = `test-papers/${timestamp}-${filename.replaceAll(/\s/g, '_')}`;
 
       // Upload to S3
       const command = new PutObjectCommand({

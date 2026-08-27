@@ -467,8 +467,8 @@ export class TestPaperHtmlService {
       });
 
       if (foundMediums.length !== dto.instruction_mediums.length) {
-        const foundIds = foundMediums.map(medium => medium.id);
-        const missingIds = dto.instruction_mediums.filter(id => !foundIds.includes(id));
+        const foundIds = new Set(foundMediums.map(medium => medium.id));
+        const missingIds = dto.instruction_mediums.filter(id => !foundIds.has(id));
         throw new NotFoundException(`Instruction medium IDs not found: ${missingIds.join(', ')}`);
       }
 
@@ -487,8 +487,8 @@ export class TestPaperHtmlService {
       });
 
       if (foundChapters.length !== dto.chapters.length) {
-        const foundIds = foundChapters.map(chapter => chapter.id);
-        const missingIds = dto.chapters.filter(id => !foundIds.includes(id));
+        const foundIds = new Set(foundChapters.map(chapter => chapter.id));
+        const missingIds = dto.chapters.filter(id => !foundIds.has(id));
         throw new NotFoundException(`Chapter IDs not found: ${missingIds.join(', ')}`);
       }
 
@@ -599,22 +599,8 @@ export class TestPaperHtmlService {
    * Helper function to parse human-readable exam time into proper DateTime format for Prisma
    */
   private parseExamTime(examTimeStr: string): string {
-    let hours = 0;
-    let minutes = 0;
-    
-    // Extract hours
-    const hoursRegex = /(\d+)\s*hour/i;
-    const hoursMatch = hoursRegex.exec(examTimeStr);
-    if (hoursMatch) {
-      hours = parseInt(hoursMatch[1], 10);
-    }
-    
-    // Extract minutes
-    const minutesRegex = /(\d+)\s*minute/i;
-    const minutesMatch = minutesRegex.exec(examTimeStr);
-    if (minutesMatch) {
-      minutes = parseInt(minutesMatch[1], 10);
-    }
+    const hours = this.parseCountBeforeWord(examTimeStr, 'hour');
+    const minutes = this.parseCountBeforeWord(examTimeStr, 'minute');
     
     // Create a base date for today at 00:00:00
     const today = new Date();
@@ -626,6 +612,26 @@ export class TestPaperHtmlService {
     
     // Format as ISO-8601 DateTime string which Prisma expects
     return today.toISOString();
+  }
+
+  private parseCountBeforeWord(input: string, word: string): number {
+    const lower = input.toLowerCase();
+    const idx = lower.indexOf(word);
+    if (idx <= 0) {
+      return 0;
+    }
+    let end = idx;
+    while (end > 0 && lower[end - 1] === ' ') {
+      end -= 1;
+    }
+    let start = end;
+    while (start > 0 && lower[start - 1] >= '0' && lower[start - 1] <= '9') {
+      start -= 1;
+    }
+    if (start === end) {
+      return 0;
+    }
+    return Number.parseInt(lower.slice(start, end), 10);
   }
 
   async getFilteredTestPapers(userId?: number, schoolId?: number) {

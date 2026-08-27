@@ -53,25 +53,24 @@ export class TeacherSubjectService {
 
   async create(createDto: CreateTeacherSubjectDto) {
     try {
-      // Check if user exists and is associated with the school
-      const userSchool = await this.prisma.user_School.findFirst({
-        where: {
-          user_id: createDto.user_id,
-          school_id: {
-            equals: (
-              await this.prisma.school_Standard.findUnique({
-                where: { id: createDto.school_standard_id },
-                select: { school_id: true }
-              })
-            )?.school_id
-          }
-        },
-        include: {
-          school: true
-        }
+      const schoolStandardForSchool = await this.prisma.school_Standard.findUnique({
+        where: { id: createDto.school_standard_id },
+        select: { school_id: true },
       });
 
-      if (!userSchool) {
+      if (!schoolStandardForSchool) {
+        throw new NotFoundException(`School standard with ID ${createDto.school_standard_id} not found`);
+      }
+
+      const membership = await this.prisma.institution_Membership.findFirst({
+        where: {
+          user_id: createDto.user_id,
+          status: 'active',
+          institution: { school_id: schoolStandardForSchool.school_id },
+        },
+      });
+
+      if (!membership) {
         throw new BadRequestException('Teacher is not associated with this school');
       }
 
@@ -253,13 +252,13 @@ export class TeacherSubjectService {
 
       // Log what will be deleted
       this.logger.log(`Deleting all teacher subject assignments for user ${assignments[0].user.name}:`);
-      assignments.forEach(assignment => {
+      for (const assignment of assignments) {
         this.logger.log(`
           - School: ${assignment.school_standard.school.name}
           - Standard: ${assignment.school_standard.standard.name}
           - Subject: ${assignment.subject.name}
         `);
-      });
+      }
 
       // Delete all assignments for the user
       await this.prisma.teacher_Subject.deleteMany({

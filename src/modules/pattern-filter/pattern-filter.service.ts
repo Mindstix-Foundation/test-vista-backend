@@ -6,7 +6,7 @@ import { FilterPatternDto, FilterPatternsWithMarksDto } from './dto/filter-patte
 export class PatternFilterService {
   private readonly logger = new Logger(PatternFilterService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async filterPatterns(filterDto: FilterPatternsWithMarksDto) {
     try {
@@ -240,7 +240,9 @@ export class PatternFilterService {
       
       // Initialize mapping with all question types set to 0
       const questionTypeMapping = new Map<number, number>();
-      questionTypes.forEach(qt => questionTypeMapping.set(qt.id, 0));
+      for (const qt of questionTypes) {
+        questionTypeMapping.set(qt.id, 0);
+      }
       
       // Count questions for each type across all chapters
       for (const typeId of questionTypeMapping.keys()) {

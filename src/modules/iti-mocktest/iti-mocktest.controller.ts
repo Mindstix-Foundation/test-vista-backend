@@ -67,10 +67,10 @@ export class ItiMocktestController {
     @Query('schoolId') schoolId: string,
     @Query('standardId') standardId: string,
   ) {
-    const schoolIdNum = parseInt(schoolId, 10);
-    const standardIdNum = parseInt(standardId, 10);
+    const schoolIdNum = Number.parseInt(schoolId, 10);
+    const standardIdNum = Number.parseInt(standardId, 10);
     
-    if (isNaN(schoolIdNum) || isNaN(standardIdNum)) {
+    if (Number.isNaN(schoolIdNum) || Number.isNaN(standardIdNum)) {
       throw new BadRequestException('Invalid schoolId or standardId');
     }
     
@@ -87,10 +87,10 @@ export class ItiMocktestController {
     @Query('schoolId') schoolId: string,
     @Query('standardId') standardId: string,
   ) {
-    const schoolIdNum = parseInt(schoolId, 10);
-    const standardIdNum = parseInt(standardId, 10);
+    const schoolIdNum = Number.parseInt(schoolId, 10);
+    const standardIdNum = Number.parseInt(standardId, 10);
     
-    if (isNaN(schoolIdNum) || isNaN(standardIdNum)) {
+    if (Number.isNaN(schoolIdNum) || Number.isNaN(standardIdNum)) {
       throw new BadRequestException('Invalid schoolId or standardId');
     }
     

@@ -8,18 +8,19 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
+import { isWellFormedEmail } from '../../common/utils/email.util';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private tokenBlacklist: Set<string> = new Set();
+  private readonly tokenBlacklist: Set<string> = new Set();
 
   constructor(
     private readonly userService: UserService,
     private readonly roleService: RoleService,
     private readonly jwtService: JwtService,
-    private prisma: PrismaService,
-    private configService: ConfigService,
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
   ) {}
 
   async validateUser(email_id: string, password: string): Promise<any> {
@@ -181,9 +182,7 @@ export class AuthService {
 
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
     try {
-      // Check if email format is valid (you might want to add more validation)
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(forgotPasswordDto.email)) {
+      if (!isWellFormedEmail(forgotPasswordDto.email)) {
         throw new UnauthorizedException('Invalid email format');
       }
 
@@ -376,6 +375,9 @@ export class AuthService {
 
       return { message: 'Password successfully reset' };
     } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid or expired reset token');
     }
   }
@@ -515,13 +517,24 @@ export class AuthService {
               }
             }
           },
-          user_schools: {
+          institution_memberships: {
+            where: { status: 'active' },
             select: {
-              school: {
+              member_role: true,
+              institution: {
                 select: {
                   id: true,
                   name: true,
-                  board: true
+                  org_code: true,
+                  institution_type: true,
+                  visibility: true,
+                  school: {
+                    select: {
+                      id: true,
+                      name: true,
+                      board: true
+                    }
+                  }
                 }
               }
             }
@@ -548,6 +561,27 @@ export class AuthService {
                 }
               }
             }
+          },
+          teacher_curriculum_scopes: {
+            select: {
+              id: true,
+              board_id: true,
+              standard_id: true,
+              subject_id: true,
+              board: {
+                select: { id: true, name: true, abbreviation: true },
+              },
+              standard: {
+                select: { id: true, name: true, sequence_number: true },
+              },
+              subject: {
+                select: { id: true, name: true },
+              },
+            },
+            orderBy: [
+              { standard: { sequence_number: 'asc' } },
+              { subject: { name: 'asc' } },
+            ],
           },
           student: {
             select: {
@@ -597,6 +631,19 @@ export class AuthService {
       const isStudent = roles.includes('STUDENT');
       
       if (isStudent && user.student) {
+        const learnerMembership = await this.prisma.learner_Institution_Membership.findFirst({
+          where: {
+            user_id: userId,
+            status: { in: ['pending', 'active', 'rejected'] as any },
+          },
+          orderBy: { created_at: 'desc' },
+          include: {
+            institution: {
+              select: { id: true, name: true, org_code: true, institution_type: true },
+            },
+          },
+        });
+
         // Return student-specific profile
         return {
           id: user.id,
@@ -608,6 +655,10 @@ export class AuthService {
           date_of_birth: user.student.date_of_birth,
           school_name: user.student.school_standard.school.name,
           standard: user.student.school_standard.standard.name,
+          status: user.student.status,
+          membership_status: learnerMembership?.status ?? null,
+          membership_pending: learnerMembership?.status === 'pending',
+          institution: learnerMembership?.institution ?? null,
           roles: user.user_roles.map(ur => ({
             id: ur.role.id,
             name: ur.role.role_name
@@ -642,10 +693,21 @@ export class AuthService {
           id: ur.role.id,
           name: ur.role.role_name
         })),
-        schools: user.user_schools.map(us => ({
-          id: us.school.id,
-          name: us.school.name,
-          board: us.school.board
+        schools: user.institution_memberships
+          .filter((m) => m.institution?.school)
+          .map((m) => ({
+            id: m.institution.school.id,
+            name: m.institution.school.name,
+            board: m.institution.school.board,
+          })),
+        institutions: user.institution_memberships.map((m) => ({
+          id: m.institution.id,
+          name: m.institution.name,
+          org_code: m.institution.org_code,
+          institution_type: m.institution.institution_type,
+          visibility: m.institution.visibility,
+          member_role: m.member_role,
+          school_id: m.institution.school?.id ?? null,
         })),
         teaching_subjects: sortedTeachingSubjects.map(ts => ({
           id: ts.id,
@@ -658,7 +720,49 @@ export class AuthService {
             id: ts.subject.id,
             name: ts.subject.name
           }
-        }))
+        })),
+        curriculum_scope: (() => {
+          const rows = user.teacher_curriculum_scopes || [];
+          if (!rows.length) return null;
+          const board = rows[0].board;
+          const standardsMap = new Map<
+            number,
+            {
+              id: number;
+              name: string;
+              sequence_number: number;
+              subjects: { id: number; name: string }[];
+            }
+          >();
+          for (const row of rows) {
+            let standardEntry = standardsMap.get(row.standard_id);
+            if (!standardEntry) {
+              standardEntry = {
+                id: row.standard.id,
+                name: row.standard.name,
+                sequence_number: row.standard.sequence_number,
+                subjects: [],
+              };
+              standardsMap.set(row.standard_id, standardEntry);
+            }
+            standardEntry.subjects.push({
+              id: row.subject.id,
+              name: row.subject.name,
+            });
+          }
+          return {
+            board,
+            standards: Array.from(standardsMap.values()),
+            items: rows.map((r) => ({
+              id: r.id,
+              board_id: r.board_id,
+              standard_id: r.standard_id,
+              subject_id: r.subject_id,
+              standard: r.standard,
+              subject: r.subject,
+            })),
+          };
+        })(),
       };
     } catch (error) {
       this.logger.error('Failed to fetch user profile:', error);

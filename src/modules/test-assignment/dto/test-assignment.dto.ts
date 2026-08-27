@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsString, IsOptional, IsDateString, IsBoolean } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsString, IsOptional, IsDateString, IsBoolean, IsArray } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateTestAssignmentDto {
@@ -35,10 +35,16 @@ export class CreateTestAssignmentDto {
 }
 
 export class BulkAssignTestDto {
-  @ApiProperty({ example: [1, 2, 3], description: 'Array of student IDs' })
+  @ApiPropertyOptional({ example: [1, 2, 3], description: 'Array of student IDs (optional if group_id set)' })
+  @IsOptional()
+  @IsArray()
   @IsNumber({}, { each: true })
-  @IsNotEmpty()
-  student_ids: number[];
+  student_ids?: number[];
+
+  @ApiPropertyOptional({ example: 1, description: 'Assign all members of this Student_Group' })
+  @IsOptional()
+  @IsNumber()
+  group_id?: number;
 
   @ApiProperty({ example: 1, description: 'Test Paper ID' })
   @IsNumber()
@@ -143,13 +149,13 @@ export class GetTestAssignmentsQueryDto {
   @ApiPropertyOptional({ example: 1, description: 'Filter by student ID' })
   @IsNumber()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   student_id?: number;
 
   @ApiPropertyOptional({ example: 1, description: 'Filter by test paper ID' })
   @IsNumber()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   test_paper_id?: number;
 
   @ApiPropertyOptional({ example: 'assigned', description: 'Filter by status' })
@@ -160,7 +166,7 @@ export class GetTestAssignmentsQueryDto {
   @ApiPropertyOptional({ example: 1, description: 'Filter by assigned by user ID' })
   @IsNumber()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   assigned_by_user_id?: number;
 }
 
@@ -279,6 +285,18 @@ export class ExamInstructionsDto {
 
   @ApiProperty({ example: 'assigned' })
   status: string;
+
+  @ApiProperty({ required: false, example: 'UPSC Civil Services Examination' })
+  exam_program?: string | null;
+
+  @ApiProperty({ required: false, example: 'COMPETITIVE', description: 'BOARD | ENTRANCE | COMPETITIVE' })
+  exam_category?: string | null;
+
+  @ApiProperty({
+    required: false,
+    description: 'Paper-template sections (name, questions, marks, timing, cutoff). Empty for board papers.',
+  })
+  sections?: any[];
 }
 
 export class ExamQuestionDto {
@@ -320,6 +338,22 @@ export class ExamQuestionDto {
 
   @ApiProperty({ example: true })
   is_mandatory: boolean;
+
+  @ApiProperty({ required: false, example: 12, description: 'Passage group id when linked' })
+  question_group_id?: number | null;
+
+  @ApiProperty({ required: false, example: 1, description: 'Order within the passage group' })
+  group_order?: number | null;
+
+  @ApiProperty({
+    required: false,
+    example: 'Shared passage text…',
+    description: 'Shared passage shown with every linked child MCQ',
+  })
+  passage_text?: string | null;
+
+  @ApiProperty({ required: false, example: 'https://…', description: 'Optional passage image URL' })
+  passage_image?: string | null;
 }
 
 export class ExamDataDto {
@@ -362,6 +396,12 @@ export class ExamDataDto {
   @ApiProperty({ example: false, description: 'Whether options are randomized for this student' })
   randomize_options: boolean;
 
+  @ApiProperty({
+    required: false,
+    description: 'Option C template sections (answer_format, sectional timing/cutoff). Empty for legacy board papers.',
+  })
+  sections?: any[];
+
   @ApiProperty({ type: [ExamQuestionDto] })
   questions: ExamQuestionDto[];
 
@@ -398,10 +438,15 @@ export class SubmitAnswerDto {
   @IsNotEmpty()
   question_text_id: number;
 
-  @ApiProperty({ example: 2, description: 'Selected option ID (0-based index)' })
+  @ApiProperty({ example: 1042, description: 'Selected Mcq_Option ID (the actual option id, not an index)' })
   @IsNumber()
   @IsOptional()
   selected_option_id?: number;
+
+  @ApiProperty({ example: 42.5, required: false, description: 'Numeric answer for NAT questions (JEE style)' })
+  @IsNumber()
+  @IsOptional()
+  numeric_answer?: number;
 
   @ApiProperty({ example: 30000, description: 'Time spent on this question in milliseconds' })
   @IsNumber()
@@ -489,6 +534,24 @@ export class ExamResultDto {
   })
   chapter_wise_analysis?: any;
 
+  @ApiProperty({
+    required: false,
+    description: 'Section-wise scores with sectional cutoffs (competitive/entrance papers)',
+  })
+  section_wise_scores?: any;
+
+  @ApiProperty({ required: false, example: true, description: 'All cutoffs met (null when paper has none)' })
+  overall_qualified?: boolean | null;
+
+  @ApiProperty({ required: false, example: 4, description: 'Rank among all takers of this paper' })
+  rank?: number;
+
+  @ApiProperty({ required: false, example: 120 })
+  total_participants?: number;
+
+  @ApiProperty({ required: false, example: 96.4 })
+  percentile?: number;
+
   @ApiProperty({ example: ['Algebra', 'Geometry'] })
   strengths?: string[];
 
@@ -537,6 +600,9 @@ export class DetailedReportDto {
     marks_obtained: number;
     time_spent_seconds?: number;
     is_flagged: boolean;
+    answer_format?: 'MCQ' | 'NUMERIC';
+    numeric_answer?: number | null;
+    correct_numeric?: number | null;
   }[];
 }
 
@@ -632,7 +698,7 @@ export class TestPaperResultsResponseDto {
   @ApiProperty({ example: 45.2 })
   lowest_score: number;
 
-  @ApiProperty({ example: 72.0 })
+  @ApiProperty({ example: 72 })
   pass_rate: number;
 
   @ApiProperty({ 
@@ -643,14 +709,32 @@ export class TestPaperResultsResponseDto {
         correct: 7.5,
         wrong: 1.8,
         skipped: 0.7,
-        percentage: 75.0,
+        percentage: 75,
         totalMarks: 20,
-        obtainedMarks: 15.0,
+        obtainedMarks: 15,
         performanceLevel: 'good'
       }
     ]
   })
   chapter_wise_analysis?: any[];
+
+  @ApiProperty({
+    example: [
+      {
+        sectionName: 'General Studies',
+        questions: 100,
+        attempted: 92,
+        obtainedMarks: 140,
+        totalMarks: 200,
+        percentage: 70,
+        qualifyingMarks: null,
+        qualifiedRate: null,
+        studentsCount: 18,
+      },
+    ],
+    description: 'Aggregated section scores for competitive/entrance mocks (empty for board papers)',
+  })
+  section_wise_analysis?: any[];
 
   @ApiProperty({ 
     example: ['Algebra', 'Geometry'],

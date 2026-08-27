@@ -46,25 +46,25 @@ export class CreateMediumStandardSubjectDto {
 export class GetMssQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   @IsNumber()
   board_id?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   @IsNumber()
   instruction_medium_id?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   @IsNumber()
   standard_id?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   @IsNumber()
   subject_id?: number;
 } 

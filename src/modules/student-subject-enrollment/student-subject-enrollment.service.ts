@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { 
   CreateStudentSubjectEnrollmentDto, 
@@ -7,10 +7,13 @@ import {
   GetEnrolledStudentsQueryDto,
   EnrollmentStatus 
 } from './dto/student-subject-enrollment.dto';
+import { currentAcademicYear, OrgMembershipStatus, OrgMemberRole } from '../../common/utils/org-membership.util';
 
 @Injectable()
 export class StudentSubjectEnrollmentService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(StudentSubjectEnrollmentService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
 
   private readonly enrollmentSelect = {
     id: true,
@@ -159,6 +162,89 @@ export class StudentSubjectEnrollmentService {
     }
   }
 
+  /**
+   * Teacher (own subject) or org ADMIN maps a student onto a Teacher_Subject as approved.
+   */
+  async mapStudentToTeacherSubject(
+    actorUserId: number,
+    dto: { student_id: number; teacher_subject_id: number; academic_year?: string },
+  ) {
+    const student = await this.prisma.student.findUnique({
+      where: { id: dto.student_id },
+      include: {
+        school_standard: true,
+        learner_memberships: {
+          where: { status: OrgMembershipStatus.active },
+          take: 1,
+        },
+      },
+    });
+    if (!student) throw new NotFoundException(`Student ${dto.student_id} not found`);
+
+    const teacherSubject = await this.prisma.teacher_Subject.findUnique({
+      where: { id: dto.teacher_subject_id },
+      include: { school_standard: true },
+    });
+    if (!teacherSubject) {
+      throw new NotFoundException(`Teacher subject ${dto.teacher_subject_id} not found`);
+    }
+
+    if (teacherSubject.school_standard_id !== student.school_standard_id) {
+      throw new BadRequestException('Student and teacher subject must share the same school-standard');
+    }
+
+    const ownsSubject = teacherSubject.user_id === actorUserId;
+    let isOrgAdmin = false;
+    if (!ownsSubject) {
+      const studentInstitutionId = student.learner_memberships[0]?.institution_id;
+      if (studentInstitutionId) {
+        const admin = await this.prisma.institution_Membership.findFirst({
+          where: {
+            user_id: actorUserId,
+            institution_id: studentInstitutionId,
+            member_role: OrgMemberRole.ADMIN,
+            status: OrgMembershipStatus.active,
+          },
+        });
+        isOrgAdmin = !!admin;
+      }
+    }
+    if (!ownsSubject && !isOrgAdmin) {
+      throw new BadRequestException(
+        'Only the subject teacher or an organization admin can map this enrollment',
+      );
+    }
+
+    const academicYear = dto.academic_year?.trim() || currentAcademicYear();
+    const now = new Date();
+
+    return this.prisma.student_Subject_Enrollment.upsert({
+      where: {
+        student_id_teacher_subject_id: {
+          student_id: dto.student_id,
+          teacher_subject_id: dto.teacher_subject_id,
+        },
+      },
+      create: {
+        student_id: dto.student_id,
+        teacher_subject_id: dto.teacher_subject_id,
+        status: EnrollmentStatus.APPROVED,
+        academic_year: academicYear,
+        enrollment_date: now,
+        responded_at: now,
+        teacher_response: 'Mapped by teacher/admin',
+      },
+      update: {
+        status: EnrollmentStatus.APPROVED,
+        enrollment_date: now,
+        responded_at: now,
+        teacher_response: 'Mapped by teacher/admin',
+        academic_year: academicYear,
+      },
+      select: this.enrollmentSelect,
+    });
+  }
+
   async updateEnrollmentStatus(enrollmentId: number, teacherId: number, dto: UpdateEnrollmentStatusDto) {
     try {
       // Find the enrollment and verify teacher ownership
@@ -240,6 +326,10 @@ export class StudentSubjectEnrollmentService {
 
       return enrollments;
     } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error('Failed to fetch enrollments', error);
       throw new BadRequestException('Failed to fetch enrollments');
     }
   }
@@ -297,7 +387,7 @@ export class StudentSubjectEnrollmentService {
       // Filter by specific teacher subject if provided
       if (query?.teacher_subject_id) {
         where.teacher_subject_id = typeof query.teacher_subject_id === 'string' 
-          ? parseInt(query.teacher_subject_id, 10) 
+          ? Number.parseInt(query.teacher_subject_id, 10) 
           : query.teacher_subject_id;
       }
 
@@ -400,7 +490,7 @@ export class StudentSubjectEnrollmentService {
       // Group teacher subjects by standard
       const standardsMap = new Map();
 
-      teacherSubjects.forEach(ts => {
+      for (const ts of teacherSubjects) {
         const standardId = ts.school_standard.standard.id;
         const standardName = ts.school_standard.standard.name;
         
@@ -435,7 +525,7 @@ export class StudentSubjectEnrollmentService {
           teacherSubjectId: ts.id,
           stats
         });
-      });
+      }
 
       // Convert map to array
       const standards = Array.from(standardsMap.values()).map(standard => ({
@@ -663,11 +753,32 @@ export class StudentSubjectEnrollmentService {
       console.log('Found teacher subject:', teacherSubject.id);
 
       // Build the where clause for filtering enrollments
+      const teacherOrg = await this.prisma.institution_Membership.findFirst({
+        where: {
+          user_id: teacherId,
+          status: OrgMembershipStatus.active,
+        },
+        select: { institution_id: true },
+      });
+
       const where: any = {
         teacher_subject_id: teacherSubject.id,
         status: {
           in: [EnrollmentStatus.APPROVED, EnrollmentStatus.ACTIVE]
-        }
+        },
+        student: {
+          status: 'active',
+          ...(teacherOrg
+            ? {
+                learner_memberships: {
+                  some: {
+                    institution_id: teacherOrg.institution_id,
+                    status: OrgMembershipStatus.active,
+                  },
+                },
+              }
+            : { id: -1 }), // no org → no assignable students
+        },
       };
 
       // Get enrolled students

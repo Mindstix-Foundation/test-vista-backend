@@ -3,9 +3,10 @@ import { QuestionService } from './question.service';
 import { QuestionController } from './question.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AwsModule } from '../aws/aws.module';
+import { SyllabusModule } from '../syllabus/syllabus.module';
 
 @Module({
-  imports: [PrismaModule, AwsModule],
+  imports: [PrismaModule, AwsModule, SyllabusModule],
   controllers: [QuestionController],
   providers: [QuestionService],
   exports: [QuestionService]

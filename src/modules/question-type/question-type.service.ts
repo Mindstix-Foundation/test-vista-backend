@@ -6,7 +6,7 @@ import { CreateQuestionTypeDto } from './dto/create-question-type.dto';
 export class QuestionTypeService {
   private readonly logger = new Logger(QuestionTypeService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateQuestionTypeDto) {
     try {

@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserRoleDto } from './dto/user-role.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 
 @Injectable()
 export class UserRoleService {

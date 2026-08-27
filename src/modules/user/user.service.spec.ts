@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserService } from './user.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RoleService } from '../role/role.service';
 import { NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
@@ -21,8 +22,13 @@ describe('UserService', () => {
       delete: jest.fn(),
       count: jest.fn(),
     },
-    user_School: {
-      count: jest.fn(),
+    institution_Membership: {
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    institution: {
+      findFirst: jest.fn(),
       create: jest.fn(),
     },
     user_Role: {
@@ -46,6 +52,10 @@ describe('UserService', () => {
     $transaction: jest.fn(),
   };
 
+  const mockRoleService = {
+    getRoleIdByName: jest.fn().mockResolvedValue(2),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,6 +63,10 @@ describe('UserService', () => {
         {
           provide: PrismaService,
           useValue: mockPrismaService,
+        },
+        {
+          provide: RoleService,
+          useValue: mockRoleService,
         },
       ],
     }).compile();
@@ -171,8 +185,8 @@ describe('UserService', () => {
         skip: 0,
         take: 15,
         where: { 
-          user_schools: {
-            some: { school_id: 1 }
+          institution_memberships: {
+            some: { status: 'active', institution: { school_id: 1 } }
           }
         },
         orderBy: { name: 'asc' },
@@ -264,8 +278,13 @@ describe('UserService', () => {
   describe('remove', () => {
     it('should delete a user successfully', async () => {
       const userId = 1;
-      mockPrismaService.user.findUnique.mockResolvedValue({ id: userId });
-      mockPrismaService.user_School.count.mockResolvedValue(0);
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: userId,
+        name: 'Test User',
+        user_roles: [],
+        institution_memberships: [],
+        teacher_subjects: [],
+      });
 
       await service.remove(userId);
       expect(mockPrismaService.user.delete).toHaveBeenCalledWith({
@@ -278,14 +297,6 @@ describe('UserService', () => {
       mockPrismaService.user.findUnique.mockResolvedValue(null);
 
       await expect(service.remove(userId)).rejects.toThrow(NotFoundException);
-    });
-
-    it('should throw UnprocessableEntityException when user has school associations', async () => {
-      const userId = 1;
-      mockPrismaService.user.findUnique.mockResolvedValue({ id: userId });
-      mockPrismaService.user_School.count.mockResolvedValue(1);
-
-      await expect(service.remove(userId)).rejects.toThrow('Cannot delete user because they are associated with schools');
     });
   });
 
@@ -382,8 +393,15 @@ describe('UserService', () => {
           user_Role: {
             create: jest.fn().mockResolvedValue({})
           },
-          user_School: {
-            create: jest.fn().mockResolvedValue({})
+          institution: {
+            findFirst: jest.fn().mockResolvedValue({ id: 10, school_id: 1 }),
+            create: jest.fn(),
+          },
+          institution_Membership: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          subject: {
+            findFirst: jest.fn().mockResolvedValue({ id: 1, board_id: 1 }),
           },
           medium_Standard_Subject: {
             findMany: jest.fn()
@@ -495,11 +513,11 @@ describe('UserService', () => {
         user_roles: [
           { role: { id: 2, role_name: 'TEACHER' } }
         ],
-        user_schools: [
+        institution_memberships: [
           { 
-            school: { 
-              id: 1, 
-              name: 'Old School' 
+            institution: { 
+              school_id: 1,
+              school: { id: 1, name: 'Old School' } 
             } 
           }
         ]
@@ -530,12 +548,27 @@ describe('UserService', () => {
               email_id: 'updated.teacher@example.com',
               contact_number: '+911234567890',
               status: true
-            })
+            }),
+            findUnique: jest.fn().mockResolvedValue({
+              id: 1,
+              name: 'Updated Teacher',
+              email_id: 'updated.teacher@example.com',
+              contact_number: '+911234567890',
+              alternate_contact_number: null,
+              highest_qualification: null,
+              status: true,
+            }),
           },
-          user_School: {
-            findFirst: jest.fn().mockResolvedValue(null),
+          institution: {
+            findFirst: jest.fn().mockResolvedValue({ id: 10, school_id: 2 }),
+            create: jest.fn(),
+          },
+          institution_Membership: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
             create: jest.fn().mockResolvedValue({}),
-            update: jest.fn().mockResolvedValue({})
+            findFirst: jest.fn().mockResolvedValue({
+              institution: { school: { name: 'New School' } },
+            }),
           },
           teacher_Subject: {
             deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
@@ -547,6 +580,9 @@ describe('UserService', () => {
                 }
               }
             ])
+          },
+          subject: {
+            findFirst: jest.fn().mockResolvedValue({ id: 4, board_id: 1 }),
           },
           medium_Standard_Subject: {
             findMany: jest.fn().mockResolvedValue([
@@ -578,7 +614,7 @@ describe('UserService', () => {
         user_roles: [
           { role: { id: 1, role_name: 'ADMIN' } }
         ],
-        user_schools: []
+        institution_memberships: []
       });
 
       await expect(service.editTeacher(mockEditTeacherDto)).rejects.toThrow(BadRequestException);
@@ -592,7 +628,7 @@ describe('UserService', () => {
         user_roles: [
           { role: { id: 2, role_name: 'TEACHER' } }
         ],
-        user_schools: []
+        institution_memberships: []
       });
 
       // Set up the test to make isValidEmail return false
@@ -614,7 +650,7 @@ describe('UserService', () => {
         user_roles: [
           { role: { id: 2, role_name: 'TEACHER' } }
         ],
-        user_schools: []
+        institution_memberships: []
       });
 
       // Mock isValidEmail to return true
@@ -637,7 +673,7 @@ describe('UserService', () => {
         user_roles: [
           { role: { id: 2, role_name: 'TEACHER' } }
         ],
-        user_schools: []
+        institution_memberships: []
       });
 
       // Mock isValidEmail to return true

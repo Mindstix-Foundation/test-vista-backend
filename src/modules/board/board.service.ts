@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException,  ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBoardDto, UpdateBoardDto } from './dto/board.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 
@@ -160,6 +160,28 @@ export class BoardService {
       this.logger.error('Failed to fetch all boards:', error);
       throw new InternalServerErrorException('Failed to fetch all boards');
     }
+  }
+
+  /**
+   * Boards that have at least one Medium_Standard_Subject mapping
+   * (usable for teacher registration / create-paper).
+   */
+  async findWithMappedCurriculum() {
+    return this.prisma.board.findMany({
+      where: {
+        instruction_mediums: {
+          some: {
+            medium_standard_subjects: { some: {} },
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        abbreviation: true,
+      },
+      orderBy: { name: 'asc' },
+    });
   }
 
   async findOne(id: number) {

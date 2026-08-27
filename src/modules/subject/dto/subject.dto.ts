@@ -55,7 +55,7 @@ export class UnconnectedSubjectsQueryDto {
   })
   @IsNumber({}, { message: 'Board ID must be a number' })
   @IsNotEmpty({ message: 'Board ID is required' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   board_id: number;
 
   @ApiProperty({ 
@@ -64,7 +64,7 @@ export class UnconnectedSubjectsQueryDto {
   })
   @IsNumber({}, { message: 'Medium ID must be a number' })
   @IsNotEmpty({ message: 'Medium ID is required' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   medium_id: number;
 
   @ApiProperty({ 
@@ -73,7 +73,7 @@ export class UnconnectedSubjectsQueryDto {
   })
   @IsNumber({}, { message: 'Standard ID must be a number' })
   @IsNotEmpty({ message: 'Standard ID is required' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   standard_id: number;
 }
 
@@ -84,7 +84,7 @@ export class SchoolStandardSubjectsQueryDto {
   })
   @IsNumber({}, { message: 'School ID must be a number' })
   @IsNotEmpty({ message: 'School ID is required' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   school_id: number;
 
   @ApiProperty({ 
@@ -93,7 +93,7 @@ export class SchoolStandardSubjectsQueryDto {
   })
   @IsNumber({}, { message: 'Standard ID must be a number' })
   @IsNotEmpty({ message: 'Standard ID is required' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   standard_id: number;
 }
 
@@ -104,7 +104,7 @@ export class CommonSubjectsQueryDto {
   })
   @IsNumber({}, { message: 'Standard ID must be a number' })
   @IsNotEmpty({ message: 'Standard ID is required' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => Number.parseInt(value))
   standard_id: number;
 
   @ApiProperty({ 
@@ -117,8 +117,8 @@ export class CommonSubjectsQueryDto {
   @Type(() => Number)
   @Transform(({ value }) => 
     Array.isArray(value) 
-      ? value.map(v => parseInt(v)) 
-      : [parseInt(value)]
+      ? value.map(v => Number.parseInt(v)) 
+      : [Number.parseInt(value)]
   )
   medium_ids: number[];
 } 

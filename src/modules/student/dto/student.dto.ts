@@ -5,7 +5,6 @@ import {
   IsOptional, 
   IsNotEmpty, 
   IsEmail, 
-  IsBoolean, 
   IsPhoneNumber, 
   Length,
   IsDateString,
@@ -106,7 +105,7 @@ export class CreateStudentDto {
   @ApiPropertyOptional({ example: 'active', description: 'Student status' })
   @IsOptional()
   @IsString({ message: 'Status must be a string' })
-  status?: string = 'active';
+  status?: string = 'pending';
 }
 
 export class UpdateStudentDto {

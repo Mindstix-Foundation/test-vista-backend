@@ -7,7 +7,7 @@ import { UpdateSectionDto } from './dto/update-section.dto';
 export class SectionService {
   private readonly logger = new Logger(SectionService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(createSectionDto: CreateSectionDto) {
     try {

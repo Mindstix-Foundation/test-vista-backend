@@ -9,8 +9,7 @@ import {
   UseGuards, 
   HttpStatus,
   Request,
-  BadRequestException,
-  NotFoundException
+  BadRequestException
 } from '@nestjs/common';
 import { 
   ApiTags, 
@@ -282,6 +281,20 @@ export class TestAssignmentController {
     }
   }
 
+  @Get('student/my-results')
+  @Roles('STUDENT')
+  @ApiOperation({
+    summary: "Get student's past results",
+    description: 'All completed attempt results (teacher-assigned and Smart Tests) with scores',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Student past results retrieved successfully',
+  })
+  async getStudentPastResults(@Request() req: any) {
+    return await this.testAssignmentService.getStudentPastResults(req.user.id);
+  }
+
   // New student exam endpoints
 
   @Get('student/exam/:assignmentId/instructions')
@@ -302,7 +315,7 @@ export class TestAssignmentController {
   ) {
     try {
       const userId = req.user.id;
-      return await this.testAssignmentService.getExamInstructions(userId, parseInt(assignmentId));
+      return await this.testAssignmentService.getExamInstructions(userId, Number.parseInt(assignmentId));
     } catch (error) {
       console.error('Error in getExamInstructions:', error);
       throw error;
@@ -355,7 +368,7 @@ export class TestAssignmentController {
   ) {
     try {
       const userId = req.user.id;
-      return await this.testAssignmentService.getExamAttemptStatus(userId, parseInt(attemptId));
+      return await this.testAssignmentService.getExamAttemptStatus(userId, Number.parseInt(attemptId));
     } catch (error) {
       console.error('Error in getExamAttemptStatus:', error);
       throw error;
@@ -387,7 +400,7 @@ export class TestAssignmentController {
   ) {
     try {
       const userId = req.user.id;
-      const status = await this.testAssignmentService.getExamAttemptStatus(userId, parseInt(attemptId));
+      const status = await this.testAssignmentService.getExamAttemptStatus(userId, Number.parseInt(attemptId));
       
       return {
         time_remaining_seconds: status.time_remaining_seconds,
@@ -476,7 +489,7 @@ export class TestAssignmentController {
   ) {
     try {
       const userId = req.user.id;
-      return await this.testAssignmentService.getExamResult(userId, parseInt(attemptId));
+      return await this.testAssignmentService.getExamResult(userId, Number.parseInt(attemptId));
     } catch (error) {
       console.error('Error in getExamResult:', error);
       throw error;
@@ -501,7 +514,7 @@ export class TestAssignmentController {
   ) {
     try {
       const userId = req.user.id;
-      return await this.testAssignmentService.getDetailedReport(userId, parseInt(attemptId));
+      return await this.testAssignmentService.getDetailedReport(userId, Number.parseInt(attemptId));
     } catch (error) {
       console.error('Error in getDetailedReport:', error);
       throw error;
@@ -526,7 +539,7 @@ export class TestAssignmentController {
   @ApiParam({ name: 'id', description: 'Test assignment ID' })
   async getTestAssignmentById(@Param('id') id: string) {
     try {
-      return await this.testAssignmentService.getTestAssignmentById(parseInt(id));
+      return await this.testAssignmentService.getTestAssignmentById(Number.parseInt(id));
     } catch (error) {
       console.error('Error in getTestAssignmentById:', error);
       throw error;
@@ -563,9 +576,9 @@ export class TestAssignmentController {
   ) {
     try {
       const teacherId = req.user.id;
-      const testPaperIdNumber = parseInt(testPaperId);
+      const testPaperIdNumber = Number.parseInt(testPaperId);
       
-      if (isNaN(testPaperIdNumber)) {
+      if (Number.isNaN(testPaperIdNumber)) {
         throw new BadRequestException('Invalid test paper ID');
       }
       
@@ -611,9 +624,9 @@ export class TestAssignmentController {
   ) {
     try {
       const teacherId = req.user.id;
-      const testPaperIdNumber = parseInt(testPaperId);
+      const testPaperIdNumber = Number.parseInt(testPaperId);
       
-      if (isNaN(testPaperIdNumber)) {
+      if (Number.isNaN(testPaperIdNumber)) {
         throw new BadRequestException('Invalid test paper ID');
       }
       

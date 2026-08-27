@@ -9,25 +9,25 @@ import * as passport from 'passport';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
-  
+
   // Enhanced CORS configuration
-  const corsOrigins = process.env.CORS_ORIGINS 
+  const corsOrigins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
     : [process.env.FRONTEND_URL || 'http://localhost:5173'];
-  
+
   logger.log(`CORS enabled for origins: ${corsOrigins.join(', ')}`);
-  
+
   app.enableCors({
     origin: corsOrigins,
     methods: process.env.CORS_METHODS || 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: process.env.CORS_ALLOWED_HEADERS || 'Content-Type, Accept, Authorization',
-    maxAge: parseInt(process.env.CORS_MAX_AGE || '86400'), // 24 hours in seconds
+    maxAge: Number.parseInt(process.env.CORS_MAX_AGE || '86400', 10), // 24 hours in seconds
   });
-  
+
   // Global exception filter with logger
   app.useGlobalFilters(new AllExceptionsFilter());
-  
+
   // Global validation pipe
   app.useGlobalPipes(new ValidationPipe({
     transform: true,
@@ -57,13 +57,17 @@ async function bootstrap() {
       },
     }),
   );
-  
+
   // Initialize passport
   app.use(passport.initialize());
   app.use(passport.session());
 
-  const port = process.env.PORT || 3000;
-  await app.listen(port);
-  logger.log(`Application is running on: ${await app.getUrl()}`);
+  const port = Number(process.env.PORT) || 3000;
+  // Bind IPv4 explicitly so Vite's proxy to 127.0.0.1:3000 always works
+  // (default listen can end up on ::1 only, which causes ECONNREFUSED from the FE).
+  const host = process.env.HOST || '0.0.0.0';
+  await app.listen(port, host);
+  logger.log(`Application is running on: http://127.0.0.1:${port}`);
 }
+
 bootstrap();

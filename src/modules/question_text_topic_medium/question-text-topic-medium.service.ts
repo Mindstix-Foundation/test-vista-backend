@@ -203,8 +203,8 @@ export class QuestionTextTopicMediumService {
       });
 
       if (existingRecords.length !== ids.length) {
-        const existingIds = existingRecords.map(record => record.id);
-        const missingIds = ids.filter(id => !existingIds.includes(id));
+        const existingIds = new Set(existingRecords.map(record => record.id));
+        const missingIds = ids.filter(id => !existingIds.has(id));
         throw new NotFoundException(`Some associations were not found: ${missingIds.join(', ')}`);
       }
 

@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsEnum, IsString, ValidateNested, Min, Max } from 'class-validator';
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsEnum, IsString, ValidateNested, ValidateIf, Min, Max, IsArray, ArrayMinSize } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 import { SortOrder } from '../../../common/dto/pagination.dto';
@@ -78,6 +78,16 @@ export class QuestionFilterDto {
   @Type(() => Number)
   @IsInt({ message: 'chapter_id must be an integer' })
   chapter_id?: number;
+
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: 'Filter by competitive/entrance syllabus node ID',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'syllabus_node_id must be an integer' })
+  syllabus_node_id?: number;
   
   @ApiProperty({
     required: false,
@@ -405,15 +415,17 @@ export class CompleteQuestionDto {
   @Type(() => CreateQuestionTextData)
   question_text_data: CreateQuestionTextData;
 
-  // Question topic data
+  // Question topic data (required for school board; omitted for competitive/entrance syllabus tagging)
   @ApiProperty({
     type: CreateQuestionTopicData,
-    description: 'Question topic association'
+    description: 'Question topic association',
+    required: false,
   })
+  @ValidateIf((o) => !o.syllabus_node_id)
   @IsNotEmpty()
   @ValidateNested()
   @Type(() => CreateQuestionTopicData)
-  question_topic_data: CreateQuestionTopicData;
+  question_topic_data?: CreateQuestionTopicData;
 
   // Question text topic medium data
   @ApiProperty({
@@ -425,6 +437,14 @@ export class CompleteQuestionDto {
   @ValidateNested()
   @Type(() => CreateQuestionTextTopicMediumData)
   question_text_topic_medium_data?: CreateQuestionTextTopicMediumData;
+
+  @ApiProperty({
+    required: false,
+    description: 'Competitive/entrance syllabus node to tag this question under (skips chapter/topic)',
+  })
+  @IsOptional()
+  @IsInt()
+  syllabus_node_id?: number;
 }
 
 export class CreateQuestionTextTopicMediumDto {
@@ -655,4 +675,129 @@ export class QuestionCountFilterDto {
   })
   @IsBoolean({ message: 'is_verified must be a boolean' })
   is_verified?: boolean;
-} 
+}
+
+/** One child MCQ inside a passage-linked group. */
+export class PassageGroupChildDto {
+  @ApiProperty({ example: 'Which of the following conclusions are valid?' })
+  @IsString()
+  @IsNotEmpty()
+  question_text: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  image_id?: number;
+
+  @ApiProperty({ type: [CreateMcqOptionDto] })
+  @IsArray()
+  @ArrayMinSize(2)
+  @ValidateNested({ each: true })
+  @Type(() => CreateMcqOptionDto)
+  mcq_options: CreateMcqOptionDto[];
+
+  @ApiProperty({
+    required: false,
+    example: 1,
+    description: '1-based order within the group; assigned sequentially when omitted',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  group_order?: number;
+}
+
+export class CreatePassageGroupDto {
+  @ApiProperty({ example: 'Passage text shared by linked MCQs…' })
+  @IsString()
+  @IsNotEmpty()
+  passage_text: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  passage_image_id?: number;
+
+  @ApiProperty({ required: false, default: 'PASSAGE_MCQ' })
+  @IsOptional()
+  @IsString()
+  group_kind?: string;
+
+  @ApiProperty({ required: false, description: 'Idempotent import key, e.g. CSAT-2026-G1' })
+  @IsOptional()
+  @IsString()
+  external_key?: string;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  board_question: boolean;
+
+  @ApiProperty({
+    required: false,
+    description: 'Board topic (required when syllabus_node_id is omitted)',
+  })
+  @ValidateIf((o) => !o.syllabus_node_id)
+  @IsNotEmpty()
+  @ValidateNested()
+  @Type(() => CreateQuestionTopicData)
+  question_topic_data?: CreateQuestionTopicData;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateQuestionTextTopicMediumData)
+  question_text_topic_medium_data?: CreateQuestionTextTopicMediumData;
+
+  @ApiProperty({ required: false, description: 'Competitive syllabus node for all children' })
+  @IsOptional()
+  @IsInt()
+  syllabus_node_id?: number;
+
+  @ApiProperty({ type: [PassageGroupChildDto], description: 'At least 2 linked MCQs' })
+  @IsArray()
+  @ArrayMinSize(2)
+  @ValidateNested({ each: true })
+  @Type(() => PassageGroupChildDto)
+  children: PassageGroupChildDto[];
+}
+
+export class UpdatePassageGroupDto {
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  passage_text?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  passage_image_id?: number | null;
+
+  @ApiProperty({
+    required: false,
+    type: [PassageGroupChildDto],
+    description: 'When provided, replaces all children (min 2)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ValidateNested({ each: true })
+  @Type(() => PassageGroupChildDto)
+  children?: PassageGroupChildDto[];
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  board_question?: boolean;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsInt()
+  syllabus_node_id?: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateQuestionTopicData)
+  question_topic_data?: CreateQuestionTopicData;
+}

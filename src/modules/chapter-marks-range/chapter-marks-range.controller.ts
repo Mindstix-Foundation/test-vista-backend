@@ -59,8 +59,8 @@ export class ChapterMarksRangeController {
     @Query('questionOrigin') questionOrigin: 'board' | 'other' | 'both' = 'both',
   ): Promise<ChapterMarksRangeResponseDto[]> {
     // Parse and validate patternId
-    const patternId = parseInt(patternIdStr, 10);
-    if (isNaN(patternId) || patternId <= 0) {
+    const patternId = Number.parseInt(patternIdStr, 10);
+    if (Number.isNaN(patternId) || patternId <= 0) {
       throw new BadRequestException('Invalid pattern ID provided');
     }
 
@@ -69,8 +69,8 @@ export class ChapterMarksRangeController {
       throw new BadRequestException('Chapter IDs are required');
     }
     const parsedChapterIds = chapterIds.split(',').map(id => {
-      const parsed = parseInt(id.trim(), 10);
-      if (isNaN(parsed) || parsed <= 0) {
+      const parsed = Number.parseInt(id.trim(), 10);
+      if (Number.isNaN(parsed) || parsed <= 0) {
         throw new BadRequestException(`Invalid chapter ID: ${id}`);
       }
       return parsed;
@@ -81,8 +81,8 @@ export class ChapterMarksRangeController {
       throw new BadRequestException('Medium IDs are required');
     }
     const parsedMediumIds = mediumIds.split(',').map(id => {
-      const parsed = parseInt(id.trim(), 10);
-      if (isNaN(parsed) || parsed <= 0) {
+      const parsed = Number.parseInt(id.trim(), 10);
+      if (Number.isNaN(parsed) || parsed <= 0) {
         throw new BadRequestException(`Invalid medium ID: ${id}`);
       }
       return parsed;

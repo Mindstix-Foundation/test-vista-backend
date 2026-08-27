@@ -5,17 +5,33 @@ import {
   ConflictException, 
   InternalServerErrorException, 
   BadRequestException,
-  UnprocessableEntityException 
+  UnprocessableEntityException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
-import { hash } from 'bcryptjs';
-import { Prisma } from '@prisma/client';
+import { hash, compare } from 'bcryptjs';
+import { Prisma } from '../../prisma/client';
 import { UserExistsException } from './exceptions/user-exists.exception';
 import { toTitleCase } from '../../utils/titleCase';
 import { SortField, SortOrder } from '../../common/dto/pagination.dto';
 import { AddTeacherDto } from './dto/add-teacher.dto';
+import { RegisterTeacherDto, RegisterStudentDto, UpdateTeacherCurriculumScopeDto } from './dto/register-teacher.dto';
+import { DeleteMyAccountDto } from './dto/delete-account.dto';
 import { RoleService } from '../role/role.service';
+import { InstitutionService } from '../institution/institution.service';
+import {
+  OrgMembershipStatus,
+  OrgMemberRole,
+  generateOrgCode,
+  activeTeacherMembershipInclude,
+  schoolIdFromMembership,
+} from '../../common/utils/org-membership.util';
+import { InstitutionType, InstitutionVisibility } from '../../generated/prisma/client';
+import { OPEN_LEARNING } from '../participant/participant.service';
+import { randomHexToken } from '../../common/utils/secure-random.util';
+import { isWellFormedEmail } from '../../common/utils/email.util';
 
 /**
  * User search parameters for findAll method
@@ -37,8 +53,574 @@ export class UserService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly roleService: RoleService
+    private readonly roleService: RoleService,
+    private readonly jwtService: JwtService,
+    private readonly institutionService: InstitutionService,
   ) {}
+
+  /**
+   * Public teacher self-registration (no school/org required).
+   * Optional pending join request when institution_id or org_code provided.
+   * Returns JWT so the FE can auto-login like aspirant registration.
+   */
+  async registerTeacher(dto: RegisterTeacherDto) {
+    if (!this.isValidEmail(dto.email_id)) {
+      throw new BadRequestException('Invalid email format');
+    }
+
+    if (dto.institution_id && dto.org_code?.trim()) {
+      throw new BadRequestException('Provide either institution_id or org_code, not both');
+    }
+
+    const scopeRows = await this.validateAndFlattenCurriculumScopes(dto.board_id, dto.scopes);
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email_id: dto.email_id },
+    });
+    if (existingUser) {
+      throw new ConflictException(
+        'An account with this email already exists. Please log in instead.',
+      );
+    }
+
+    const hashedPassword = await this.hashPassword(dto.password);
+    const teacherRoleId = await this.roleService.getRoleIdByName('TEACHER');
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          name: toTitleCase(dto.name),
+          email_id: dto.email_id.trim().toLowerCase(),
+          password: hashedPassword,
+          contact_number: dto.contact_number,
+          highest_qualification: dto.highest_qualification?.trim() || null,
+          status: true,
+        },
+      });
+
+      await tx.user_Role.create({
+        data: {
+          user_id: created.id,
+          role_id: teacherRoleId,
+        },
+      });
+
+      await tx.teacher_Curriculum_Scope.createMany({
+        data: scopeRows.map((row) => ({
+          user_id: created.id,
+          board_id: row.board_id,
+          standard_id: row.standard_id,
+          subject_id: row.subject_id,
+        })),
+      });
+
+      return created;
+    });
+
+    let joinRequest: { message: string; membership?: unknown } | null = null;
+    if (dto.org_code?.trim()) {
+      joinRequest = await this.institutionService.requestJoinByCode(
+        user.id,
+        dto.org_code.trim(),
+        dto.request_message,
+      );
+    } else if (dto.institution_id) {
+      joinRequest = await this.institutionService.requestJoin(
+        user.id,
+        dto.institution_id,
+        dto.request_message,
+      );
+    }
+
+    const access_token = this.jwtService.sign({
+      sub: user.id,
+      email_id: user.email_id,
+      roles: ['TEACHER'],
+    });
+
+    this.logger.log(`Teacher self-registered: ${user.email_id} (id=${user.id})`);
+
+    return {
+      message: joinRequest
+        ? 'Teacher registration successful. Join request sent — waiting for organization admin approval.'
+        : 'Teacher registration successful. You can create test papers now. Join or create a School / Coaching Center to assign tests to students.',
+      access_token,
+      join_request: joinRequest
+        ? { pending: true, message: joinRequest.message }
+        : null,
+      user: {
+        id: user.id,
+        name: user.name,
+        email_id: user.email_id,
+        contact_number: user.contact_number,
+        highest_qualification: user.highest_qualification,
+      },
+    };
+  }
+
+  /**
+   * Replace teacher curriculum scope (create-paper). Does not touch org Teacher_Subject rows.
+   */
+  async updateMyCurriculumScope(userId: number, dto: UpdateTeacherCurriculumScopeDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { user_roles: { include: { role: true } } },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    const isTeacher = user.user_roles.some((ur) => ur.role.role_name === 'TEACHER');
+    if (!isTeacher) {
+      throw new BadRequestException('Only teachers can update curriculum scope');
+    }
+
+    const scopeRows = await this.validateAndFlattenCurriculumScopes(dto.board_id, dto.scopes);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.teacher_Curriculum_Scope.deleteMany({ where: { user_id: userId } });
+      await tx.teacher_Curriculum_Scope.createMany({
+        data: scopeRows.map((row) => ({
+          user_id: userId,
+          board_id: row.board_id,
+          standard_id: row.standard_id,
+          subject_id: row.subject_id,
+        })),
+      });
+    });
+
+    // If teacher is in an active org, refresh Teacher_Subject from new scope
+    const membership = await this.prisma.institution_Membership.findFirst({
+      where: { user_id: userId, status: OrgMembershipStatus.active },
+      include: { institution: { select: { school_id: true } } },
+    });
+    if (membership?.institution?.school_id) {
+      await this.institutionService.mapCurriculumScopeToTeacherSubjects(
+        userId,
+        membership.institution.school_id,
+      );
+    }
+
+    return {
+      message: 'Curriculum scope updated',
+      curriculum_scope: await this.getCurriculumScopeForUser(userId),
+    };
+  }
+
+  async getCurriculumScopeForUser(userId: number) {
+    const rows = await this.prisma.teacher_Curriculum_Scope.findMany({
+      where: { user_id: userId },
+      include: {
+        board: { select: { id: true, name: true, abbreviation: true } },
+        standard: { select: { id: true, name: true, sequence_number: true } },
+        subject: { select: { id: true, name: true } },
+      },
+      orderBy: [
+        { standard: { sequence_number: 'asc' } },
+        { subject: { name: 'asc' } },
+      ],
+    });
+    if (!rows.length) return null;
+
+    const board = rows[0].board;
+    const standardsMap = new Map<number, { id: number; name: string; sequence_number: number; subjects: { id: number; name: string }[] }>();
+    for (const row of rows) {
+      let standardEntry = standardsMap.get(row.standard_id);
+      if (!standardEntry) {
+        standardEntry = {
+          id: row.standard.id,
+          name: row.standard.name,
+          sequence_number: row.standard.sequence_number,
+          subjects: [],
+        };
+        standardsMap.set(row.standard_id, standardEntry);
+      }
+      standardEntry.subjects.push({
+        id: row.subject.id,
+        name: row.subject.name,
+      });
+    }
+
+    return {
+      board,
+      standards: Array.from(standardsMap.values()),
+      items: rows.map((r) => ({
+        id: r.id,
+        board_id: r.board_id,
+        standard_id: r.standard_id,
+        subject_id: r.subject_id,
+        standard: r.standard,
+        subject: r.subject,
+      })),
+    };
+  }
+
+  private async validateAndFlattenCurriculumScopes(
+    boardId: number,
+    scopes: { standard_id: number; subject_ids: number[] }[],
+  ): Promise<{ board_id: number; standard_id: number; subject_id: number }[]> {
+    if (!scopes?.length) {
+      throw new BadRequestException('At least one standard with subjects is required');
+    }
+
+    const board = await this.prisma.board.findUnique({ where: { id: boardId } });
+    if (!board) throw new NotFoundException(`Board ${boardId} not found`);
+
+    const standardIds = [...new Set(scopes.map((s) => s.standard_id))];
+    const standards = await this.prisma.standard.findMany({
+      where: { id: { in: standardIds }, board_id: boardId },
+    });
+    if (standards.length !== standardIds.length) {
+      throw new BadRequestException('One or more standards are invalid for the selected board');
+    }
+
+    const allSubjectIds = [...new Set(scopes.flatMap((s) => s.subject_ids || []))];
+    if (!allSubjectIds.length) {
+      throw new BadRequestException('At least one subject is required');
+    }
+    const subjects = await this.prisma.subject.findMany({
+      where: { id: { in: allSubjectIds }, board_id: boardId },
+    });
+    if (subjects.length !== allSubjectIds.length) {
+      throw new BadRequestException('One or more subjects are invalid for the selected board');
+    }
+
+    const rows: { board_id: number; standard_id: number; subject_id: number }[] = [];
+    const seen = new Set<string>();
+    for (const scope of scopes) {
+      if (!scope.subject_ids?.length) {
+        throw new BadRequestException(
+          `Standard ${scope.standard_id} must include at least one subject`,
+        );
+      }
+      for (const subjectId of scope.subject_ids) {
+        const key = `${scope.standard_id}:${subjectId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          board_id: boardId,
+          standard_id: scope.standard_id,
+          subject_id: subjectId,
+        });
+      }
+    }
+    return rows;
+  }
+
+  /**
+   * Public student self-registration (email + password).
+   * With org + school_standard_id → pending learner membership at that school.
+   * Without org → Open Learning bridge (join a school later from the portal).
+   */
+  async registerStudent(dto: RegisterStudentDto) {
+    const wantsOrg = this.validateRegisterStudentInput(dto);
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email_id: dto.email_id.trim().toLowerCase() },
+    });
+    if (existingUser) {
+      throw new ConflictException(
+        'An account with this email already exists. Please log in instead.',
+      );
+    }
+
+    const hashedPassword = await this.hashPassword(dto.password);
+    const studentRoleId = await this.roleService.getRoleIdByName('STUDENT');
+
+    const { schoolStandardId, institutionId, requestMessage } = wantsOrg
+      ? await this.resolveOrgRegistrationContext(dto)
+      : await this.resolveOpenLearningRegistrationContext();
+
+    const existingRoll = await this.prisma.student.findFirst({
+      where: {
+        student_id: dto.student_id.trim(),
+        school_standard_id: schoolStandardId,
+      },
+    });
+    if (existingRoll) {
+      throw new ConflictException(
+        `Student ID ${dto.student_id} already exists in this school-standard`,
+      );
+    }
+
+    const result = await this.createRegisteredStudentRecords({
+      dto,
+      hashedPassword,
+      studentRoleId,
+      schoolStandardId,
+      wantsOrg,
+      institutionId,
+      requestMessage,
+    });
+
+    const access_token = this.jwtService.sign({
+      sub: result.user.id,
+      email_id: result.user.email_id,
+      roles: ['STUDENT'],
+    });
+
+    this.logger.log(`Student self-registered: ${result.user.email_id} (id=${result.user.id})`);
+
+    return {
+      message: wantsOrg
+        ? 'Student registration successful. Join request sent — waiting for organization admin approval. Self-practice is available now.'
+        : 'Student registration successful. You can join a school later from Organization.',
+      access_token,
+      join_request: wantsOrg ? { pending: true } : null,
+      user: {
+        id: result.user.id,
+        name: result.user.name,
+        email_id: result.user.email_id,
+        contact_number: result.user.contact_number,
+      },
+      student: {
+        id: result.student.id,
+        student_id: result.student.student_id,
+        status: result.student.status,
+      },
+    };
+  }
+
+  private validateRegisterStudentInput(dto: RegisterStudentDto): boolean {
+    if (!this.isValidEmail(dto.email_id)) {
+      throw new BadRequestException('Invalid email format');
+    }
+    if (dto.institution_id && dto.org_code?.trim()) {
+      throw new BadRequestException('Provide either institution_id or org_code, not both');
+    }
+
+    const wantsOrg = !!(dto.institution_id || dto.org_code?.trim());
+    if (wantsOrg && !dto.school_standard_id) {
+      throw new BadRequestException(
+        'school_standard_id is required when joining an organization',
+      );
+    }
+    return wantsOrg;
+  }
+
+  private async resolveOrgRegistrationContext(dto: RegisterStudentDto): Promise<{
+    schoolStandardId: number;
+    institutionId: number;
+    requestMessage: string | null;
+  }> {
+    const institution = await this.findRegistrationInstitution(dto);
+    if (!institution?.is_active) {
+      throw new NotFoundException('Organization not found or is closed');
+    }
+    if (!institution.school_id) {
+      throw new BadRequestException('This organization has no linked school curriculum');
+    }
+    if (
+      institution.visibility === InstitutionVisibility.PRIVATE &&
+      !dto.org_code?.trim()
+    ) {
+      throw new BadRequestException(
+        'This organization is private. Join using the org code instead.',
+      );
+    }
+
+    const schoolStandardId = dto.school_standard_id;
+    if (schoolStandardId == null) {
+      throw new BadRequestException(
+        'school_standard_id is required when joining an organization',
+      );
+    }
+    const schoolStandard = await this.prisma.school_Standard.findFirst({
+      where: {
+        id: schoolStandardId,
+        school_id: institution.school_id,
+      },
+    });
+    if (!schoolStandard) {
+      throw new BadRequestException(
+        'Selected standard is not offered by this organization',
+      );
+    }
+
+    return {
+      schoolStandardId: schoolStandard.id,
+      institutionId: institution.id,
+      requestMessage: dto.request_message?.trim() || null,
+    };
+  }
+
+  private async findRegistrationInstitution(dto: RegisterStudentDto) {
+    if (dto.institution_id) {
+      return this.prisma.institution.findUnique({ where: { id: dto.institution_id } });
+    }
+    if (!dto.org_code?.trim()) {
+      return null;
+    }
+    return (
+      (await this.prisma.institution.findUnique({
+        where: { org_code: dto.org_code.trim().toUpperCase() },
+      })) ||
+      (await this.prisma.institution.findFirst({
+        where: { org_code: { equals: dto.org_code.trim(), mode: 'insensitive' } },
+      }))
+    );
+  }
+
+  private async resolveOpenLearningRegistrationContext(): Promise<{
+    schoolStandardId: number;
+    institutionId: null;
+    requestMessage: string | null;
+  }> {
+    const open = await this.prisma.$transaction(async (tx) =>
+      this.ensureOpenLearningInfra(tx),
+    );
+    return {
+      schoolStandardId: open.schoolStandard.id,
+      institutionId: null,
+      requestMessage: null,
+    };
+  }
+
+  private async createRegisteredStudentRecords(params: {
+    dto: RegisterStudentDto;
+    hashedPassword: string;
+    studentRoleId: number;
+    schoolStandardId: number;
+    wantsOrg: boolean;
+    institutionId: number | null;
+    requestMessage: string | null;
+  }) {
+    const {
+      dto,
+      hashedPassword,
+      studentRoleId,
+      schoolStandardId,
+      wantsOrg,
+      institutionId,
+      requestMessage,
+    } = params;
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email_id: dto.email_id.trim().toLowerCase(),
+          password: hashedPassword,
+          name: toTitleCase(dto.name),
+          contact_number: dto.contact_number,
+          status: true,
+        },
+      });
+
+      await tx.user_Role.create({
+        data: { user_id: user.id, role_id: studentRoleId },
+      });
+
+      const student = await tx.student.create({
+        data: {
+          user_id: user.id,
+          student_id: dto.student_id.trim(),
+          school_standard_id: schoolStandardId,
+          status: wantsOrg ? 'pending' : 'active',
+        },
+      });
+
+      let membership = null;
+      if (wantsOrg && institutionId) {
+        membership = await tx.learner_Institution_Membership.create({
+          data: {
+            user_id: user.id,
+            institution_id: institutionId,
+            student_id: student.id,
+            school_standard_id: schoolStandardId,
+            status: OrgMembershipStatus.pending,
+            request_message: requestMessage,
+          },
+        });
+      }
+
+      return { user, student, membership };
+    });
+  }
+
+  /** Idempotent Open Learning board/school/standard (shared with aspirants). */
+  private async ensureOpenLearningInfra(tx: any) {
+    let board = await tx.board.findUnique({ where: { abbreviation: OPEN_LEARNING.BOARD_ABBR } });
+    if (!board) {
+      let city = await tx.city.findFirst();
+      if (!city) {
+        const country = await tx.country.create({ data: { name: 'India' } });
+        const state = await tx.state.create({
+          data: { country_id: country.id, name: 'Maharashtra' },
+        });
+        city = await tx.city.create({ data: { state_id: state.id, name: 'Pune' } });
+      }
+      const address = await tx.address.create({
+        data: { city_id: city.id, postal_code: '000000', street: 'Virtual Campus' },
+      });
+      board = await tx.board.create({
+        data: {
+          name: OPEN_LEARNING.BOARD_NAME,
+          abbreviation: OPEN_LEARNING.BOARD_ABBR,
+          address_id: address.id,
+        },
+      });
+      await tx.instruction_Medium.upsert({
+        where: {
+          board_id_instruction_medium: { board_id: board.id, instruction_medium: 'English' },
+        },
+        update: {},
+        create: { board_id: board.id, instruction_medium: 'English' },
+      });
+    }
+
+    let standard = await tx.standard.findFirst({
+      where: { board_id: board.id, name: OPEN_LEARNING.STANDARD_NAME },
+    });
+    if (!standard) {
+      standard = await tx.standard.create({
+        data: {
+          board_id: board.id,
+          name: OPEN_LEARNING.STANDARD_NAME,
+          sequence_number: 1,
+        },
+      });
+    }
+
+    let school = await tx.school.findFirst({
+      where: { board_id: board.id, name: OPEN_LEARNING.SCHOOL_NAME },
+    });
+    if (!school) {
+      const city = await tx.city.findFirst();
+      const schoolAddress = await tx.address.create({
+        data: { city_id: city.id, postal_code: '000000', street: 'Virtual Campus' },
+      });
+      school = await tx.school.create({
+        data: {
+          board_id: board.id,
+          name: OPEN_LEARNING.SCHOOL_NAME,
+          address_id: schoolAddress.id,
+          principal_name: 'Test Vista',
+          email: 'open-learning@testvista.in',
+          contact_number: '0000000000',
+        },
+      });
+    }
+
+    const schoolStandard = await tx.school_Standard.upsert({
+      where: { school_id_standard_id: { school_id: school.id, standard_id: standard.id } },
+      update: {},
+      create: { school_id: school.id, standard_id: standard.id },
+    });
+
+    let institution = await tx.institution.findUnique({ where: { school_id: school.id } });
+    if (!institution) {
+      institution = await tx.institution.create({
+        data: {
+          institution_type: 'VIRTUAL',
+          name: OPEN_LEARNING.SCHOOL_NAME,
+          email: 'open-learning@testvista.in',
+          school_id: school.id,
+          org_code: generateOrgCode('TV-OL'),
+          visibility: InstitutionVisibility.PRIVATE,
+          is_active: true,
+        },
+      });
+    }
+
+    return { schoolStandard, institution };
+  }
 
   async create(createDto: CreateUserDto) {
     try {
@@ -98,10 +680,13 @@ export class UserService {
       // Build where clause
       let where: Prisma.UserWhereInput = {};
       
-      // Filter by school ID if provided
+      // Filter by school ID via institution memberships
       if (schoolId) {
-        where.user_schools = {
-          some: { school_id: schoolId }
+        where.institution_memberships = {
+          some: {
+            status: OrgMembershipStatus.active,
+            institution: { school_id: schoolId },
+          },
         };
       }
       
@@ -124,17 +709,20 @@ export class UserService {
         ];
       }
       
-      // Add search condition for school name
+      // Add search condition for school name via institution memberships
       if (schoolSearch) {
-        where.user_schools = {
+        where.institution_memberships = {
           some: {
-            school: {
-              name: {
-                contains: schoolSearch,
-                mode: 'insensitive'
-              }
-            }
-          }
+            status: OrgMembershipStatus.active,
+            institution: {
+              school: {
+                name: {
+                  contains: schoolSearch,
+                  mode: 'insensitive',
+                },
+              },
+            },
+          },
         };
       }
       
@@ -155,14 +743,17 @@ export class UserService {
           id: true,
           name: true,
           status: true,
-          user_schools: {
+          institution_memberships: {
+            where: { status: OrgMembershipStatus.active },
             select: {
-              school: {
+              institution: {
                 select: {
-                  name: true
-                }
-              }
-            }
+                  school: {
+                    select: { name: true },
+                  },
+                },
+              },
+            },
           },
           user_roles: {
             select: {
@@ -180,7 +771,9 @@ export class UserService {
       const formattedUsers = users.map(user => ({
         id: user.id,
         name: user.name,
-        schools: user.user_schools.map(us => us.school.name),
+        schools: user.institution_memberships
+          .map(m => m.institution?.school?.name)
+          .filter((name): name is string => name != null),
         roles: user.user_roles.map(ur => ur.role.role_name),
         status: user.status
       }));
@@ -228,15 +821,20 @@ export class UserService {
               }
             }
           },
-          user_schools: {
+          institution_memberships: {
+            where: { status: OrgMembershipStatus.active },
             select: {
-              school: {
+              institution: {
                 select: {
-                  id: true,
-                  name: true
-                }
-              }
-            }
+                  school: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
           },
           teacher_subjects: {
             select: {
@@ -297,10 +895,10 @@ export class UserService {
           id: ur.role.id,
           name: ur.role.role_name
         })),
-        schools: user.user_schools.map(us => ({
-          id: us.school.id,
-          name: us.school.name
-        })),
+        schools: user.institution_memberships
+          .map(m => m.institution?.school)
+          .filter((s): s is { id: number; name: string } => s != null)
+          .map(s => ({ id: s.id, name: s.name })),
         teaching_assignments: user.teacher_subjects.map(ts => ({
           id: ts.id,
           standard: {
@@ -386,10 +984,13 @@ export class UserService {
               role: true
             }
           },
-          user_schools: {
+          institution_memberships: {
+            where: { status: OrgMembershipStatus.active },
             include: {
-              school: true
-            }
+              institution: {
+                include: { school: true },
+              },
+            },
           },
           teacher_subjects: {
             include: {
@@ -409,10 +1010,18 @@ export class UserService {
         throw new NotFoundException(`User with ID ${id} not found`);
       }
 
+      const schoolNames = user.institution_memberships
+        .map(m => m.institution?.school?.name)
+        .filter((n): n is string => n != null);
+
       // Get counts of related entities for informative message
       const relatedCounts = {
         roles: user.user_roles.length,
-        schools: new Set(user.user_schools.map(us => us.school_id)).size,
+        schools: new Set(
+          user.institution_memberships
+            .map(m => schoolIdFromMembership(m))
+            .filter((id): id is number => id != null)
+        ).size,
         teachingAssignments: user.teacher_subjects.length,
         uniqueSubjects: new Set(user.teacher_subjects.map(ts => 
           ts.subject.name
@@ -427,7 +1036,7 @@ export class UserService {
         
         Details:
         - Roles: ${user.user_roles.map(ur => ur.role.role_name).join(', ')}
-        - Schools: ${user.user_schools.map(us => us.school.name).join(', ')}
+        - Schools: ${schoolNames.join(', ')}
         - Teaching: ${user.teacher_subjects.map(ts => 
           `${ts.subject.name} at ${ts.school_standard.school.name}`
         ).join(', ')}
@@ -448,9 +1057,272 @@ export class UserService {
     }
   }
 
+  /**
+   * Preconditions for self-serve account deletion (teacher org admin / last-teacher gates).
+   */
+  async getDeleteAccountStatus(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        user_roles: { include: { role: true } },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const roles = user.user_roles.map((ur) => ur.role.role_name);
+    if (roles.includes('ADMIN')) {
+      return {
+        allowed: false,
+        reason: 'Platform admin accounts cannot be self-deleted.',
+        roles,
+        org: null,
+      };
+    }
+
+    const isTeacher = roles.includes('TEACHER');
+    if (!isTeacher) {
+      return {
+        allowed: true,
+        roles,
+        org: null,
+        requires: { mode: 'simple' as const },
+      };
+    }
+
+    const membership = await this.prisma.institution_Membership.findFirst({
+      where: {
+        user_id: userId,
+        status: { in: [OrgMembershipStatus.pending, OrgMembershipStatus.active] },
+      },
+      include: {
+        institution: { select: { id: true, name: true, org_code: true, is_active: true } },
+      },
+    });
+
+    if (!membership || membership.status === OrgMembershipStatus.pending) {
+      return {
+        allowed: true,
+        roles,
+        org: membership
+          ? {
+              institution_id: membership.institution.id,
+              name: membership.institution.name,
+              membership_status: membership.status,
+              member_role: membership.member_role,
+              is_sole_admin: false,
+              is_last_teacher: false,
+              other_teachers: [],
+            }
+          : null,
+        requires: { mode: 'simple' as const },
+      };
+    }
+
+    const otherTeachers = await this.prisma.institution_Membership.findMany({
+      where: {
+        institution_id: membership.institution_id,
+        status: OrgMembershipStatus.active,
+        user_id: { not: userId },
+      },
+      include: {
+        user: { select: { id: true, name: true, email_id: true } },
+      },
+      orderBy: { created_at: 'asc' },
+    });
+
+    const adminCount = await this.prisma.institution_Membership.count({
+      where: {
+        institution_id: membership.institution_id,
+        member_role: OrgMemberRole.ADMIN,
+        status: OrgMembershipStatus.active,
+      },
+    });
+
+    const isAdmin = membership.member_role === OrgMemberRole.ADMIN;
+    const isSoleAdmin = isAdmin && adminCount <= 1;
+    const isLastTeacher = otherTeachers.length === 0;
+
+    let requires: { mode: 'simple' | 'transfer_admin' | 'delete_org'; modes?: string[] };
+    if (isSoleAdmin && isLastTeacher) {
+      requires = { mode: 'delete_org', modes: ['delete_org'] };
+    } else if (isSoleAdmin) {
+      requires = {
+        mode: 'transfer_admin',
+        modes: ['transfer_admin', 'delete_org'],
+      };
+    } else {
+      requires = { mode: 'simple' };
+    }
+
+    return {
+      allowed: true,
+      roles,
+      org: {
+        institution_id: membership.institution.id,
+        name: membership.institution.name,
+        membership_status: membership.status,
+        member_role: membership.member_role,
+        is_sole_admin: isSoleAdmin,
+        is_last_teacher: isLastTeacher,
+        other_teachers: otherTeachers.map((m) => ({
+          membership_id: m.id,
+          user_id: m.user.id,
+          name: m.user.name,
+          email_id: m.user.email_id,
+          member_role: m.member_role,
+        })),
+      },
+      requires,
+    };
+  }
+
+  /**
+   * Self-serve hard-delete account (teachers, students, aspirants). Platform ADMIN out of scope.
+   */
+  async deleteMyAccount(userId: number, dto: DeleteMyAccountDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        user_roles: { include: { role: true } },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const roles = new Set(user.user_roles.map((ur) => ur.role.role_name));
+    // Platform ADMIN out of scope (even if somehow combined with other roles)
+    if (roles.has('ADMIN')) {
+      throw new ForbiddenException('Platform admin accounts cannot be self-deleted');
+    }
+
+    const passwordOk = await compare(dto.password, user.password);
+    if (!passwordOk) {
+      throw new BadRequestException('Password is incorrect');
+    }
+
+    const isTeacher = roles.has('TEACHER');
+    if (isTeacher) {
+      await this.handleTeacherOrgBeforeAccountDelete(userId, dto);
+    }
+
+    await this.prisma.user.delete({ where: { id: userId } });
+    this.logger.log(`User ${userId} self-deleted their account`);
+    return { message: 'Your account has been permanently deleted.' };
+  }
+
+  private async handleTeacherOrgBeforeAccountDelete(userId: number, dto: DeleteMyAccountDto) {
+    const membership = await this.prisma.institution_Membership.findFirst({
+      where: {
+        user_id: userId,
+        status: { in: [OrgMembershipStatus.pending, OrgMembershipStatus.active] },
+      },
+      include: { institution: { select: { id: true, name: true } } },
+    });
+
+    if (!membership) {
+      return; // free teacher
+    }
+
+    if (membership.status === OrgMembershipStatus.pending) {
+      await this.institutionService.leaveMyMembership(userId);
+      return;
+    }
+
+    const otherTeachers = await this.prisma.institution_Membership.findMany({
+      where: {
+        institution_id: membership.institution_id,
+        status: OrgMembershipStatus.active,
+        user_id: { not: userId },
+      },
+      select: { id: true, user_id: true },
+    });
+
+    const adminCount = await this.prisma.institution_Membership.count({
+      where: {
+        institution_id: membership.institution_id,
+        member_role: OrgMemberRole.ADMIN,
+        status: OrgMembershipStatus.active,
+      },
+    });
+
+    const isSoleAdmin =
+      membership.member_role === OrgMemberRole.ADMIN && adminCount <= 1;
+    const isLastTeacher = otherTeachers.length === 0;
+
+    if (isSoleAdmin && isLastTeacher) {
+      await this.deleteOrgAsSoleAdminLastTeacher(userId, dto, membership.institution_id);
+      return;
+    }
+
+    if (isSoleAdmin) {
+      await this.handleSoleAdminTeacherAccountDelete(
+        userId,
+        dto,
+        membership.institution_id,
+        otherTeachers,
+      );
+      return;
+    }
+
+    await this.institutionService.leaveMyMembership(userId);
+  }
+
+  private async deleteOrgAsSoleAdminLastTeacher(
+    userId: number,
+    dto: DeleteMyAccountDto,
+    institutionId: number,
+  ) {
+    const mode = dto.mode || 'simple';
+    if (mode !== 'delete_org' || dto.confirm_delete_org !== true) {
+      throw new BadRequestException(
+        'You are the last teacher in this organization. Confirm organization deletion (mode=delete_org, confirm_delete_org=true) to delete your account.',
+      );
+    }
+    await this.institutionService.hardDeleteForOrgAdmin(userId, institutionId);
+  }
+
+  private async handleSoleAdminTeacherAccountDelete(
+    userId: number,
+    dto: DeleteMyAccountDto,
+    institutionId: number,
+    otherTeachers: { id: number; user_id: number }[],
+  ) {
+    const mode = dto.mode || 'simple';
+    if (mode === 'transfer_admin') {
+      await this.transferAdminBeforeTeacherAccountDelete(userId, dto, otherTeachers);
+      return;
+    }
+    if (mode === 'delete_org') {
+      if (dto.confirm_delete_org !== true) {
+        throw new BadRequestException('confirm_delete_org must be true to permanently delete the organization');
+      }
+      await this.institutionService.hardDeleteForOrgAdmin(userId, institutionId);
+      return;
+    }
+    throw new BadRequestException(
+      'You are the sole organization admin. Choose mode=transfer_admin (promote another teacher) or mode=delete_org.',
+    );
+  }
+
+  private async transferAdminBeforeTeacherAccountDelete(
+    userId: number,
+    dto: DeleteMyAccountDto,
+    otherTeachers: { id: number; user_id: number }[],
+  ) {
+    if (!dto.promote_membership_id) {
+      throw new BadRequestException('promote_membership_id is required to transfer admin');
+    }
+    const target = otherTeachers.find((t) => t.id === dto.promote_membership_id);
+    if (!target) {
+      throw new BadRequestException(
+        'Selected teacher is not an active member of your organization',
+      );
+    }
+    await this.institutionService.promoteMemberToAdmin(userId, dto.promote_membership_id);
+    await this.institutionService.leaveMyMembership(userId);
+  }
+
   private isValidEmail(email: string): boolean {
-    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-    return emailRegex.test(email) && email.length <= 254;
+    return isWellFormedEmail(email);
   }
 
   private async hashPassword(password: string): Promise<string> {
@@ -494,14 +1366,11 @@ export class UserService {
             role: true
           }
         },
-        user_schools: {
+        institution_memberships: {
+          where: { status: OrgMembershipStatus.active },
           include: {
-            school: {
-              include: {
-                board: true
-              }
-            }
-          }
+            ...activeTeacherMembershipInclude,
+          },
         },
         teacher_subjects: {
           include: {
@@ -552,10 +1421,13 @@ export class UserService {
       // Build where clause
       let where: Prisma.UserWhereInput = {};
       
-      // Filter by school ID if provided
+      // Filter by school ID via institution memberships
       if (schoolId) {
-        where.user_schools = {
-          some: { school_id: schoolId }
+        where.institution_memberships = {
+          some: {
+            status: OrgMembershipStatus.active,
+            institution: { school_id: schoolId },
+          },
         };
       }
       
@@ -578,17 +1450,20 @@ export class UserService {
         ];
       }
       
-      // Add search condition for school name
+      // Add search condition for school name via institution memberships
       if (schoolSearch) {
-        where.user_schools = {
+        where.institution_memberships = {
           some: {
-            school: {
-              name: {
-                contains: schoolSearch,
-                mode: 'insensitive'
-              }
-            }
-          }
+            status: OrgMembershipStatus.active,
+            institution: {
+              school: {
+                name: {
+                  contains: schoolSearch,
+                  mode: 'insensitive',
+                },
+              },
+            },
+          },
         };
       }
       
@@ -596,7 +1471,7 @@ export class UserService {
       const orderBy: Prisma.UserOrderByWithRelationInput = {};
       orderBy[sort_by] = sort_order;
       
-      // Get all users with sorting but without pagination - only select essential fields
+      // Get all users with sorting but without pagination
       const users = await this.prisma.user.findMany({
         where,
         orderBy,
@@ -604,14 +1479,17 @@ export class UserService {
           id: true,
           name: true,
           status: true,
-          user_schools: {
+          institution_memberships: {
+            where: { status: OrgMembershipStatus.active },
             select: {
-              school: {
+              institution: {
                 select: {
-                  name: true
-                }
-              }
-            }
+                  school: {
+                    select: { name: true },
+                  },
+                },
+              },
+            },
           },
           user_roles: {
             select: {
@@ -629,7 +1507,9 @@ export class UserService {
       const formattedUsers = users.map(user => ({
         id: user.id,
         name: user.name,
-        schools: user.user_schools.map(us => us.school.name),
+        schools: user.institution_memberships
+          .map(m => m.institution?.school?.name)
+          .filter((name): name is string => name != null),
         roles: user.user_roles.map(ur => ur.role.role_name),
         status: user.status
       }));
@@ -714,7 +1594,7 @@ export class UserService {
         // Create user and assign roles
         const user = await this.createTeacherUser(prisma, addTeacherDto);
         
-        // Assign teacher to school
+        // Assign teacher to school via institution membership
         await this.assignTeacherToSchool(prisma, user.id, addTeacherDto);
         
         // Process subject assignments
@@ -814,8 +1694,8 @@ export class UserService {
     });
 
     if (validSchoolStandards.length !== schoolStandardIds.length) {
-      const foundIds = validSchoolStandards.map(ss => ss.id);
-      const invalidIds = schoolStandardIds.filter(id => !foundIds.includes(id));
+      const foundIds = new Set(validSchoolStandards.map(ss => ss.id));
+      const invalidIds = schoolStandardIds.filter(id => !foundIds.has(id));
       throw new BadRequestException(`Invalid school-standard IDs for the specified school: ${invalidIds.join(', ')}`);
     }
 
@@ -850,16 +1730,52 @@ export class UserService {
   }
 
   /**
-   * Assigns teacher to a school
+   * Ensures an Institution record exists for the given school_id.
+   * Creates one (type SCHOOL, visibility PRIVATE) if missing.
+   */
+  private async ensureInstitutionForSchool(prisma, schoolId: number) {
+    let institution = await prisma.institution.findFirst({
+      where: { school_id: schoolId },
+    });
+
+    if (!institution) {
+      const school = await prisma.school.findUnique({ where: { id: schoolId } });
+      const randomSuffix = randomHexToken(6);
+      const orgCode = `TV-S${schoolId}-${randomSuffix}`;
+
+      institution = await prisma.institution.create({
+        data: {
+          institution_type: InstitutionType.SCHOOL,
+          name: school?.name ?? `School ${schoolId}`,
+          email: school?.email ?? null,
+          contact_number: school?.contact_number ?? null,
+          principal_name: school?.principal_name ?? null,
+          org_code: orgCode,
+          visibility: InstitutionVisibility.PRIVATE,
+          school_id: schoolId,
+        },
+      });
+    }
+
+    return institution;
+  }
+
+  /**
+   * Assigns teacher to a school via Institution_Membership
    */
   private async assignTeacherToSchool(prisma, userId: number, addTeacherDto: AddTeacherDto) {
-    return prisma.user_School.create({
+    const institution = await this.ensureInstitutionForSchool(prisma, addTeacherDto.school_id);
+    const now = new Date();
+
+    return prisma.institution_Membership.create({
       data: {
         user_id: userId,
-        school_id: addTeacherDto.school_id,
-        start_date: addTeacherDto.start_date,
-        end_date: addTeacherDto.end_date || null
-      }
+        institution_id: institution.id,
+        member_role: OrgMemberRole.ADMIN,
+        status: OrgMembershipStatus.active,
+        requested_at: now,
+        responded_at: now,
+      },
     });
   }
 
@@ -1026,15 +1942,16 @@ export class UserService {
             role: true
           }
         },
-        user_schools: {
-          orderBy: {
-            created_at: 'desc'
-          },
-          take: 1,
+        institution_memberships: {
+          where: { status: OrgMembershipStatus.active },
           include: {
-            school: true
-          }
-        }
+            institution: {
+              include: { school: true },
+            },
+          },
+          orderBy: { created_at: 'desc' as const },
+          take: 1,
+        },
       }
     });
 
@@ -1134,7 +2051,7 @@ export class UserService {
   }
 
   /**
-   * Gets school information from teacher data or existing user
+   * Gets school information from teacher data or existing user's active membership
    */
   private async getSchoolInfo(teacherData: any, existingUser: any) {
     if (teacherData.school_id) {
@@ -1159,18 +2076,20 @@ export class UserService {
       
       return school;
     } 
-    else if (existingUser.user_schools.length > 0) {
-      const existingSchool = existingUser.user_schools[0].school;
-      return await this.prisma.school.findUnique({
-        where: { id: existingSchool.id },
-        include: {
-          school_instruction_mediums: {
-            include: {
-              instruction_medium: true
+    else if (existingUser.institution_memberships?.length > 0) {
+      const existingSchoolId = schoolIdFromMembership(existingUser.institution_memberships[0]);
+      if (existingSchoolId) {
+        return await this.prisma.school.findUnique({
+          where: { id: existingSchoolId },
+          include: {
+            school_instruction_mediums: {
+              include: {
+                instruction_medium: true
+              }
             }
           }
-        }
-      });
+        });
+      }
     }
     
     return null;
@@ -1194,8 +2113,8 @@ export class UserService {
     });
 
     if (validSchoolStandards.length !== schoolStandardIds.length) {
-      const foundIds = validSchoolStandards.map(ss => ss.id);
-      const invalidIds = schoolStandardIds.filter(id => !foundIds.includes(id));
+      const foundIds = new Set(validSchoolStandards.map(ss => ss.id));
+      const invalidIds = schoolStandardIds.filter(id => !foundIds.has(id));
       throw new BadRequestException(`Invalid school-standard IDs for the specified school: ${invalidIds.join(', ')}`);
     }
     
@@ -1203,39 +2122,38 @@ export class UserService {
   }
 
   /**
-   * Updates or creates teacher school assignment
+   * Updates teacher school assignment: marks previous active memberships as 'left'
+   * and creates a new active membership for the new school's institution.
    */
   private async updateTeacherSchoolAssignment(prisma, userId: number, teacherData: any) {
-    // Check if there's already a school assignment
-    const existingSchoolAssignment = await prisma.user_School.findFirst({
+    const now = new Date();
+
+    // Mark all current active memberships for this user as 'left'
+    await prisma.institution_Membership.updateMany({
       where: {
         user_id: userId,
-        school_id: teacherData.school_id
-      }
+        status: OrgMembershipStatus.active,
+      },
+      data: {
+        status: OrgMembershipStatus.left,
+        responded_at: now,
+      },
     });
 
-    if (existingSchoolAssignment) {
-      // Update existing assignment
-      await prisma.user_School.update({
-        where: { id: existingSchoolAssignment.id },
-        data: {
-          start_date: teacherData.start_date || existingSchoolAssignment.start_date,
-          end_date: teacherData.end_date !== undefined 
-            ? teacherData.end_date 
-            : existingSchoolAssignment.end_date
-        }
-      });
-    } else {
-      // Create new assignment
-      await prisma.user_School.create({
-        data: {
-          user_id: userId,
-          school_id: teacherData.school_id,
-          start_date: teacherData.start_date || new Date(),
-          end_date: teacherData.end_date || null
-        }
-      });
-    }
+    // Ensure institution exists for the new school
+    const institution = await this.ensureInstitutionForSchool(prisma, teacherData.school_id);
+
+    // Create new active membership
+    await prisma.institution_Membership.create({
+      data: {
+        user_id: userId,
+        institution_id: institution.id,
+        member_role: OrgMemberRole.ADMIN,
+        status: OrgMembershipStatus.active,
+        requested_at: now,
+        responded_at: now,
+      },
+    });
   }
 
   /**
@@ -1317,13 +2235,18 @@ export class UserService {
    * Gets updated teacher details
    */
   private async getUpdatedTeacherDetails(prisma, userId: number) {
-    // Get the latest school assignment
-    const latestSchoolAssignment = await prisma.user_School.findFirst({
-      where: { user_id: userId },
+    // Get the latest active membership to resolve school
+    const latestMembership = await prisma.institution_Membership.findFirst({
+      where: {
+        user_id: userId,
+        status: OrgMembershipStatus.active,
+      },
       orderBy: { created_at: 'desc' },
       include: {
-        school: true
-      }
+        institution: {
+          include: { school: true },
+        },
+      },
     });
 
     // Get current standard assignments
@@ -1363,9 +2286,9 @@ export class UserService {
       highest_qualification: user.highest_qualification,
       status: user.status,
       role: 'TEACHER',
-      school: latestSchoolAssignment?.school.name || 'Not Assigned',
+      school: latestMembership?.institution?.school?.name || 'Not Assigned',
       assigned_standards: currentStandards.map(ts => ts.school_standard.standard.name),
       message: 'Teacher updated successfully'
     };
   }
-} 
+}

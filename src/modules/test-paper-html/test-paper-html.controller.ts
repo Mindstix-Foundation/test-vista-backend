@@ -39,8 +39,8 @@ export class TestPaperHtmlController {
   ) {
     try {
       // Parse userId and schoolId if provided
-      const userId = userIdString ? parseInt(userIdString, 10) : undefined;
-      const schoolId = schoolIdString ? parseInt(schoolIdString, 10) : undefined;
+      const userId = userIdString ? Number.parseInt(userIdString, 10) : undefined;
+      const schoolId = schoolIdString ? Number.parseInt(schoolIdString, 10) : undefined;
       
       return await this.testPaperHtmlService.getFilteredTestPapers(userId, schoolId);
     } catch (error) {
@@ -365,9 +365,9 @@ export class TestPaperHtmlController {
   private logFilesInfo(files: Array<Express.Multer.File>): void {
     this.logger.debug(`Received ${files ? files.length : 0} files`);
     if (files && files.length > 0) {
-      files.forEach((file, index) => {
+      for (const [index, file] of files.entries()) {
         this.logger.debug(`File ${index}: ${file.originalname}, ${file.mimetype}, ${file.size} bytes`);
-      });
+      }
     } else {
       this.logger.debug('No files provided');
     }

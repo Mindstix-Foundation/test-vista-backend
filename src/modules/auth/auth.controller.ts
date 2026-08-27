@@ -1,4 +1,4 @@
-import { Controller, Post, UseGuards, Request, Body, Get, HttpStatus, HttpCode, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, UseGuards, Request, Body, Get, HttpStatus, HttpCode } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -21,23 +21,19 @@ export class AuthController {
   @ApiResponse({ status: HttpStatus.OK, description: 'Login successful' })
   @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Invalid credentials' })
   async login(@Body() loginDto: LoginDto) {
-    try {
-      const result = await this.authService.login(loginDto);
-      return {
-        statusCode: HttpStatus.OK,
-        message: 'Login successful',
-        data: {
-          user: {
-            id: result.id,
-            email_id: result.email_id,
-            roles: result.roles
-          },
-          access_token: result.access_token
-        }
-      };
-    } catch (error) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    const result = await this.authService.login(loginDto);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: result.id,
+          email_id: result.email_id,
+          roles: result.roles
+        },
+        access_token: result.access_token
+      }
+    };
   }
 
   @Post('logout')

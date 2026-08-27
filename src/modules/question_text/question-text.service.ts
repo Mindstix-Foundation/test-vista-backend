@@ -10,7 +10,7 @@ import {
   CreateMatchPairDto
 } from './dto/question-text.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../prisma/client';
 import { AwsS3Service } from '../aws/aws-s3.service';
 
 interface QuestionTextFilters {
@@ -408,12 +408,12 @@ export class QuestionTextService {
     const topicConditions: Prisma.Question_TopicWhereInput = {};
     
     if (topicId) {
-      topicConditions.topic_id = parseInt(String(topicId), 10);
+      topicConditions.topic_id = Number.parseInt(String(topicId), 10);
     }
     
     if (chapterId) {
       topicConditions.topic = {
-        chapter_id: parseInt(String(chapterId), 10)
+        chapter_id: Number.parseInt(String(chapterId), 10)
       };
     }
     
@@ -431,7 +431,7 @@ export class QuestionTextService {
     
     // Ensure instruction_medium_id is a number
     const mediumId = typeof instructionMediumId === 'string' 
-      ? parseInt(instructionMediumId, 10) 
+      ? Number.parseInt(instructionMediumId, 10) 
       : instructionMediumId;
     
     this.logger.log(`Filtering question texts with instruction_medium_id: ${mediumId}`);
@@ -682,7 +682,7 @@ export class QuestionTextService {
       where: { id },
       data: {
         ...(questionText ? { question_text: questionText } : {}),
-        ...(imageId !== undefined ? { image_id: imageId } : {})
+        ...(imageId === undefined ? {} : { image_id: imageId })
       }
     });
   }
@@ -736,7 +736,7 @@ export class QuestionTextService {
         data: {
           option_text: option.option_text,
           is_correct: option.is_correct,
-          ...(option.image_id !== undefined ? { image_id: option.image_id } : {})
+          ...(option.image_id === undefined ? {} : { image_id: option.image_id })
         }
       });
       
@@ -834,8 +834,8 @@ export class QuestionTextService {
         data: {
           ...(pair.left_text ? { left_text: pair.left_text } : {}),
           ...(pair.right_text ? { right_text: pair.right_text } : {}),
-          ...(pair.left_image_id !== undefined ? { left_image_id: pair.left_image_id } : {}),
-          ...(pair.right_image_id !== undefined ? { right_image_id: pair.right_image_id } : {})
+          ...(pair.left_image_id === undefined ? {} : { left_image_id: pair.left_image_id }),
+          ...(pair.right_image_id === undefined ? {} : { right_image_id: pair.right_image_id })
         }
       });
       
@@ -992,9 +992,9 @@ export class QuestionTextService {
    * Validates sort field and returns a valid sort field
    */
   private validateSortField(sortBy: QuestionTextSortField): QuestionTextSortField {
-    const validSortFields = Object.values(QuestionTextSortField);
-    return validSortFields.includes(sortBy as any)
-      ? sortBy as QuestionTextSortField
+    const validSortFields = Object.values(QuestionTextSortField) as QuestionTextSortField[];
+    return validSortFields.includes(sortBy)
+      ? sortBy
       : QuestionTextSortField.CREATED_AT;
   }
 
@@ -1098,7 +1098,7 @@ export class QuestionTextService {
     
     // Ensure instruction_medium_id is a number
     const mediumId = typeof instructionMediumId === 'string'
-      ? parseInt(instructionMediumId, 10)
+      ? Number.parseInt(instructionMediumId, 10)
       : instructionMediumId;
       
     this.logger.log(`Finding untranslated texts for instruction_medium_id: ${mediumId}`);

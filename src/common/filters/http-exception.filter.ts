@@ -9,6 +9,14 @@ import {
 import { Request, Response } from 'express';
 
 
+/** Chrome DevTools / automation probes — not app traffic; don't spam ERROR logs. */
+const IGNORED_PROBE_PATHS = new Set([
+  '/json',
+  '/json/version',
+  '/json/list',
+  '/favicon.ico',
+]);
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -23,11 +31,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // Log the error
-    this.logger.error(
-      `Error processing ${request.method} ${request.url}`,
-      exception instanceof Error ? exception.stack : 'Unknown error',
-    );
+    const path = request.path || request.url?.split('?')[0] || '';
+    const isIgnoredProbe =
+      status === HttpStatus.NOT_FOUND && IGNORED_PROBE_PATHS.has(path);
+
+    if (!isIgnoredProbe) {
+      this.logger.error(
+        `Error processing ${request.method} ${request.url}`,
+        exception instanceof Error ? exception.stack : 'Unknown error',
+      );
+    }
 
     // Get the response body
     let responseBody: any;

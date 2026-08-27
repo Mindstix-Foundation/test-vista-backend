@@ -12,6 +12,12 @@ import {
   ChangeQuestionResponseDto
 } from './dto/chapter-marks-distribution.dto';
 import { AwsS3Service } from '../aws/aws-s3.service';
+import {
+  pickRandom,
+  randomChance,
+  shuffleInPlace,
+  shuffledCopy,
+} from '../../common/utils/secure-random.util';
 
 // Define type alias for the question origin
 type QuestionOrigin = 'board' | 'other' | 'both';
@@ -128,12 +134,19 @@ interface ProcessAllocationParams {
   usedQuestionIds: Set<number>;
 }
 
+interface SortedAllocationEntry {
+  key: string;
+  allocation: any;
+  chapterId: number;
+  questionTypeId: number;
+}
+
 @Injectable()
 export class ChapterMarksDistributionService {
   private readonly logger = new Logger(ChapterMarksDistributionService.name);
 
   constructor(
-    private prisma: PrismaService,
+    private readonly prisma: PrismaService,
     private readonly awsS3Service: AwsS3Service
   ) {}
 
@@ -166,12 +179,7 @@ export class ChapterMarksDistributionService {
   }
 
   private generateRandomSequence<T>(items: T[]): T[] {
-    const sequence = [...items];
-    for (let i = sequence.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [sequence[i], sequence[j]] = [sequence[j], sequence[i]];
-    }
-    return sequence;
+    return shuffledCopy(items);
   }
 
   private async getChapterQuestionTypeCounts(
@@ -214,11 +222,11 @@ export class ChapterMarksDistributionService {
     
     // Get all unique question types from the pattern
     const uniqueQuestionTypes = new Set<number>();
-    pattern.sections.forEach(section => {
-      section.subsection_question_types.forEach(sqt => {
+    for (const section of pattern.sections) {
+      for (const sqt of section.subsection_question_types) {
         uniqueQuestionTypes.add(sqt.question_type_id);
-      });
-    });
+      }
+    }
 
     // Get question counts for each chapter and question type
     for (const chapterId of chapterIds) {
@@ -272,9 +280,9 @@ export class ChapterMarksDistributionService {
 
   private getUniqueMarksPerQuestion(sections: any[]): number[] {
     const marksSet = new Set<number>();
-    sections.forEach(section => {
+    for (const section of sections) {
       marksSet.add(section.marks_per_question);
-    });
+    }
     const uniqueMarks = Array.from(marksSet).sort((a, b) => a - b);
     return uniqueMarks;
   }
@@ -299,7 +307,7 @@ export class ChapterMarksDistributionService {
       if (a.requestedMarks !== b.requestedMarks) {
         return b.requestedMarks - a.requestedMarks;
       }
-      return Math.random() - 0.5; // Random if both are same
+      return randomChance(0.5) ? -1 : 1;
     });
 
     const priorityList = chaptersWithInfo.map(chapter => chapter.chapterId);
@@ -317,13 +325,14 @@ export class ChapterMarksDistributionService {
         const chapterIndex = subsection.allocatedChapters.findIndex(
           chapter => chapter.chapterId === chapterId
         );
-        if (chapterIndex !== -1) {
-          if (sectionAlloc.absoluteMarks === currentMark) {
-            return {
-              sectionId: sectionAlloc.sectionId,
-              subsectionId: subsection.subsectionQuestionTypeId
-            };
-          }
+        if (chapterIndex === -1) {
+          continue;
+        }
+        if (sectionAlloc.absoluteMarks === currentMark) {
+          return {
+            sectionId: sectionAlloc.sectionId,
+            subsectionId: subsection.subsectionQuestionTypeId
+          };
         }
       }
     }
@@ -494,17 +503,25 @@ export class ChapterMarksDistributionService {
     sqt: any,
     chapterId: number
   ): Promise<void> {
-    const sectionAlloc = sectionAllocations.find(sa => sa.sectionId === sectionId)!;
+    const sectionAlloc = sectionAllocations.find(sa => sa.sectionId === sectionId);
+    if (!sectionAlloc) {
+      return;
+    }
     let subsectionAlloc = sectionAlloc.subsectionAllocations.find(
       sa => sa.subsectionQuestionTypeId === sqt.id
     );
     
-    const chapterName = (await this.prisma.chapter.findUnique({
+    const chapter = await this.prisma.chapter.findUnique({
       where: { id: chapterId }
-    }))!.name;
+    });
+    const chapterName = chapter?.name ?? `Chapter ${chapterId}`;
     
-    if (!subsectionAlloc) {
-      // Create new subsection allocation
+    if (subsectionAlloc) {
+      subsectionAlloc.allocatedChapters.push({
+        chapterId,
+        chapterName
+      });
+    } else {
       const newSubsection = this.ensureSubsectionProperties({
         subsectionQuestionTypeId: sqt.id,
         questionTypeName: sqt.question_type.type_name,
@@ -515,12 +532,6 @@ export class ChapterMarksDistributionService {
       });
       
       sectionAlloc.subsectionAllocations.push(newSubsection);
-    } else {
-      // Add to existing subsection
-      subsectionAlloc.allocatedChapters.push({
-        chapterId,
-        chapterName
-      });
     }
   }
   
@@ -532,7 +543,7 @@ export class ChapterMarksDistributionService {
     questionTypeId: number,
     currentCount: number
   ): void {
-    usedQuestionTypes.get(sectionId)!.add(questionTypeId);
+    usedQuestionTypes.get(sectionId)?.add(questionTypeId);
     chapterQuestionTypeUsage.set(questionTypeId, currentCount - 1);
     
     // Update the question count (1:1 ratio)
@@ -543,12 +554,12 @@ export class ChapterMarksDistributionService {
   private getQuestionTypeUsage(sectionAllocations: SectionAllocationDto[]): Map<number, number> {
     const usageMap = new Map<number, number>();
     
-    sectionAllocations.forEach(section => {
-      section.subsectionAllocations.forEach(subsection => {
+    for (const section of sectionAllocations) {
+      for (const subsection of section.subsectionAllocations) {
         const questionTypeId = subsection.subsectionQuestionTypeId;
         usageMap.set(questionTypeId, (usageMap.get(questionTypeId) || 0) + subsection.allocatedChapters.length);
-      });
-    });
+      }
+    }
     
     return usageMap;
   }
@@ -558,42 +569,58 @@ export class ChapterMarksDistributionService {
     chapterId: number,
     pattern: any
   ): Map<number, number> {
-    // Track usage by actual question_type_id, not just subsection ID
-    const usageMap = new Map<number, number>();
-    
-    // Initialize all question types from the pattern with 0 usage
-    pattern.sections.forEach(section => {
-      section.subsection_question_types.forEach(sqt => {
-        const typeId = sqt.question_type_id;
-        if (!usageMap.has(typeId)) {
-          usageMap.set(typeId, 0);
-        }
-      });
-    });
-    
-    // Count how many times each question type has been used for this chapter
-    sectionAllocations.forEach(section => {
-      section.subsectionAllocations.forEach(subsection => {
-        // Find the question_type_id for this subsection
-        const sectionObj = pattern.sections.find(s => s.id === section.sectionId);
-        if (!sectionObj) return;
-        
-        const sqt = sectionObj.subsection_question_types.find(
-          s => s.id === subsection.subsectionQuestionTypeId
-        );
-        if (!sqt) return;
-        
-        const questionTypeId = sqt.question_type_id;
-        
-        // Count allocations for this chapter for this question type
-        const allocatedToChapter = subsection.allocatedChapters.filter(c => c.chapterId === chapterId).length;
-        if (allocatedToChapter > 0) {
-          usageMap.set(questionTypeId, (usageMap.get(questionTypeId) || 0) + allocatedToChapter);
-        }
-      });
-    });
-    
+    const usageMap = this.initQuestionTypeUsageFromPattern(pattern);
+    this.addChapterQuestionTypeUsage(usageMap, sectionAllocations, chapterId, pattern);
     return usageMap;
+  }
+
+  private initQuestionTypeUsageFromPattern(pattern: any): Map<number, number> {
+    const usageMap = new Map<number, number>();
+    for (const section of pattern.sections) {
+      for (const sqt of section.subsection_question_types) {
+        if (!usageMap.has(sqt.question_type_id)) {
+          usageMap.set(sqt.question_type_id, 0);
+        }
+      }
+    }
+    return usageMap;
+  }
+
+  private addChapterQuestionTypeUsage(
+    usageMap: Map<number, number>,
+    sectionAllocations: SectionAllocationDto[],
+    chapterId: number,
+    pattern: any,
+  ): void {
+    for (const section of sectionAllocations) {
+      for (const subsection of section.subsectionAllocations) {
+        this.incrementChapterQuestionTypeUsage(usageMap, section, subsection, chapterId, pattern);
+      }
+    }
+  }
+
+  private incrementChapterQuestionTypeUsage(
+    usageMap: Map<number, number>,
+    section: SectionAllocationDto,
+    subsection: SectionAllocationDto['subsectionAllocations'][number],
+    chapterId: number,
+    pattern: any,
+  ): void {
+    const sectionObj = pattern.sections.find(s => s.id === section.sectionId);
+    if (!sectionObj) {
+      return;
+    }
+    const sqt = sectionObj.subsection_question_types.find(
+      s => s.id === subsection.subsectionQuestionTypeId
+    );
+    if (!sqt) {
+      return;
+    }
+    const allocatedToChapter = subsection.allocatedChapters.filter(c => c.chapterId === chapterId).length;
+    if (allocatedToChapter === 0) {
+      return;
+    }
+    usageMap.set(sqt.question_type_id, (usageMap.get(sqt.question_type_id) || 0) + allocatedToChapter);
   }
 
   private isSubsectionAllocated(
@@ -706,15 +733,13 @@ export class ChapterMarksDistributionService {
     // Prioritize unused types first
     if (availableTypes.unused.length > 0) {
       // Randomly select from unused types
-      const randomIndex = Math.floor(Math.random() * availableTypes.unused.length);
-      return availableTypes.unused[randomIndex];
+      return pickRandom(availableTypes.unused);
     }
     
     // If no unused types, use least used types
     if (availableTypes.leastUsed.length > 0) {
       // Randomly select from least used types
-      const randomIndex = Math.floor(Math.random() * availableTypes.leastUsed.length);
-      return availableTypes.leastUsed[randomIndex];
+      return pickRandom(availableTypes.leastUsed);
     }
     
     return null;
@@ -790,8 +815,7 @@ export class ChapterMarksDistributionService {
     
     if (unusedTypes.length > 0) {
       // Randomly select from unused types
-      const randomIndex = Math.floor(Math.random() * unusedTypes.length);
-      const selected = unusedTypes[randomIndex];
+      const selected = pickRandom(unusedTypes);
       return selected;
     }
     
@@ -800,8 +824,7 @@ export class ChapterMarksDistributionService {
     const leastUsedTypes = availableTypes.filter(type => type.usage === minUsage);
     
     // Randomly select from least used types
-    const randomIndex = Math.floor(Math.random() * leastUsedTypes.length);
-    const selected = leastUsedTypes[randomIndex];
+    const selected = pickRandom(leastUsedTypes);
     return selected;
   }
 
@@ -924,17 +947,23 @@ export class ChapterMarksDistributionService {
     const { section, selectedSqt, chapterId, sectionAllocations, usedQuestionTypes, 
             questionTypeUsage, chapterQuestionTypes, selectedTypeId } = params;
     
-    const chapterName = (await this.prisma.chapter.findUnique({
+    const chapter = await this.prisma.chapter.findUnique({
       where: { id: chapterId }
-    }))!.name;
+    });
+    const chapterName = chapter?.name ?? `Chapter ${chapterId}`;
     
     // Find or create subsection allocation
-    let subsectionAllocation = sectionAllocations
-      .find(sa => sa.sectionId === section.id)!
-      .subsectionAllocations
+    const sectionAllocation = sectionAllocations
+      .find(sa => sa.sectionId === section.id);
+    let subsectionAllocation = sectionAllocation?.subsectionAllocations
       .find(sa => sa.subsectionQuestionTypeId === selectedSqt.id);
     
-    if (!subsectionAllocation) {
+    if (subsectionAllocation) {
+      subsectionAllocation.allocatedChapters.push({
+        chapterId,
+        chapterName
+      });
+    } else if (sectionAllocation) {
       const newSubsection = this.ensureSubsectionProperties({
         subsectionQuestionTypeId: selectedSqt.id,
         questionTypeName: selectedSqt.question_type.type_name,
@@ -944,18 +973,11 @@ export class ChapterMarksDistributionService {
         }]
       });
       
-      sectionAllocations
-        .find(sa => sa.sectionId === section.id)!
-        .subsectionAllocations.push(newSubsection);
-    } else {
-      subsectionAllocation.allocatedChapters.push({
-        chapterId,
-        chapterName
-      });
+      sectionAllocation.subsectionAllocations.push(newSubsection);
     }
 
     // Update tracking
-    usedQuestionTypes.get(section.id)!.add(selectedTypeId);
+    usedQuestionTypes.get(section.id)?.add(selectedTypeId);
     const currentCount = chapterQuestionTypes.get(selectedTypeId) || 0;
     questionTypeUsage.set(selectedTypeId, currentCount - 1);
     chapterQuestionTypes.set(selectedTypeId, Math.max(0, currentCount - 1));
@@ -968,8 +990,8 @@ export class ChapterMarksDistributionService {
     subsectionId: number
   ): any {
     return sectionAllocations
-      .find(sa => sa.sectionId === sectionId)!
-      .subsectionAllocations
+      .find(sa => sa.sectionId === sectionId)
+      ?.subsectionAllocations
       .find(sa => sa.subsectionQuestionTypeId === subsectionId);
   }
   
@@ -1089,13 +1111,13 @@ export class ChapterMarksDistributionService {
     const usedQuestionTypes = new Map<number, Set<number>>();
     const questionTypeUsage = new Map<number, number>();
     
-    pattern.sections.forEach(section => {
+    for (const section of pattern.sections) {
       usedQuestionTypes.set(section.id, new Set<number>());
-    });
+    }
     
-    chapterIds.forEach(chapterId => {
+    for (const chapterId of chapterIds) {
       questionTypeUsage.set(chapterId, 0);
-    });
+    }
 
     return { usedQuestionTypes, questionTypeUsage };
   }
@@ -1149,9 +1171,10 @@ export class ChapterMarksDistributionService {
     const { section, selectedSqt, chapterId, sectionAllocations, usedQuestionTypes, 
             questionTypeUsage, chapterQuestionTypes, selectedTypeId } = params;
     
-    const chapterName = (await this.prisma.chapter.findUnique({
+    const chapter = await this.prisma.chapter.findUnique({
       where: { id: chapterId }
-    }))!.name;
+    });
+    const chapterName = chapter?.name ?? `Chapter ${chapterId}`;
 
     // Use the existing helper methods for better maintainability
     // Find subsection allocation using the helper method
@@ -1161,8 +1184,9 @@ export class ChapterMarksDistributionService {
       selectedSqt.id
     );
 
-    if (!subsectionAllocation) {
-      // Create a new subsection using the helper method
+    if (subsectionAllocation) {
+      this.addChapterToSubsection(subsectionAllocation, chapterId, chapterName);
+    } else {
       const newSubsection = this.createNewSubsection(
         selectedSqt,
         section.id,
@@ -1170,17 +1194,14 @@ export class ChapterMarksDistributionService {
         chapterName
       );
       
-      sectionAllocations
-        .find(sa => sa.sectionId === section.id)!
-        .subsectionAllocations.push(newSubsection);
-    } else {
-      // Add chapter to existing subsection using the helper method
-      this.addChapterToSubsection(subsectionAllocation, chapterId, chapterName);
+      const sectionAllocation = sectionAllocations
+        .find(sa => sa.sectionId === section.id);
+      sectionAllocation?.subsectionAllocations.push(newSubsection);
     }
 
     // Use the updateAllocationTracking helper method for tracking updates
     // It decrements by 1 now (1:1 ratio), so override that behavior by updating directly
-    usedQuestionTypes.get(section.id)!.add(selectedTypeId);
+    usedQuestionTypes.get(section.id)?.add(selectedTypeId);
     
     // Adjust the count differently than the original method
     const currentCount = chapterQuestionTypes.get(selectedTypeId) || 0;
@@ -1283,7 +1304,7 @@ export class ChapterMarksDistributionService {
     let localUnallocatedMarks = 0;
     
     // Randomly decide if we'll fill in ascending or descending order
-    const isAscendingMarkOrder = Math.random() < 0.5;
+    const isAscendingMarkOrder = randomChance(0.5);
     
     // Try to allocate marks until none are left or allocation fails
     const result = await this.allocateMarksInSequence({
@@ -1341,7 +1362,7 @@ export class ChapterMarksDistributionService {
     
     while (remainingMarks > 0) {
       // Get mark sequence to try
-      const randomizeCompletely = Math.random() < 0.2;
+      const randomizeCompletely = randomChance(0.2);
       const marksToTry = this.prepareMarksSequence(uniqueMarks, randomizeCompletely ? true : isAscendingMarkOrder, randomizeCompletely);
       
       // Try to allocate marks with regular allocation
@@ -1759,15 +1780,15 @@ export class ChapterMarksDistributionService {
   ): Promise<ChapterMarksDto[]> {
     // Calculate the map of allocated marks
     const finalChapterMarksMap = new Map<number, number>();
-    sectionAllocations.forEach(section => {
-      section.subsectionAllocations.forEach(subsection => {
-        subsection.allocatedChapters.forEach(allocatedChapter => {
+    for (const section of sectionAllocations) {
+      for (const subsection of section.subsectionAllocations) {
+        for (const allocatedChapter of subsection.allocatedChapters) {
           const chapterId = allocatedChapter.chapterId;
           const marksPerQuestion = section.marks_per_question;
           finalChapterMarksMap.set(chapterId, (finalChapterMarksMap.get(chapterId) || 0) + marksPerQuestion);
-        });
-      });
-    });
+        }
+      }
+    }
 
     // Convert to ChapterMarksDto array
     return Promise.all(
@@ -1781,7 +1802,7 @@ export class ChapterMarksDistributionService {
         }
         
         const chapterIndex = chapterIds.indexOf(chapterId);
-        const requestedMark = chapterIndex !== -1 ? requestedMarks[chapterIndex] : 0;
+        const requestedMark = chapterIndex === -1 ? 0 : requestedMarks[chapterIndex];
         
         return {
         chapterId,
@@ -1854,13 +1875,13 @@ export class ChapterMarksDistributionService {
 
       // 6. Get unique marks per question
       const uniqueMarks = [...new Set(pattern.sections.map(s => s.marks_per_question))].sort((a: number, b: number) => a - b);
-      const highestMark = uniqueMarks.length > 0 ? uniqueMarks[uniqueMarks.length - 1] as number : 0;
+      const highestMark = uniqueMarks.length > 0 ? Number(uniqueMarks.at(-1)) : 0;
 
       // 7. Process each chapter
       let unallocatedMarks = 0;
       for (const chapterId of chapterPriorityList) {
         const chapterIndex = filter.chapterIds.indexOf(chapterId);
-        const requestedMarks = chapterIndex !== -1 ? filter.requestedMarks[chapterIndex] : 0;
+        const requestedMarks = chapterIndex === -1 ? 0 : filter.requestedMarks[chapterIndex];
         const chapterQuestionTypes = chapterQuestionTypeMap.get(chapterId) || new Map();
         
         // Process this chapter's allocation
@@ -2293,9 +2314,9 @@ export class ChapterMarksDistributionService {
     
     // Build allocation needs map - how many questions we need for each combination
     const allocationNeeds = new Map<string, number>();
-    allocationMap.forEach((allocations, key) => {
+    for (const [key, allocations] of allocationMap.entries()) {
       allocationNeeds.set(key, allocations.length);
-    });
+    }
     
     // Validate each chapter-questionType pair has enough questions in each medium
     for (const { chapterId, questionTypeId } of chapterQuestionTypePairs) {
@@ -2623,6 +2644,149 @@ export class ChapterMarksDistributionService {
     };
   }
   
+  private collectSortedAllocations(
+    allocationMap: Map<string, any[]>,
+  ): SortedAllocationEntry[] {
+    const allAllocations: SortedAllocationEntry[] = [];
+
+    for (const [key, allocations] of allocationMap.entries()) {
+      const [chapterId, questionTypeId] = key.split('-').map(Number);
+
+      for (const allocation of allocations) {
+        allAllocations.push({
+          key,
+          allocation,
+          chapterId,
+          questionTypeId,
+        });
+      }
+    }
+
+    allAllocations.sort((a, b) => {
+      if (a.allocation.sectionIndex !== b.allocation.sectionIndex) {
+        return a.allocation.sectionIndex - b.allocation.sectionIndex;
+      }
+      if (a.allocation.subsectionId !== b.allocation.subsectionId) {
+        return a.allocation.subsectionId - b.allocation.subsectionId;
+      }
+      return (a.allocation.originalSequenceIndex || 0) -
+        (b.allocation.originalSequenceIndex || 0);
+    });
+
+    return allAllocations;
+  }
+
+  private calculateConsecutiveCapacity(
+    allAllocations: SortedAllocationEntry[],
+    allocationIndex: number,
+    current: SortedAllocationEntry,
+  ): number {
+    let consecutiveCapacity = 1;
+    while (allocationIndex + consecutiveCapacity < allAllocations.length) {
+      const previous = allAllocations[allocationIndex + consecutiveCapacity - 1];
+      const next = allAllocations[allocationIndex + consecutiveCapacity];
+      const previousSequence = previous.allocation.originalSequenceIndex || 0;
+      const nextSequence = next.allocation.originalSequenceIndex || 0;
+      if (
+        next.key !== current.key ||
+        next.allocation.sectionIndex !== current.allocation.sectionIndex ||
+        next.allocation.subsectionId !== current.allocation.subsectionId ||
+        nextSequence !== previousSequence + 1
+      ) {
+        break;
+      }
+      consecutiveCapacity++;
+    }
+    return consecutiveCapacity;
+  }
+
+  private filterEligibleQuestionCandidates(
+    questions: any[],
+    consecutiveCapacity: number,
+    selectedQuestionIds: Set<number>,
+    usedQuestionIds: Set<number>,
+  ): any[] {
+    return questions.filter((question) => {
+      const members = question.group_questions?.length
+        ? question.group_questions
+        : [question];
+      return (
+        members.length <= consecutiveCapacity &&
+        members.every(
+          (member) =>
+            !selectedQuestionIds.has(member.id) &&
+            !usedQuestionIds.has(member.id),
+        )
+      );
+    });
+  }
+
+  private buildInsufficientQuestionsAllocationError(
+    current: SortedAllocationEntry,
+    consecutiveCapacity: number,
+  ): {
+    hasError: boolean;
+    errorResponse: ChapterMarksDistributionResponseDto;
+  } {
+    this.logger.error(
+      `No complete question unit fits ${current.key} with ${consecutiveCapacity} consecutive slot(s).`,
+    );
+    return {
+      hasError: true,
+      errorResponse: {
+        insufficientQuestions: true,
+        allocationMessage:
+          `Insufficient unique standalone questions or complete passage groups ` +
+          `for chapter ${current.chapterId}, type ${current.questionTypeId}.`,
+      } as ChapterMarksDistributionResponseDto,
+    };
+  }
+
+  private getQuestionUnitMembers(selectedUnit: any): any[] {
+    return selectedUnit.group_questions?.length
+      ? [...selectedUnit.group_questions].sort(
+          (a, b) => (a.group_order || 0) - (b.group_order || 0),
+        )
+      : [selectedUnit];
+  }
+
+  private assignQuestionMembersToAllocations(
+    allAllocations: SortedAllocationEntry[],
+    allocationIndex: number,
+    members: any[],
+    requestBody: FinalQuestionsDistributionBodyDto,
+    responseDto: ChapterMarksDistributionResponseDto,
+    selectedQuestionIds: Set<number>,
+    usedQuestionIds: Set<number>,
+  ): void {
+    for (let memberIndex = 0; memberIndex < members.length; memberIndex++) {
+      const target = allAllocations[allocationIndex + memberIndex];
+      const member = members[memberIndex];
+      const { sectionIndex, subsectionId, originalSequenceIndex } = target.allocation;
+      const section = responseDto.sectionAllocations[sectionIndex];
+      const subsection = section?.subsectionAllocations.find(
+        (sub) => sub.subsectionQuestionTypeId === subsectionId,
+      );
+      if (!subsection) continue;
+      if (!subsection.allocatedChapters) subsection.allocatedChapters = [];
+
+      const chapterAllocation = this.createChapterAllocation(
+        target.chapterId,
+        member,
+        requestBody,
+        sectionIndex,
+        subsectionId,
+      );
+      while (subsection.allocatedChapters.length <= originalSequenceIndex) {
+        subsection.allocatedChapters.push(null);
+      }
+      subsection.allocatedChapters[originalSequenceIndex] = chapterAllocation;
+
+      selectedQuestionIds.add(member.id);
+      usedQuestionIds.add(member.id);
+    }
+  }
+
   // Helper to assign questions to allocations
   private assignQuestionsToAllocations(
     allocationMap: Map<string, any[]>,
@@ -2635,65 +2799,52 @@ export class ChapterMarksDistributionService {
     hasError: boolean;
     errorResponse?: ChapterMarksDistributionResponseDto;
   } {
-    // Track used question IDs per chapter-questionType combination
-    const usedIdsMap = new Map<string, Set<number>>();
-    
-    // Collect all allocations with their original sequence and sort by sequence
-    const allAllocations: Array<{
-      key: string;
-      allocation: any;
-      chapterId: number;
-      questionTypeId: number;
-    }> = [];
-    
-    for (const [key, allocations] of allocationMap.entries()) {
-      const [chapterId, questionTypeId] = key.split('-').map(Number);
-      
-      for (const allocation of allocations) {
-        allAllocations.push({
-          key,
-          allocation,
-          chapterId,
-          questionTypeId
-        });
-      }
-    }
-    
-    // Sort by original sequence index to maintain the order from payload
-    allAllocations.sort((a, b) => 
-      (a.allocation.originalSequenceIndex || 0) - (b.allocation.originalSequenceIndex || 0)
-    );
-    
-    // Process allocations in original sequence order
-    for (const { key, allocation, chapterId, questionTypeId } of allAllocations) {
-      const questions = questionsMap.get(key) || [];
-      
-      // Initialize set for tracking used questions for this key
-      if (!usedIdsMap.has(key)) {
-        usedIdsMap.set(key, new Set<number>());
-      }
-      const usedIds = usedIdsMap.get(key);
-      
-      const result = this.processAllocation({
-        allocation,
+    const allAllocations = this.collectSortedAllocations(allocationMap);
+
+    // A selection unit is either one standalone question or every child of a
+    // passage group. A grouped unit is only eligible when enough consecutive
+    // slots exist in the same chapter/type/subsection.
+    let allocationIndex = 0;
+    while (allocationIndex < allAllocations.length) {
+      const current = allAllocations[allocationIndex];
+      const questions = questionsMap.get(current.key) || [];
+
+      const consecutiveCapacity = this.calculateConsecutiveCapacity(
+        allAllocations,
+        allocationIndex,
+        current,
+      );
+
+      const candidates = this.filterEligibleQuestionCandidates(
         questions,
-        usedIds,
-        chapterId,
-        questionTypeId,
+        consecutiveCapacity,
+        selectedQuestionIds,
+        usedQuestionIds,
+      );
+
+      if (!candidates.length) {
+        return this.buildInsufficientQuestionsAllocationError(
+          current,
+          consecutiveCapacity,
+        );
+      }
+
+      const selectedUnit = pickRandom(candidates);
+      const members = this.getQuestionUnitMembers(selectedUnit);
+
+      this.assignQuestionMembersToAllocations(
+        allAllocations,
+        allocationIndex,
+        members,
         requestBody,
         responseDto,
         selectedQuestionIds,
-        usedQuestionIds
-      });
-      
-      if (result.hasError) {
-        return {
-          hasError: true,
-          errorResponse: result.errorResponse
-        };
-      }
+        usedQuestionIds,
+      );
+
+      allocationIndex += members.length;
     }
-    
+
     return { hasError: false };
   }
   
@@ -2749,8 +2900,7 @@ export class ChapterMarksDistributionService {
     }
     
     // Get a random question
-    const randomIndex = Math.floor(Math.random() * availableQuestions.length);
-    const questionMin = availableQuestions[randomIndex];
+    const questionMin = pickRandom(availableQuestions);
     
     // Create allocation
     const chapterAllocation = this.createChapterAllocation(
@@ -2845,6 +2995,21 @@ export class ChapterMarksDistributionService {
         select: {
           id: true,
           question_type_id: true,
+          question_group_id: true,
+          group_order: true,
+          question_group: {
+            select: {
+              id: true,
+              group_kind: true,
+              passage_text: true,
+              passage_image: {
+                select: {
+                  id: true,
+                  image_url: true,
+                },
+              },
+            },
+          },
           question_type: {
             select: {
               id: true,
@@ -3243,6 +3408,7 @@ export class ChapterMarksDistributionService {
     const whereClause: any = {
       id: { notIn: questionIdsToExclude }, // Exclude questions associated with the provided question text IDs
       question_type_id: questionTypeId, // Ensure the question has the same type as the original
+      question_group_id: null, // Do not replace a slot with part of a passage group
       question_topics: {
         some: {
           topic: {
@@ -3332,8 +3498,7 @@ export class ChapterMarksDistributionService {
     this.logger.log(`Found ${replacementQuestions.length} potential replacement questions with the same question type`);
 
     // Select a random question from the available pool
-    const randomIndex = Math.floor(Math.random() * replacementQuestions.length);
-    const selectedQuestion = replacementQuestions[randomIndex];
+    const selectedQuestion = pickRandom(replacementQuestions);
     
     // Verify the selected question has the same question type as the original
     if (selectedQuestion.question_type_id !== questionTypeId) {
@@ -3377,13 +3542,7 @@ export class ChapterMarksDistributionService {
           continue;
         }
         
-        // Shuffle the allocated chapters using Fisher-Yates algorithm
-        for (let i = subsection.allocatedChapters.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          // Swap elements
-          [subsection.allocatedChapters[i], subsection.allocatedChapters[j]] = 
-          [subsection.allocatedChapters[j], subsection.allocatedChapters[i]];
-        }
+        shuffleInPlace(subsection.allocatedChapters);
       }
     }
   }
@@ -3468,7 +3627,8 @@ export class ChapterMarksDistributionService {
     usedQuestionIds: Set<number> = new Set(),
     questionOrigin?: QuestionOrigin
   ): any {
-    // Base where clause
+    // Passage-linked MCQs share the normal MCQ question type. Atomic handling
+    // happens when candidates are organized and assigned to consecutive slots.
     const whereClause: any = {
       question_type_id: questionTypeId,
       question_topics: {
@@ -3525,6 +3685,27 @@ export class ChapterMarksDistributionService {
       select: {
         id: true,
         question_type_id: true,
+        question_group_id: true,
+        group_order: true,
+        question_group: {
+          select: {
+            questions: {
+              orderBy: { group_order: 'asc' },
+              select: {
+                id: true,
+                question_type_id: true,
+                question_group_id: true,
+                group_order: true,
+                question_topics: {
+                  select: {
+                    topic_id: true,
+                    topic: { select: { chapter_id: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
         question_topics: {
           select: {
             topic_id: true,
@@ -3564,14 +3745,40 @@ export class ChapterMarksDistributionService {
   ): void {
     // Filter out questions already used
     const availableQuestions = minimumQuestions.filter(q => !usedQuestionIds.has(q.id));
+    const availableById = new Map(availableQuestions.map((q) => [q.id, q]));
+    const emittedGroups = new Set<number>();
     
     for (const question of availableQuestions) {
+      let candidate = question;
+      if (question.question_group_id) {
+        if (emittedGroups.has(question.question_group_id)) continue;
+        emittedGroups.add(question.question_group_id);
+
+        const expectedMembers = question.question_group?.questions || [];
+        const members = expectedMembers
+          .map((member) => availableById.get(member.id))
+          .filter(Boolean)
+          .sort((a, b) => (a.group_order || 0) - (b.group_order || 0));
+        // Never expose a partial passage group as a selectable candidate.
+        if (members.length < 2 || members.length !== expectedMembers.length) continue;
+        candidate = {
+          ...members[0],
+          group_questions: members,
+        };
+      }
+
       // Find which chapter(s) this question belongs to
-      const questionChapterIds = this.extractChapterIds(question, chapterIds);
+      const questionChapterIds = this.extractChapterIds(candidate, chapterIds);
       
       // Add question to each relevant chapter-questionType pair
       for (const chapterId of questionChapterIds) {
-        this.addQuestionToMap(question, chapterId, questionTypeId, questionsMap);
+        const members = candidate.group_questions || [candidate];
+        const allMembersBelongToChapter = members.every((member) =>
+          this.extractChapterIds(member, chapterIds).includes(chapterId),
+        );
+        if (allMembersBelongToChapter) {
+          this.addQuestionToMap(candidate, chapterId, questionTypeId, questionsMap);
+        }
       }
     }
   }
@@ -3596,10 +3803,7 @@ export class ChapterMarksDistributionService {
       questionsMap.set(key, []);
     }
     
-    questionsMap.get(key).push({
-      id: question.id,
-      question_type_id: question.question_type_id
-    });
+    questionsMap.get(key).push(question);
   }
   
   // Helper to apply fallback strategies for empty pairs
@@ -3690,10 +3894,10 @@ export class ChapterMarksDistributionService {
       if (!targetMap.has(key) || targetMap.get(key).length === 0) {
         targetMap.set(key, questions);
         
-        if (mediumId !== undefined) {
-          this.logger.debug(`Using questions with medium ${mediumId} only for ${key}`);
-        } else {
+        if (mediumId === undefined) {
           this.logger.debug(`Using questions with no medium constraint for ${key}`);
+        } else {
+          this.logger.debug(`Using questions with medium ${mediumId} only for ${key}`);
         }
       }
     }

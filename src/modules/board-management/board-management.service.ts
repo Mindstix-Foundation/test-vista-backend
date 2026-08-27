@@ -252,7 +252,18 @@ export class BoardManagementService {
   }
 
   async update(id: number, updateDto: UpdateBoardManagementDto): Promise<BoardManagementData> {
-    // Log the incoming update data for debugging
+    this.logBoardUpdatePayload(id, updateDto);
+    const standardsToReorder = await this.collectStandardsToReorder(id, updateDto);
+    const result = await this.prisma.$transaction((prisma) =>
+      this.applyBoardManagementUpdate(id, updateDto, prisma),
+    );
+    if (standardsToReorder.length === 0) {
+      return result;
+    }
+    return this.reorderStandardsAfterUpdate(id, standardsToReorder);
+  }
+
+  private logBoardUpdatePayload(id: number, updateDto: UpdateBoardManagementDto): void {
     this.logger.log(`🔍 Updating board ${id} with data:`, {
       hasBoard: !!updateDto.board,
       hasAddress: !!updateDto.address,
@@ -263,101 +274,97 @@ export class BoardManagementService {
       deleteStandardIds: updateDto.deleteStandardIds || [],
       deleteSubjectIds: updateDto.deleteSubjectIds || []
     });
+  }
 
-    // First, collect standards that need reordering (before the transaction)
+  private async collectStandardsToReorder(
+    boardId: number,
+    updateDto: UpdateBoardManagementDto,
+  ): Promise<Array<{ id: number; newSequence: number }>> {
     const standardsToReorder: Array<{ id: number; newSequence: number }> = [];
-    
-    if (updateDto.standards && updateDto.standards.length > 0) {
-      // Get current standards to determine which ones need reordering
-      const currentStandards = await this.prisma.standard.findMany({
-        where: { board_id: id },
-        select: { id: true, sequence_number: true, name: true },
-        orderBy: { sequence_number: 'asc' }
-      });
-
-      const currentSequenceMap = new Map(
-        currentStandards.map(s => [s.id, s.sequence_number])
-      );
-
-      // Process only existing standards that need reordering
-      updateDto.standards.forEach((standard, index) => {
-        if (standard.id && standard.sequence_number !== undefined) {
-          // Only handle existing standards with explicit sequence numbers
-          const currentSequence = currentSequenceMap.get(standard.id);
-          if (currentSequence !== undefined && currentSequence !== standard.sequence_number) {
-            standardsToReorder.push({
-              id: standard.id,
-              newSequence: standard.sequence_number
-            });
-          }
-        }
-      });
+    if (!updateDto.standards || updateDto.standards.length === 0) {
+      return standardsToReorder;
     }
 
-    // Execute the main transaction (without sequence number updates)
-    const result = await this.prisma.$transaction(async (prisma) => {
-      try {
-        // Check if board exists
-        const existingBoard = await prisma.board.findUnique({
-          where: { id },
-          select: { id: true, address_id: true }
-        });
-
-        if (!existingBoard) {
-          throw new NotFoundException(`Board with ID ${id} not found`);
-        }
-
-        // Update board if provided
-        if (updateDto.board) {
-          await prisma.board.update({
-            where: { id },
-            data: {
-              name: updateDto.board.name,
-              abbreviation: updateDto.board.abbreviation,
-            }
-          });
-        }
-
-        // Update address if provided
-        if (updateDto.address) {
-          await prisma.address.update({
-            where: { id: existingBoard.address_id },
-            data: {
-              street: updateDto.address.street,
-              postal_code: updateDto.address.postal_code,
-              city_id: updateDto.address.city_id,
-            }
-          });
-        }
-
-        // Handle deletions first
-        await this.handleDeletions(id, updateDto, prisma);
-
-        // Update child entities (without sequence number updates for standards)
-        await this.updateChildEntities(id, updateDto, prisma);
-
-        // Return updated data using findOne
-        return await this.findOne(id);
-      } catch (error) {
-        this.logger.error(`Failed to update board management with ID ${id}:`, error);
-        throw error;
-      }
+    const currentStandards = await this.prisma.standard.findMany({
+      where: { board_id: boardId },
+      select: { id: true, sequence_number: true, name: true },
+      orderBy: { sequence_number: 'asc' }
     });
+    const currentSequenceMap = new Map(
+      currentStandards.map(s => [s.id, s.sequence_number])
+    );
 
-    // Handle standards reordering outside the transaction using StandardService
-    if (standardsToReorder.length > 0) {
-      this.logger.log(`Reordering ${standardsToReorder.length} existing standards for board ${id}`);
-      
-      for (const reorderOp of standardsToReorder) {
-        this.logger.log(`Reordering standard ${reorderOp.id} to position ${reorderOp.newSequence}`);
-        await this.standardService.reorderStandard(reorderOp.id, reorderOp.newSequence, id);
+    for (const standard of updateDto.standards) {
+      if (!standard.id || standard.sequence_number === undefined) {
+        continue;
       }
-      
-      // Fetch the final result after reordering
-      return await this.findOne(id);
+      const currentSequence = currentSequenceMap.get(standard.id);
+      if (currentSequence === undefined || currentSequence === standard.sequence_number) {
+        continue;
+      }
+      standardsToReorder.push({
+        id: standard.id,
+        newSequence: standard.sequence_number
+      });
     }
+    return standardsToReorder;
+  }
 
-    return result;
+  private async applyBoardManagementUpdate(
+    id: number,
+    updateDto: UpdateBoardManagementDto,
+    prisma: any,
+  ): Promise<BoardManagementData> {
+    try {
+      const existingBoard = await prisma.board.findUnique({
+        where: { id },
+        select: { id: true, address_id: true }
+      });
+
+      if (!existingBoard) {
+        throw new NotFoundException(`Board with ID ${id} not found`);
+      }
+
+      if (updateDto.board) {
+        await prisma.board.update({
+          where: { id },
+          data: {
+            name: updateDto.board.name,
+            abbreviation: updateDto.board.abbreviation,
+          }
+        });
+      }
+
+      if (updateDto.address) {
+        await prisma.address.update({
+          where: { id: existingBoard.address_id },
+          data: {
+            street: updateDto.address.street,
+            postal_code: updateDto.address.postal_code,
+            city_id: updateDto.address.city_id,
+          }
+        });
+      }
+
+      await this.handleDeletions(id, updateDto, prisma);
+      await this.updateChildEntities(id, updateDto, prisma);
+      return await this.findOne(id);
+    } catch (error) {
+      this.logger.error(`Failed to update board management with ID ${id}:`, error);
+      throw error;
+    }
+  }
+
+  private async reorderStandardsAfterUpdate(
+    boardId: number,
+    standardsToReorder: Array<{ id: number; newSequence: number }>,
+  ): Promise<BoardManagementData> {
+    this.logger.log(`Reordering ${standardsToReorder.length} existing standards for board ${boardId}`);
+    for (const reorderOp of standardsToReorder) {
+      this.logger.log(`Reordering standard ${reorderOp.id} to position ${reorderOp.newSequence}`);
+      await this.standardService.reorderStandard(reorderOp.id, reorderOp.newSequence, boardId);
+    }
+    return this.findOne(boardId);
   }
 
   /**

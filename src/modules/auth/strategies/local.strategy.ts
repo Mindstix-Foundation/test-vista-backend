@@ -3,12 +3,15 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from '../auth.service';
 
+const LOGIN_EMAIL_BODY_FIELD = 'email_id';
+const LOGIN_CREDENTIAL_BODY_FIELD = 'password';
+
 @Injectable()
 export class LocalStrategy extends PassportStrategy(Strategy) {
-  constructor(private authService: AuthService) {
+  constructor(private readonly authService: AuthService) {
     super({
-      usernameField: 'email_id',
-      passwordField: 'password',
+      usernameField: LOGIN_EMAIL_BODY_FIELD,
+      passwordField: LOGIN_CREDENTIAL_BODY_FIELD,
     });
   }
 

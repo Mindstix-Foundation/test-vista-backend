@@ -10,8 +10,7 @@ import {
   UseGuards, 
   HttpStatus,
   Request,
-  BadRequestException,
-  NotFoundException
+  BadRequestException
 } from '@nestjs/common';
 import { 
   ApiTags, 
@@ -27,6 +26,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { StudentSubjectEnrollmentService } from './student-subject-enrollment.service';
 import { 
   CreateStudentSubjectEnrollmentDto, 
+  AdminMapEnrollmentDto,
   UpdateEnrollmentStatusDto, 
   GetEnrollmentsQueryDto,
   GetEnrolledStudentsQueryDto,
@@ -77,6 +77,21 @@ export class StudentSubjectEnrollmentController {
       console.error('Error in createEnrollmentRequest:', error);
       throw error;
     }
+  }
+
+  @Post('map')
+  @Roles('TEACHER', 'ADMIN')
+  @ApiOperation({
+    summary: 'Map student to teacher subject (approved)',
+    description: 'Teacher (own subject) or org admin creates an approved L2 enrollment without a student request',
+  })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Enrollment mapped successfully',
+    type: StudentSubjectEnrollmentResponseDto,
+  })
+  async mapEnrollment(@Request() req: any, @Body() dto: AdminMapEnrollmentDto) {
+    return this.enrollmentService.mapStudentToTeacherSubject(req.user.id, dto);
   }
 
   @Put(':id/status')
